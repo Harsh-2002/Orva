@@ -1,5 +1,66 @@
 # HTTP API reference
 
+## Internal opt-in configuration publication (not normal routes)
+
+`workloadconfig.HTTPAdapter` is an explicitly registered Linux scratch adapter.
+Normal function/secret handlers retain legacy behavior; no boot schema or normal
+route is activated. See
+[`workloadconfig/README.md`](../backend/internal/workloadconfig/README.md).
+
+All mutation bodies include `expected` with **seven string fields**:
+`function_version`, `artifact_revision`, `artifact_epoch`, `generation`,
+`policy_revision`, `authority_epoch`, `approved_artifact`. Revisions are canonical
+positive decimal strings; generation is the exact durable UUID, and stored
+approval is only a CAS token. Also supply `current_artifact`, the actual installed
+Factory digest, except for installation. Owner is the exact path UUID, not a name.
+
+| Optional endpoint | Other required fields |
+| --- | --- |
+| `GET /api/v1/functions/{id}/configuration` | READ-only metadata inspection; no body |
+| `PUT /api/v1/functions/{id}/configuration/environment` | `environment`: complete string-to-string environment |
+| `PUT /api/v1/functions/{id}/configuration/settings` | `environment`, plus complete `settings` |
+| `PUT /api/v1/functions/{id}/configuration/secrets` | `secret: {key, value}` |
+| `DELETE /api/v1/functions/{id}/configuration/secrets` | `secret: {key}` |
+| `POST /api/v1/functions/{id}/configuration/install` | Only `expected`; installs a fresh Factory, **not approval** |
+
+`settings` has exactly `timeout_ms`, `memory_mb`, `cpus`, `network_mode`, `sdk`,
+`max_concurrency`, `concurrency_policy`, `auth_mode`, `rate_limit_per_min`.
+It cannot change code, runtime, deployment identity, entrypoint or status.
+Timeout is 1–86,400,000 ms, memory 16–1,048,576 MiB, CPUs finite 0–1024,
+concurrency/rate nonnegative; existing network/auth/concurrency-mode validators
+remain authoritative. Snapshot and concrete Factory bounds may refuse more
+conservatively before publication.
+
+Mutation requires live ADMIN for any outbound/inbound or retained source grant,
+quarantine or review-required state; truly empty, review-free owners preserve
+ordinary WRITE. Installation requires ADMIN. These writes do **not** additionally
+require READ. A trusted authenticator supplies token-free API-key, session or
+OAuth references; credentials/scopes/audience/expiry are rechecked transactionally.
+There is no authorable actor, permission or artifact-approval claim.
+
+The READ-only inspection returns `expected`, review/quarantine flags,
+environment/secret entry counts, and the actual installed `current_artifact`
+(empty if unavailable) with code/runtime digests when known. It returns no
+environment values, ciphertext or secret names, and never converts durable
+metadata into a current Factory. Writes can use deliberately supplied exact
+expectations without being given READ; inspection grants no write authority.
+
+Bodies are at most 1 MiB; duplicate/unknown fields, invalid UTF-8, unpaired UTF-16,
+null string values and inexact revisions deny. Success is 200/no-store, returning
+only the seven fresh expectation fields and `review_required:true`; no environment, plaintext,
+ciphertext or secret-name list is returned. Installation instead returns
+`{current_artifact,review_required:true}`. Errors are 400 `VALIDATION`,
+401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 409 `IAM_CONFLICT`, or sanitized 503
+`IAM_UNAVAILABLE`. Never automatically replace expectations and retry.
+
+Mutation commits generation/configuration/secrets, review-required deny,
+policy/authority epoch and audit together; invalidates the old current Factory
+before ACK; then retires/cancels outside locks. Follow with explicit installation
+and the existing source-aware policy review of the **new installed artifact**.
+The old current observer cannot approve the new durable generation. Busy workers
+may still hold old injected values, but lose protected SDK access. This is not
+secret recall, production cut-over, queued deployment or reboot recovery.
+
 The optional history deletion root can include `managed_sources`: bounded
 owner/policy UUID, owner revision/epoch, pin/enabled, before/after membership and
 digest metadata. It is inspection-only, contains no policy body or payload, and

@@ -1,5 +1,32 @@
 # Security model
 
+## Opt-in configuration and secret publication
+
+`workloadconfig` is not serving-wired. Its owner lock → IAM gate → transaction
+boundary rechecks the complete function, durable generation, policy revision,
+authority epoch, original inline/attached sources and ciphertext snapshot.
+Any outbound, inbound-only or retained source grant, quarantine or review state
+requires current ADMIN; empty review-free owners retain ordinary WRITE.
+Trusted token-free credentials are re-resolved using existing API-key,
+session/user and OAuth token/client/audience/expiry checks. READ is not an
+implicit requirement of these writes.
+
+Encryption/decryption, candidate construction and concrete lease acquisition
+run outside owner/IAM locks. Commit failure cannot change admission, current
+Factory, registry cache or cancellations. Success atomically persists mutation,
+generation rotation, policy/epoch advancement and review-required deny, then
+invalidates the old actual Factory under the same gate before ACK. Callbacks,
+retirement and lease release follow outside owner/gate locks. A fresh strict
+snapshot must be installed before explicit source-aware review; the old observer
+cannot silently rebind retained approval. Inline/attachments are never replaced
+by their compiled union, and quarantine survives mutation/installation.
+
+Injected secrets cannot be recalled. Old busy workers can finish ordinary
+computation with old memory, but cannot perform new protected SDK operations
+after acknowledgment. Retirement and external credential rotation may still be
+necessary. Other writers, complete lifecycle, boot/restore/recovery and serving
+activation remain unqualified; do not enable this partial composition normally.
+
 Staged SDK IAM `spans.emit` requires an active original host dispatch, an
 execution-only `own_execution` grant and an explicit current-artifact observer
 under the IAM gate. Emission nonblockingly queues an immutable host-attributed

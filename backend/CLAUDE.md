@@ -1,5 +1,14 @@
 # Backend
 
+`workloadconfig` is an internal opt-in environment/execution-settings/secret
+mutation service. It rechecks exact durable/source/ciphertext CAS and current
+operator authority under owner → IAM → DB ordering, commits review-required deny,
+then invalidates the old actual Factory before ACK. Cancellation/retirement
+callbacks run outside owner/IAM locks. Explicit new concrete Factory installation
+precedes separate aggregate-policy review. Optional HTTP/MCP/shared-AI adapters
+do not activate normal routes or boot schemas. See its README; queued code
+publication, other writers, full lifecycle and recovery remain separate gates.
+
 `workloadhistory` is an internal opt-in deletion/history service. Its explicit
 schema and registry hook are absent from normal boot/router construction.
 Capacity and canonical metadata capture commit before deleting status and IAM

@@ -1,5 +1,31 @@
 # Operations runbook
 
+## Internal configuration publication workflow
+
+No production upgrade or activation is required. The opt-in `workloadconfig`
+service requires initialized artifact/managed sources and enrolled concrete
+code/runtime stores; never point it at mutable current paths or infer a Factory
+from a durable generation row. It does not coordinate queued deploy/rollback,
+clone/import, trigger mutations, runtime upgrades, boot or restore.
+
+In an explicit scratch composition, first inspect exact function/generation and
+policy/source expectations. Publish the environment/settings/secret mutation:
+it acknowledges **review-required DENY**, not a rebind. Old current Factories are
+invalidated before success; old busy workers lose SDK authority while possibly
+retaining injected values in memory. Next explicitly install a newly prepared
+Factory using the fresh complete expectations, then explicitly review the new
+installed artifact and current aggregate sources through the managed-policy
+service. Mutation/installation cannot clear quarantine.
+
+On conflict, inspect again and get a new deliberate decision; do not silently
+retry with refreshed revisions. A failed transaction leaves old host/cache and
+durable state unchanged. If installation fails after a successful mutation,
+remain denied and retry fresh preparation/installation; do not approve the old
+artifact or edit rows to bypass review. Interrupted in-process cleanup, reboot
+and restore recovery are separate gates, not proven by this procedure.
+For sensitive removed/changed secrets retire affected workers and rotate the
+external credential as needed; IAM does not erase old memory or exfiltrated data.
+
 ## Internal history fixture recovery limits
 
 Normal boot does not initialize or activate deleted-work history. In the

@@ -522,6 +522,19 @@ and conflict states require rendered verification, not source inspection alone.
 
 Current delivery checkpoints, not substitutes for the complete gates below:
 
+- The isolated configuration mutation candidate adds an opt-in shared service for
+  environment, execution settings and encrypted secret upsert/delete. Exact
+  source/function/generation/policy/epoch/ciphertext CAS and live operator checks
+  precede one durable deny-first commit. The old actual Factory is invalidated
+  under IAM before ACK; cancellation/retirement/event callbacks follow outside
+  owner locks. A fresh strict snapshot with the same concrete code/runtime leases
+  is separately installed, then explicitly reviewed against current aggregate
+  grants. Optional HTTP/MCP/shared-AI adapters are not normally registered.
+  The sealed Node/Python fixture covers real public invoke/private SDK,
+  failed-COMMIT host/cache preservation, corruption denial, old busy SDK denial,
+  new config/secret visibility and explicit review. Independent acceptance remains
+  pending. Queued deploy/rollback, source clone/import, trigger/other writers,
+  complete lifecycle and boot/restore/recovery remain separate cut-over gates.
 - The committed direct-Factory KV workflow has scoped independent acceptance.
 - The isolated public-pool KV candidate has independent browser, correlation,
   HTTP-negative and package/race/vet acceptance. Three independent fresh-root
@@ -850,9 +863,21 @@ and policy together. Serving wiring remains absent until the full proof gates.
   private immutable queue metadata, not a durable span column or SDK claim.
   The supported-Python initialization and cron-fixture contention corrections
   also passed combined qualification and are committed separately.
-  Configuration publication, queued-build submitter capture, remaining writers
-  and boot/restore are still integration or cut-over gates. None of these
+  Queued-build submitter capture, remaining writers and boot/restore are still
+  integration or cut-over gates. None of these
   scoped results activates normal serving or establishes full IAM acceptance.
+
+- Configuration publication now has independent combined acceptance on the
+  integrated span/SDK baseline. Exact source/ciphertext/epoch CAS, live
+  source-aware operator checks, failed-COMMIT preservation, commit-to-Factory
+  invalidation and separate fresh installation/review passed. Real Node/Python
+  configuration and span workflows passed normally and under race, alongside
+  independent adversarial probes. Canonical checks, unfiltered affected suites
+  and the full database race (712 seconds) passed. Fresh locked frontend checks
+  passed 110 unit and 312 component tests, lint and production compilation.
+  All 1,056 source entries matched and owned resources were removed. Optional
+  adapters remain inactive in normal serving; queued code, other writers,
+  recovery, browser Chat and full lifecycle/cut-over remain separate gates.
 
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive

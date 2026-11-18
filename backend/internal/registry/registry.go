@@ -110,6 +110,12 @@ func (r *Registry) SetSilent(fn *database.Function) error {
 	return r.set(fn, false)
 }
 
+// CacheCommitted publishes an already committed row without a second DB write.
+// Callers own MutationLock; event callbacks belong after releasing that lock.
+func (r *Registry) CacheCommitted(fn *database.Function) {
+	r.cache.Store(fn.ID, fn.Clone())
+}
+
 func (r *Registry) set(fn *database.Function, publish bool) error {
 	if fn.ID == "" {
 		id, err := GenerateID()

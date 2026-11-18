@@ -1,5 +1,33 @@
 # Orva — Documentation
 
+> Internal configuration qualification: optional `workloadconfig` HTTP and
+> MCP/shared-AI adapters publish environment, execution settings and encrypted
+> secret upsert/delete through one exact-CAS/live-operator boundary. These are
+> **not normal routes or default tools**. Mutation publishes review-required
+> deny and invalidates the old actual Factory before ACK. Explicit new Factory
+> installation and current aggregate-policy review are separate steps; stored
+> approval cannot establish current runtime authority. Ordinary WRITE remains
+> sufficient only for truly empty, unquarantined, review-free owners; any outbound,
+> inbound or retained grant, quarantine/review state requires live ADMIN. No
+> blanket READ requirement is added to writes. Old injected secrets cannot be
+> erased by IAM. Boot/restore, all other writers and production activation remain
+> separate gates. See `docs/API.md` and `backend/internal/workloadconfig/README.md`.
+>
+> Only when supplied an explicit `Configuration` dependency, MCP and the shared
+> in-process AI registry expose READ-only `inspect_workload_configuration` and
+> mutation tools `publish_workload_environment`,
+> `publish_workload_settings`, `publish_workload_secret`,
+> `delete_workload_secret` (requires `confirm:true`) and
+> `install_workload_configuration` (ADMIN-only). Each takes exact function `id`
+> plus the original strict API body in `request`; revisions remain strings.
+> These mutation tools require WRITE or ADMIN catalog visibility, never imply
+> authority from catalog permissions, and recheck the live credential at commit.
+> MCP envelopes additionally use the existing bounded strict-management decoder.
+> Inspection takes `{id,request:{}}`, returning exact CAS metadata, counts and
+> actual current Factory digests, never environment or secret values. Mutation
+> schemas describe every authorable request field; no READ grant is implied by
+> ADMIN/WRITE and no write capability is implied by inspection.
+
 > Internal opt-in SDK IAM: `spans.emit` requires an execution-only
 > `own_execution` grant, a live original dispatch and a required current-artifact
 > observer. Admission queues or sheds an owned metadata envelope, never reads

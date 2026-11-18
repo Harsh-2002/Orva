@@ -64,6 +64,10 @@
         sources. Detach or revoke can leave overlapping grants from other sources.
         Consult the source repository's IAM_MANAGEMENT contract before using the
         staged CLI or optional MCP tools.
+        Optional configuration publication also remains scratch-only: environment,
+        settings and secret changes first publish review-required deny. Explicit
+        new Factory installation and review are separate; old injected secrets
+        cannot be recalled. No normal routes or tools are activated.
       </p>
     </section>
 

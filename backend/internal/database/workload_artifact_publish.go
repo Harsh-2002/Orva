@@ -103,6 +103,10 @@ func prepareWorkloadEnvironmentChange(c WorkloadEnvironmentChange) (string, erro
 }
 
 func publishWorkloadEnvironmentTx(ctx context.Context, tx *sql.Tx, c WorkloadEnvironmentChange, envJSON string, authorizationExpiry time.Time) (*WorkloadEnvironmentPublication, error) {
+	return publishWorkloadConfigurationTx(ctx, tx, c, envJSON, authorizationExpiry, nil)
+}
+
+func publishWorkloadConfigurationTx(ctx context.Context, tx *sql.Tx, c WorkloadEnvironmentChange, envJSON string, authorizationExpiry time.Time, plan *WorkloadConfigurationPlan) (*WorkloadEnvironmentPublication, error) {
 	fn, err := readWorkloadArtifactFunctionTx(ctx, tx, c.OwnerID)
 	if err != nil {
 		return nil, err
@@ -124,7 +128,11 @@ func publishWorkloadEnvironmentTx(ctx context.Context, tx *sql.Tx, c WorkloadEnv
 	if !authorizationExpiry.IsZero() && !authorizationExpiry.After(time.Now().UTC()) {
 		return nil, operatorDenied(ctx)
 	}
-	artifact, err := rotateWorkloadArtifactTx(ctx, tx, c.WorkloadArtifactChange, "rotate")
+	kind := "rotate"
+	if plan != nil && plan.secretKind != "" {
+		kind = plan.secretKind
+	}
+	artifact, err := rotateWorkloadArtifactTx(ctx, tx, c.WorkloadArtifactChange, kind)
 	if err != nil {
 		return nil, workloadPublicationReadError(ctx, err)
 	}
@@ -137,6 +145,27 @@ func publishWorkloadEnvironmentTx(ctx context.Context, tx *sql.Tx, c WorkloadEnv
 	}
 	if err != nil {
 		return nil, workloadArtifactStorageError(ctx, "publication function")
+	}
+	if plan != nil {
+		switch plan.secretKind {
+		case "secret_upsert":
+			_, err = tx.ExecContext(ctx, `INSERT INTO function_secrets(function_id,key,value_encrypted) VALUES(?,?,?)
+				ON CONFLICT(function_id,key) DO UPDATE SET value_encrypted=excluded.value_encrypted,updated_at=CURRENT_TIMESTAMP`, c.OwnerID, plan.secretKey, plan.encrypted)
+		case "secret_delete":
+			_, err = tx.ExecContext(ctx, `DELETE FROM function_secrets WHERE function_id=? AND key=?`, c.OwnerID, plan.secretKey)
+		}
+		if err != nil {
+			return nil, workloadArtifactStorageError(ctx, "publication secret")
+		}
+		if settings := plan.settings; settings != nil {
+			_, err = tx.ExecContext(ctx, `UPDATE functions SET timeout_ms=?,memory_mb=?,cpus=?,network_mode=?,sdk=?,
+				max_concurrency=?,concurrency_policy=?,auth_mode=?,rate_limit_per_min=? WHERE id=?`,
+				settings.TimeoutMS, settings.MemoryMB, settings.CPUs, settings.NetworkMode, settings.SDK,
+				settings.MaxConcurrency, settings.ConcurrencyPolicy, settings.AuthMode, settings.RateLimitPerMin, c.OwnerID)
+			if err != nil {
+				return nil, workloadArtifactStorageError(ctx, "publication settings")
+			}
+		}
 	}
 	policy.Revision++
 	policy.AuthorityEpoch++

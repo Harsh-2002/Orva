@@ -5,6 +5,7 @@ package workloadspawn
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -241,6 +242,19 @@ func (f *Factory) Generation() Generation {
 		return Generation{}
 	}
 	return f.state.gen
+}
+
+// MatchesSnapshot runs outside IAM/pool locks and compares frozen owned inputs.
+func (f *Factory) MatchesSnapshot(p *secrets.PreparedArtifactSnapshot) bool {
+	if f == nil || f.state == nil || p == nil {
+		return false
+	}
+	s := f.state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.retired.Load() && s.base != nil &&
+		s.gen == (Generation{p.Artifact.Generation, p.Artifact.Revision, p.Artifact.Epoch}) &&
+		reflect.DeepEqual(s.base.Function, p.Function) && reflect.DeepEqual(s.base.Secrets, p.Secrets)
 }
 
 func (f *Factory) Identities() (artifactfs.Identity, artifactfs.Identity) {

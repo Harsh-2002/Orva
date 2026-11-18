@@ -32,11 +32,21 @@ func newManagedState(a *workloadiam.Authority) *managedState {
 // InstallFactory transfers an exclusively owned Factory on success. It is not
 // durable publication or authorization of any production mutation writer.
 func (m *Manager) InstallFactory(ctx context.Context, factory *workloadspawn.Factory) error {
+	cleanup, err := m.InstallFactoryDeferred(ctx, factory)
+	if err == nil {
+		cleanup()
+	}
+	return err
+}
+
+// InstallFactoryDeferred leaves old-generation cleanup to the caller after its
+// owner locks are released. The new generation has no implicit IAM approval.
+func (m *Manager) InstallFactoryDeferred(ctx context.Context, factory *workloadspawn.Factory) (func(), error) {
 	if m.managed == nil || ctx == nil || factory == nil || factory.Retired() || factory.Owner() == "" {
-		return errors.New("managed pool requires a live concrete Factory and Authority")
+		return nil, errors.New("managed pool requires a live concrete Factory and Authority")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	facts := factory.Resources()
 	g := &managedGeneration{factory: factory}
@@ -45,21 +55,21 @@ func (m *Manager) InstallFactory(ctx context.Context, factory *workloadspawn.Fac
 	m.poolMu.Lock()
 	if err := ctx.Err(); err != nil {
 		m.poolMu.Unlock()
-		return err
+		return nil, err
 	}
 	if m.closing.Load() {
 		m.poolMu.Unlock()
-		return ErrManagerClosed
+		return nil, ErrManagerClosed
 	}
 	before := m.managed.current.Load()
 	old := before.generations[factory.Owner()]
 	if len(before.generations) >= 256 && old == nil {
 		m.poolMu.Unlock()
-		return errors.New("managed pool owner capacity")
+		return nil, errors.New("managed pool owner capacity")
 	}
 	if old != nil && old.factory.ArtifactRevision() == factory.ArtifactRevision() {
 		m.poolMu.Unlock()
-		return errors.New("managed generation already installed")
+		return nil, errors.New("managed generation already installed")
 	}
 	next := &managedSnapshot{generations: make(map[string]*managedGeneration, len(before.generations)+1)}
 	for id, current := range before.generations {
@@ -87,13 +97,18 @@ func (m *Manager) InstallFactory(ctx context.Context, factory *workloadspawn.Fac
 	}
 	m.poolMu.Unlock()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if old != nil {
-		old.factory.Close()
-		drainManagedIdle(old.pool)
-	}
-	return nil
+	return func() {
+		if old != nil {
+			old.factory.Close()
+			drainManagedIdle(old.pool)
+		}
+	}, nil
+}
+
+func (m *Manager) ManagedBy(a *workloadiam.Authority) bool {
+	return m != nil && m.managed != nil && m.managed.authority == a
 }
 
 func drainManagedIdle(p *functionPool) {
@@ -151,6 +166,31 @@ func (m *Manager) CurrentArtifact(owner string) string {
 
 func (m *Manager) IsCurrentArtifact(owner, artifact string) bool {
 	return artifact != "" && m.CurrentArtifact(owner) == artifact
+}
+
+// CurrentFactory is a gate-held observation, not ownership transfer.
+func (m *Manager) CurrentFactory(owner string) *workloadspawn.Factory {
+	if m.CurrentArtifact(owner) == "" {
+		return nil
+	}
+	return m.managed.current.Load().generations[owner].factory
+}
+
+// InvalidateFactoryUnderGate requires the shared IAM gate and the exact current
+// Factory. Only the returned cleanup may take pool locks or release leases.
+func (m *Manager) InvalidateFactoryUnderGate(factory *workloadspawn.Factory) func() {
+	g := m.managed.current.Load().generations[factory.Owner()]
+	if g == nil || g.factory != factory {
+		return func() {}
+	}
+	g.active.Store(false)
+	return func() {
+		g.pool.mu.Lock()
+		g.pool.markRetired()
+		g.pool.mu.Unlock()
+		g.factory.Close()
+		drainManagedIdle(g.pool)
+	}
 }
 
 func (a *AcquireResult) ManagedResources() (workloadspawn.ResourceFacts, bool) {

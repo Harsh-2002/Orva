@@ -35,6 +35,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
 
@@ -45,24 +46,25 @@ import (
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
 	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
-	IAM          *workloadpolicy.Service
-	DB           *database.Database
-	Registry     *registry.Registry
-	Builder      *builder.Builder
-	BuildQueue   *builder.Queue
-	PoolMgr      *pool.Manager
-	Secrets      *secrets.Manager
-	Proxy        *proxy.Proxy
-	Firewall     *firewall.Manager
-	Metrics      *metrics.Metrics
-	EventHub     *events.Hub
-	DataDir      string
-	Version      string // Orva version string, surfaced via initialize
-	AsyncEnabled bool
-	AsyncIAM     *workloadasync.Service
-	CronEnabled  bool
-	CronIAM      *workloadasync.Service
-	History      *workloadhistory.Service
+	IAM           *workloadpolicy.Service
+	Configuration *workloadconfig.Service
+	DB            *database.Database
+	Registry      *registry.Registry
+	Builder       *builder.Builder
+	BuildQueue    *builder.Queue
+	PoolMgr       *pool.Manager
+	Secrets       *secrets.Manager
+	Proxy         *proxy.Proxy
+	Firewall      *firewall.Manager
+	Metrics       *metrics.Metrics
+	EventHub      *events.Hub
+	DataDir       string
+	Version       string // Orva version string, surfaced via initialize
+	AsyncEnabled  bool
+	AsyncIAM      *workloadasync.Service
+	CronEnabled   bool
+	CronIAM       *workloadasync.Service
+	History       *workloadhistory.Service
 
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
@@ -166,6 +168,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	registerTraceTools(rc)
 	registerDocsTools(rc)
 	registerIAMTools(rc)
+	registerConfigurationTools(rc)
 	registerHistoryTools(rc)
 	registerResources(s, deps, perms)
 	return s

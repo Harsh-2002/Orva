@@ -386,3 +386,12 @@ The SDK HTTP route families, worker credentials/base URL and
 longer carry an Orva HTTP exception. Do not restore a network exemption to fix
 an SDK error: check the function's `sdk` permission and installed adapter first.
 Public HTTP invocation and operator APIs retain their existing authentication.
+## Internal configuration qualification is not a deployment switch
+
+Do not activate `workloadconfig`, its explicit schemas, optional management
+adapters or managed pool construction on a normal deployment. Its sealed
+Node/Python scratch acceptance covers environment/settings/secret publication,
+deny-first invalidation and separate new-Factory review, not all writers,
+boot/restore/recovery or production cut-over. There is no feature flag or
+automatic migration for this increment. See `docs/OPERATIONS.md` and
+`backend/internal/workloadconfig/README.md`.
