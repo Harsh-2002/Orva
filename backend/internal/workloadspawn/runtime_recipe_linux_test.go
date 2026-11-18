@@ -22,7 +22,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 )
 
-const runtimeRecipeSourceRevision = "f6f2560a93f4a51840e10de72f5f008e46624336"
+const runtimeRecipeSourceRevision = "python-channel-publication-v1"
 
 var runtimeRecipeBases = map[string]string{
 	"node":   "34c7b8f1559a55018827fef7f96a540afb8cfeba665ee89dbbe3170852284ed3",
@@ -59,7 +59,7 @@ var runtimeRecipeSources = map[string][]runtimeSourceFile{
 	},
 	"python": {
 		{"python/adapter.py", "opt/orva/adapter.py", "10a95a6b8c697a520716aa448d2b0e894e94a18f7f216c39aa3b4994d8817c38"},
-		{"python/orva.py", "opt/orva/orva.py", "47a4ebef3baa183a461a3a04ea6dd331224049c6bc5b02b62fb86be988fda3bf"},
+		{"python/orva.py", "opt/orva/orva.py", "41dee6721529405b096ab354b4e22ed0299b3d9dd1c7ce19f833095ff1493e81"},
 		{"python/py.typed", "opt/orva/py.typed", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
 	},
 }

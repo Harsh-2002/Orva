@@ -296,21 +296,25 @@ def _channel() -> Optional[_Chan]:
     with _chan_lock:
         if _chan_probed:
             return _chan
-        _chan_probed = True
-        if os.environ.get("ORVA_SDK_PROTO") != "1":
-            return None
-        raw = os.environ.get("ORVA_SDK_FD", "")
-        if not raw.isascii() or not raw.isdigit():
-            return None
         try:
-            fd = int(raw)
-            if fd < 3:
+            if os.environ.get("ORVA_SDK_PROTO") != "1":
                 return None
-            if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+            raw = os.environ.get("ORVA_SDK_FD", "")
+            if not raw.isascii() or not raw.isdigit():
                 return None
-            _chan = _Chan(fd)
-        except (OSError, ValueError, OverflowError):
-            _chan = None
+            try:
+                fd = int(raw)
+                if fd < 3:
+                    return None
+                if not stat.S_ISSOCK(os.fstat(fd).st_mode):
+                    return None
+                _chan = _Chan(fd)
+            except (OSError, ValueError, OverflowError):
+                _chan = None
+        finally:
+            # Publish only after initialization; other threads must not observe
+            # a completed probe while the channel is still being constructed.
+            _chan_probed = True
         return _chan
 
 

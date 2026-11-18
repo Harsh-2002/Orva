@@ -249,9 +249,7 @@ func TestCronControlProtocol(t *testing.T) {
 			}
 		}
 	}
-	fixtureSQL, err := sql.Open("sqlite", db.Path())
-	liveMust(t, err)
-	defer fixtureSQL.Close()
+	fixtureSQL := openCronProtocolSQL(t, db)
 	for _, surface := range []string{"mcp", "ai"} {
 		for _, revision := range []int64{9007199254740993, math.MaxInt64 - 1} {
 			t.Run(surface+"-"+strconv.FormatInt(revision, 10), func(t *testing.T) {
@@ -307,6 +305,15 @@ func TestCronControlProtocol(t *testing.T) {
 	}
 	t.Log("PASS: external InputSchema/OutputSchema and AI registry use strings; real MCP/AI responses preserve >2^53 and signed-max counters; signed-max mutation denies without wrap")
 }
+
+func openCronProtocolSQL(t *testing.T, db *database.Database) *sql.DB {
+	t.Helper()
+	conn, err := sql.Open("sqlite", db.Path()+"?_pragma=foreign_keys(ON)&_pragma=busy_timeout(10000)")
+	liveMust(t, err)
+	t.Cleanup(func() { liveMust(t, conn.Close()) })
+	return conn
+}
+
 func (c *cronControlSurfaces) browser(t *testing.T, row *database.AsyncCron, viewport string) {
 	t.Helper()
 	script := os.Getenv("ORVA_CRON_BROWSER_SCRIPT")

@@ -128,6 +128,12 @@ def kv_host():
 
 
 class ChannelTests(unittest.TestCase):
+    def test_concurrent_initialization_waits_for_channel_publication(self):
+        out, frames = run("concurrent_initialization", kv_host())
+        self.assertEqual(out["observed"], "lock")
+        self.assertEqual(out["results"], {"first": {"ok": 1}, "second": {"ok": 1}})
+        self.assertEqual(len(frames), 2)
+
     def test_round_trips_without_identity(self):
         out, frames = run("roundtrip", kv_host())
         self.assertEqual(out["get"], {"n": 1})

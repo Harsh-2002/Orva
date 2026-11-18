@@ -14,6 +14,12 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Fixed
+
+- Python SDK concurrent first use no longer reports an unavailable channel while
+  another thread is initializing it. Missing/invalid channels still fail closed;
+  no transport fallback or permission change is introduced.
+
 ### Internal cron controls and UI (not activated)
 
 - Adds opt-in HTTP, compiled CLI, external-MCP/shared-AI controls and schedule
