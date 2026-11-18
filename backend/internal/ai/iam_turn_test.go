@@ -202,7 +202,9 @@ func newIAMTurnFixture(t *testing.T) *iamTurnFixture {
 			t.Fatal(err)
 		}
 	}
-	stage("workload_iam_schema.go", "CREATE TABLE IF NOT EXISTS workload_iam_policies")
+	if err := db.InitIAMSchemaForFixture(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	f := &iamTurnFixture{
 		db: db, sql: conn, owner: ids.New(), artifact: strings.Repeat("a", 64),
 		actor:    Principal{ID: ids.New(), Label: "synthetic-turn-operator", Perms: auth.PermSet{"read": true, "admin": true}},

@@ -5,11 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -50,29 +46,7 @@ func newFixture(t *testing.T, blocked bool) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	source, err := parser.ParseFile(token.NewFileSet(), "../database/workload_iam_schema.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema string
-	ast.Inspect(source, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 2 {
-			return true
-		}
-		name, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || name.Sel.Name != "ExecContext" {
-			return true
-		}
-		if text, ok := call.Args[1].(*ast.BasicLit); ok {
-			schema, _ = strconv.Unquote(text.Value)
-		}
-		return true
-	})
-	if schema == "" {
-		t.Fatal("the canonical staged schema was not found")
-	}
-	if _, err := conn.Exec(schema); err != nil {
+	if err := db.InitIAMSchemaForFixture(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	f := &fixture{db: db, sql: conn, owner: ids.New(), ref: database.OperatorCredentialReference{Kind: "api_key", ID: ids.New()}}

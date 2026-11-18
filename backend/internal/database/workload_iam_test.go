@@ -91,10 +91,10 @@ func TestWorkloadIAMExplicitSchemaOnly(t *testing.T) {
 	assertAbsent()
 	f := iamTestFunction(t, db, iamTestOwner, true)
 	before, _ := json.Marshal(f)
-	if err := db.initWorkloadIAMSchema(ctx); err != nil {
+	if err := db.InitIAMSchemaForFixture(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.initWorkloadIAMSchema(ctx); err != nil {
+	if err := db.InitIAMSchemaForFixture(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if n := iamTestCount(t, db, "workload_iam_policies"); n != 0 {
@@ -111,7 +111,7 @@ func TestWorkloadIAMExplicitSchemaOnly(t *testing.T) {
 	if _, err := db.NewIAMPolicy(ctx, f.ID, true, iamTestActor); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.initWorkloadIAMSchema(ctx); err != nil {
+	if err := db.InitIAMSchemaForFixture(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if n := iamTestCount(t, db, "workload_iam_policies"); n != 1 {

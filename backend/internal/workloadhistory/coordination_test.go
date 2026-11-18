@@ -55,7 +55,9 @@ func (f *coordinationFixture) stage(t *testing.T, name, marker string) {
 func coordinated(t *testing.T) *coordinationFixture {
 	t.Helper()
 	f := &coordinationFixture{fixture: setup(t), artifact: strings.Repeat("a", 64)}
-	f.stage(t, "workload_iam_schema.go", "CREATE TABLE IF NOT EXISTS workload_iam_policies")
+	if err := f.db.InitIAMSchemaForFixture(f.ctx); err != nil {
+		t.Fatal(err)
+	}
 	evaluators := []*workloadiam.Evaluator{}
 	for _, owner := range []string{f.target, f.caller} {
 		row, err := f.db.NewIAMPolicy(f.ctx, owner, false, database.IAMActorReference{Kind: "system", ID: ids.New()})

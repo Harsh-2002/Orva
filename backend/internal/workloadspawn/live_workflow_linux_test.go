@@ -78,7 +78,7 @@ func TestLiveWorkflow(t *testing.T) {
 	liveMust(t, err)
 	defer db.Close()
 	liveMust(t, db.Migrate())
-	liveSchema(t, path)
+	liveMust(t, db.InitIAMSchemaForFixture(t.Context()))
 	keys := map[string]string{}
 	for name, perms := range map[string]string{"admin": `["read","invoke","admin"]`, "reader": `["read"]`, "writer": `["write"]`} {
 		raw := make([]byte, 32)
@@ -547,35 +547,6 @@ func liveMust(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func liveSchema(t *testing.T, path string) {
-	t.Helper()
-	source, err := parser.ParseFile(token.NewFileSet(), "../database/workload_iam_schema.go", nil, 0)
-	liveMust(t, err)
-	var schema string
-	ast.Inspect(source, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 2 {
-			return true
-		}
-		name, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || name.Sel.Name != "ExecContext" {
-			return true
-		}
-		if text, ok := call.Args[1].(*ast.BasicLit); ok {
-			schema, _ = strconv.Unquote(text.Value)
-		}
-		return true
-	})
-	if schema == "" {
-		t.Fatal("canonical staged schema absent")
-	}
-	conn, err := sql.Open("sqlite", path)
-	liveMust(t, err)
-	defer conn.Close()
-	_, err = conn.Exec(schema)
-	liveMust(t, err)
 }
 
 func liveSource(lang string) (string, string) {

@@ -32,6 +32,13 @@ func (db *Database) InitCronSchemaForFixture(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := initCronSchemaTx(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func initCronSchemaTx(ctx context.Context, tx *sql.Tx) error {
 	columns := []struct{ name, definition string }{
 		{"authority_state", "TEXT NOT NULL DEFAULT 'quarantined' CHECK(authority_state IN ('active','suspended','quarantined'))"},
 		{"authority_reason", "TEXT NOT NULL DEFAULT 'legacy_unknown' CHECK(length(authority_reason)<=64)"},
@@ -82,7 +89,7 @@ func (db *Database) InitCronSchemaForFixture(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 const asyncCronColumns = `c.id,c.function_id,c.name,c.cron_expr,c.timezone,c.enabled,c.last_run_at,c.next_run_at,

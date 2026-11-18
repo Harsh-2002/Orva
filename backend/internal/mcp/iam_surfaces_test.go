@@ -83,7 +83,9 @@ func iamSurfaceSetup(t *testing.T) *iamSurfaceFixture {
 			t.Fatal(err)
 		}
 	}
-	stage("workload_iam_schema.go", "CREATE TABLE IF NOT EXISTS workload_iam_policies")
+	if err := db.InitIAMSchemaForFixture(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	f := &iamSurfaceFixture{db: db, sql: conn, states: map[string]workloadpolicy.ArtifactState{}, keyID: ids.New(), key: "orva_" + strings.ReplaceAll(ids.New(), "-", ""), reader: "orva_" + strings.ReplaceAll(ids.New(), "-", "")}
 	compiled := []*workloadiam.Evaluator{}
 	for i, lang := range []string{"node", "python"} {

@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// InitIAMSchemaForFixture explicitly initializes canonical IAM storage only.
+// Normal New, Migrate and serving construction never call it.
+func (db *Database) InitIAMSchemaForFixture(ctx context.Context) error {
+	return db.initWorkloadIAMSchema(ctx)
+}
+
 // initWorkloadIAMSchema is deliberately NOT called by New, Migrate or serve.
 func (db *Database) initWorkloadIAMSchema(ctx context.Context) error {
 	tx, err := db.write.BeginTx(ctx, nil)
@@ -12,7 +18,14 @@ func (db *Database) initWorkloadIAMSchema(ctx context.Context) error {
 		return fmt.Errorf("IAM schema: %w", err)
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, workloadIAMSchema)
+	if err != nil {
+		return fmt.Errorf("IAM schema: %w", err)
+	}
+	return tx.Commit()
+}
+
+const workloadIAMSchema = `
 CREATE TABLE IF NOT EXISTS workload_iam_policies (
  function_id TEXT PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
  revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision > 0),
@@ -38,9 +51,4 @@ CREATE TRIGGER IF NOT EXISTS workload_iam_audit_immutable
 BEFORE UPDATE ON workload_iam_audit BEGIN
  SELECT RAISE(ABORT, 'IAM audit records are immutable');
 END;
-`)
-	if err != nil {
-		return fmt.Errorf("IAM schema: %w", err)
-	}
-	return tx.Commit()
-}
+`

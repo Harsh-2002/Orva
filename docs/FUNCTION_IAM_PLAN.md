@@ -416,6 +416,14 @@ when a busy worker loses access. Do not promise IAM revocation recalls secrets.
 
 ## 6. Storage, API and compatibility
 
+Implementation note (2026-11-18): the internal opt-in
+[`workloadrecovery` fixture](../backend/internal/workloadrecovery/README.md)
+composes guarded backup installation, external marker and file-backed quarantine.
+Normal boot/router/restore-handler activation remains off. Its bounded process
+crash and syscall-fault tests qualify only that fixture, not power loss, real
+runtime lifecycle, kernel fencing or coordinated serving cutover. The normative
+requirements below still govern that later cutover.
+
 Additive SQLite tables: current policy/acceptance, bounded policy audit history,
 and durable async provenance fields. Do not drop the old `sdk` column. After
 cut-over it is non-authoritative; API writes to it return actionable validation

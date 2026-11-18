@@ -32,7 +32,7 @@ func TestLiveManagedPoolReplacement(t *testing.T) {
 	liveMust(t, err)
 	defer db.Close()
 	liveMust(t, db.Migrate())
-	liveSchema(t, dbPath)
+	liveMust(t, db.InitIAMSchemaForFixture(t.Context()))
 	owner := ids.New()
 	fn := &database.Function{ID: owner, Name: "generation-replacement", Runtime: "node", Status: "active", Version: 1, Entrypoint: "handler.js",
 		CodeHash: digest("owned"), MemoryMB: 96, CPUs: 1, TimeoutMS: 5000, MaxConcurrency: 1, SDK: true, NetworkMode: "none",

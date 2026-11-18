@@ -85,7 +85,7 @@ func TestLiveHistoryLifecycle(t *testing.T) {
 			liveMust(t, db.InitAsyncSchemaForFixture(t.Context()))
 			liveMust(t, db.InitCronSchemaForFixture(t.Context()))
 			liveMust(t, db.InitHistorySchemaForFixture(t.Context()))
-			stageHistoryManaged(t, databasePath, "workload_iam_schema.go", "CREATE TABLE IF NOT EXISTS workload_iam_policies")
+			liveMust(t, db.InitIAMSchemaForFixture(t.Context()))
 			store := newQualificationStore(t)
 			runtimeID := sealQualificationRuntime(t, store, os.Getenv("ORVA_RUNTIME_PACKAGE_DIR"), lang, true)
 			defer reclaimQualified(t, store, runtimeID)

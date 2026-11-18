@@ -94,7 +94,7 @@ func TestLiveConfigurationEnvironment(t *testing.T) {
 			liveMust(t, err)
 			defer db.Close()
 			liveMust(t, db.Migrate())
-			liveSchema(t, path)
+			liveMust(t, db.InitIAMSchemaForFixture(t.Context()))
 			configurationSchema(t, path, "workload_artifact_schema.go")
 			owner := ids.New()
 			entry, source := configurationSource(lang)

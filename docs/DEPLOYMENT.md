@@ -1,5 +1,16 @@
 # Production deployment notes
 
+## Recovery cutover is not enabled
+
+The internal `workloadrecovery` fixture is not wired into `serve`, normal
+migration, public restore routes or scheduler construction. Deploying this
+source does not activate IAM migration/quarantine guarantees. A later coordinated
+cutover must close and drain all admissions/builds, establish external lifecycle
+fencing, use the host-owned marker before DB promotion, and reconstruct current
+artifacts independently before permitting worker/scheduler startup. Existing
+artifact-owner same-boot fencing and recovery constraints remain unchanged.
+See [the opt-in recovery contract](../backend/internal/workloadrecovery/README.md).
+
 > Orva is in active development and the maintainers don't recommend it
 > for production-critical workloads yet. The notes below are for
 > operators running it in homelabs, side projects, internal tools,

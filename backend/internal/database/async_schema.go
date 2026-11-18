@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 )
 
@@ -12,6 +13,13 @@ func (db *Database) InitAsyncSchemaForFixture(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+	if err := initAsyncSchemaTx(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func initAsyncSchemaTx(ctx context.Context, tx *sql.Tx) error {
 	columns := []struct{ name, definition string }{
 		{"authority_state", "TEXT NOT NULL DEFAULT 'quarantined' CHECK(authority_state IN ('active','suspended','quarantined'))"},
 		{"authority_reason", "TEXT NOT NULL DEFAULT 'legacy_unknown' CHECK(length(authority_reason)<=64)"},
@@ -55,7 +63,7 @@ func (db *Database) InitAsyncSchemaForFixture(ctx context.Context) error {
 			}
 		}
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 UPDATE jobs SET origin_kind='function',creator_id=enqueued_by_function_id,
  authority_state='suspended',authority_reason='legacy_review'
  WHERE origin_kind='legacy_unknown' AND COALESCE(enqueued_by_function_id,'')<>'';
@@ -86,5 +94,5 @@ END;`)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }

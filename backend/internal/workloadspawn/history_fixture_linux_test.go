@@ -37,7 +37,7 @@ func TestHistoryManagedStageSeedsCanonicalPolicy(t *testing.T) {
 	liveMust(t, err)
 	defer db.Close()
 	liveMust(t, db.Migrate())
-	stageHistoryManaged(t, path, "workload_iam_schema.go", "CREATE TABLE IF NOT EXISTS workload_iam_policies")
+	liveMust(t, db.InitIAMSchemaForFixture(t.Context()))
 	id := ids.New()
 	liveMust(t, db.InsertFunction(&database.Function{ID: id, Name: "stage", Runtime: "node", Entrypoint: "handler.js", Status: "created"}))
 	actor := database.IAMActorReference{Kind: "system", ID: ids.New()}

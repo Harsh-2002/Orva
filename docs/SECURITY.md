@@ -1,5 +1,21 @@
 # Security model
 
+## Opt-in restore-quarantine boundary
+
+The internal Linux recovery coordinator treats the archive and restored approval
+metadata as non-authoritative. Its host-owned, no-follow external marker contains
+only version/operation UUID/state and cannot be minted or cleared by guarded
+archive extraction. Trusted quiescence and closed admission are required before
+promotion; malformed controls and incomplete installation deny startup. Policy,
+inbound and all durable work origins are quarantined in one SQLite transaction;
+retained approvals/sources are inspection/review inputs, not active grants.
+
+This is not installed in normal serving or the existing public restore handler.
+Filesystem administrators and host callbacks remain trusted. Direct copying
+without the marker procedure is outside the guarantee. The marker provides no
+kernel fencing, artifact adoption, old-Factory rebinding or GC authority.
+[Recovery details and test limits](../backend/internal/workloadrecovery/README.md).
+
 ## Opt-in configuration and secret publication
 
 `workloadconfig` is not serving-wired. Its owner lock → IAM gate → transaction

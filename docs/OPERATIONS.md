@@ -1,5 +1,23 @@
 # Operations runbook
 
+## Internal restore-quarantine fixture
+
+`workloadrecovery` is an explicit Linux scratch composition, **not** the current
+public restore handler or normal boot path. It requires trusted stopped/drained
+admission before writing a durable external marker and replacing any DB files.
+Its startup transaction migrates empty legacy authority, quarantines all durable
+work origins and policy/inbound authority, fails abandoned builds, and removes
+the marker only after durable commit. Same-operation replay is idempotent;
+normal restart does not reset individual reviews.
+
+There is no shipped recovery CLI or production activation flag in this change.
+For internal manual fixtures, `PrepareManual` must precede stopped-instance file
+copying and `CompleteManual` must acknowledge a verified complete install before
+startup. Direct file copying without preparation is outside the quarantine
+guarantee. The old restore's DB rollback does not roll back replaced keys/code;
+an interrupted installation must remain closed rather than claiming full rollback.
+See [the recovery state machine and limits](../backend/internal/workloadrecovery/README.md).
+
 ## Internal configuration publication workflow
 
 No production upgrade or activation is required. The opt-in `workloadconfig`
