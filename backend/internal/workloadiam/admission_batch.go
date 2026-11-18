@@ -10,7 +10,7 @@ func (a *Authority) DoBatchObserved(observe func() Context, requests []Request, 
 	a.gate.RLock()
 	defer a.gate.RUnlock()
 	c := observe()
-	if !a.policies[c.Principal.FunctionID].AllowsBatch(c, requests) {
+	if !a.admissionPolicy(c.Principal.FunctionID).AllowsBatch(c, requests) {
 		return ErrDenied
 	}
 	return effect()

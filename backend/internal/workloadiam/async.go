@@ -27,7 +27,7 @@ func (a *Authority) allowsStanding(o AsyncOrigin, s StandingState) bool {
 	if !validUUID(o.TargetID) || !validHostID(s.TargetArtifact) || (o.Trigger != Job && o.Trigger != Cron) {
 		return false
 	}
-	target := a.policies[o.TargetID]
+	target := a.admissionPolicy(o.TargetID)
 	if target == nil || !target.valid || target.metadata.ApprovedArtifact != s.TargetArtifact {
 		return false
 	}
@@ -44,7 +44,7 @@ func (a *Authority) allowsStanding(o AsyncOrigin, s StandingState) bool {
 		if o.OperatorID != "" || o.OperatorKind != "" || !validUUID(o.CreatorID) {
 			return false
 		}
-		caller := a.policies[o.CreatorID]
+		caller := a.admissionPolicy(o.CreatorID)
 		if caller == nil || !caller.valid || caller.metadata.ApprovedArtifact != s.CreatorArtifact {
 			return false
 		}

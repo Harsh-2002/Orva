@@ -150,8 +150,26 @@ func (db *Database) CaptureWorkloadDeployment(ctx context.Context, ref OperatorC
 		return nil, err
 	}
 	fn, artifact := snapshot.Function, &snapshot.Artifact
+	pauseMode, err := workloadPauseModeTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if pauseMode {
+		if err := workloadRequireUnpausedTx(ctx, tx, owner); err != nil {
+			return nil, err
+		}
+	}
 	if fn.Status == "inactive" {
-		return nil, ErrWorkloadArtifactConflict
+		if !pauseMode || !sources.Record.ReviewRequired {
+			return nil, ErrWorkloadArtifactConflict
+		}
+		staged, err := workloadPendingReviewTx(ctx, tx, owner, fn, artifact.Generation)
+		if err != nil {
+			return nil, err
+		}
+		if !staged {
+			return nil, ErrWorkloadArtifactConflict
+		}
 	}
 	if fn.Version <= 0 || fn.Version == math.MaxInt || sources.Record.Revision >= math.MaxInt64 ||
 		sources.Record.AuthorityEpoch >= math.MaxInt64 {
@@ -209,6 +227,9 @@ func readDeploymentProvenance(ctx context.Context, tx *sql.Tx, id string) (deplo
 func checkDeploymentTx(ctx context.Context, tx *sql.Tx, id string) (*WorkloadDeploymentPlan, time.Time, error) {
 	p, err := readDeploymentProvenance(ctx, tx, id)
 	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if err := workloadCheckPauseTx(ctx, tx, p.Owner); err != nil {
 		return nil, time.Time{}, err
 	}
 	s, err := readSources(ctx, tx, p.Owner)
@@ -418,10 +439,11 @@ func (db *Database) AbandonWorkloadDeployments(ctx context.Context) error {
 }
 
 type WorkloadDeploymentInstallation struct {
-	snapshot *WorkloadArtifactSnapshot
-	sources  string
-	id       string
-	output   WorkloadBuildOutput
+	snapshot  *WorkloadArtifactSnapshot
+	sources   string
+	id        string
+	output    WorkloadBuildOutput
+	pauseMode bool
 }
 
 func (p *WorkloadDeploymentInstallation) Snapshot() *WorkloadArtifactSnapshot {
@@ -441,6 +463,15 @@ func prepareDeploymentInstallationTx(ctx context.Context, tx *sql.Tx, id string)
 	if json.Unmarshal([]byte(raw), &output) != nil || !output.valid() {
 		return nil, ErrWorkloadArtifactInvalid
 	}
+	pauseMode, err := workloadPauseModeTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if pauseMode {
+		if err := workloadRequireUnpausedTx(ctx, tx, owner); err != nil {
+			return nil, err
+		}
+	}
 	snapshot, err := readDeploymentSnapshotTx(ctx, tx, owner)
 	if err != nil {
 		return nil, err
@@ -452,11 +483,23 @@ func prepareDeploymentInstallationTx(ctx context.Context, tx *sql.Tx, id string)
 	if err != nil {
 		return nil, workloadPublicationReadError(ctx, err)
 	}
+	if pauseMode && snapshot.Function.Status != "active" {
+		if snapshot.Function.Status != "inactive" || !sources.Record.ReviewRequired {
+			return nil, ErrWorkloadArtifactConflict
+		}
+		staged, err := workloadPendingReviewTx(ctx, tx, owner, snapshot.Function, generation)
+		if err != nil {
+			return nil, err
+		}
+		if !staged {
+			return nil, ErrWorkloadArtifactConflict
+		}
+	}
 	digest, err := deploymentSourceDigest(sources)
 	if err != nil {
 		return nil, err
 	}
-	return &WorkloadDeploymentInstallation{snapshot: snapshot, sources: digest, id: id, output: output}, nil
+	return &WorkloadDeploymentInstallation{snapshot: snapshot, sources: digest, id: id, output: output, pauseMode: pauseMode}, nil
 }
 
 func (db *Database) PrepareWorkloadDeploymentInstallation(ctx context.Context, id string) (*WorkloadDeploymentInstallation, error) {
@@ -485,7 +528,7 @@ func (db *Database) CheckWorkloadDeploymentInstallation(ctx context.Context, ref
 	if err != nil {
 		return err
 	}
-	if current.sources != p.sources || current.output != p.output ||
+	if current.pauseMode != p.pauseMode || current.sources != p.sources || current.output != p.output ||
 		deploymentSnapshotDigest(current.snapshot) != deploymentSnapshotDigest(p.snapshot) {
 		return ErrWorkloadArtifactConflict
 	}
@@ -513,12 +556,17 @@ func (db *Database) ActivateWorkloadDeploymentInstallation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if current.sources != p.sources || current.output != p.output ||
+	if current.pauseMode != p.pauseMode || current.sources != p.sources || current.output != p.output ||
 		deploymentSnapshotDigest(current.snapshot) != deploymentSnapshotDigest(p.snapshot) {
 		return nil, ErrWorkloadArtifactConflict
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE functions SET status='active' WHERE id=? AND status IN ('inactive','active')`, p.snapshot.Artifact.OwnerID); err != nil {
 		return nil, workloadArtifactStorageError(ctx, "deployment installation activate")
+	}
+	if current.pauseMode {
+		if _, err := tx.ExecContext(ctx, `UPDATE deployments SET phase='installed' WHERE id=? AND phase='review_required'`, p.id); err != nil {
+			return nil, workloadArtifactStorageError(ctx, "deployment installation phase")
+		}
 	}
 	fn, err := readWorkloadArtifactFunctionTx(ctx, tx, p.snapshot.Artifact.OwnerID)
 	if err != nil {

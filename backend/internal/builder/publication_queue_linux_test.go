@@ -4,7 +4,9 @@ package builder
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -18,8 +20,11 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadspawn"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
@@ -148,5 +153,150 @@ func TestPublicationQueueFullCancellationAndDisabledLegacy(t *testing.T) {
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatal("untrusted archive leaked")
+	}
+}
+
+func TestPublicationQueuePause(t *testing.T) {
+	s, ctx, owner := publicationQueueFixture(t)
+	db := s.queue.db
+	if err := db.InitWorkloadOperatorPauseSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	store, _, limits := outputTestStore(t)
+	// Sealed fixture files qualify Factory ownership, not runtime execution.
+	seal := func(kind artifactfs.Kind, owner string, dirs []string, filename string, mode os.FileMode) string {
+		t.Helper()
+		stage, err := store.Begin(ctx, 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := stage.Path()
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest := artifactfs.Manifest{Version: 1}
+		for _, name := range append([]string{"."}, dirs...) {
+			if name != "." {
+				if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dirMode := uint32(0755)
+			if name == "." {
+				dirMode = 0700
+			}
+			if err := os.Chmod(filepath.Join(root, name), os.FileMode(dirMode)); err != nil {
+				t.Fatal(err)
+			}
+			manifest.Entries = append(manifest.Entries, artifactfs.Entry{Path: name, Type: artifactfs.TypeDirectory,
+				Mode: dirMode, UID: uint32(os.Geteuid()), GID: uint32(os.Getegid())})
+		}
+		body := []byte("// orva-sdk-proto:1")
+		files := map[string]os.FileMode{filename: mode}
+		if kind == artifactfs.KindRuntime {
+			files["opt/orva/adapter.js"] = 0644
+		}
+		sum := sha256.Sum256(body)
+		for name, fileMode := range files {
+			path := filepath.Join(root, name)
+			if err := os.WriteFile(path, body, fileMode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, fileMode); err != nil {
+				t.Fatal(err)
+			}
+			manifest.Entries = append(manifest.Entries, artifactfs.Entry{Path: name, Type: artifactfs.TypeFile,
+				Mode: uint32(fileMode), UID: uint32(os.Geteuid()), GID: uint32(os.Getegid()),
+				Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:])})
+		}
+		digest, err := artifactfs.Digest(manifest, limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := stage.Seal(ctx, kind, owner, manifest, digest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := store.Retire(id); err != nil {
+				t.Error(err)
+			} else if err := store.Reclaim(id); err != nil {
+				t.Error(err)
+			}
+		})
+		return id
+	}
+	code := seal(artifactfs.KindCode, owner, nil, "handler.js", 0644)
+	runtime := seal(artifactfs.KindRuntime, "node", []string{"usr", "usr/local", "usr/local/bin", "opt", "opt/orva"}, "usr/local/bin/node", 0755)
+	raw, err := db.GetWorkloadArtifactSnapshot(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Function.CodeHash = strings.Repeat("a", 64)
+	if err := db.UpdateFunction(raw.Function); err != nil {
+		t.Fatal(err)
+	}
+	factory, err := workloadspawn.NewFactory(ctx, &secrets.PreparedArtifactSnapshot{
+		Artifact: raw.Artifact, Function: raw.Function, Secrets: map[string]string{},
+	}, store, code, store, runtime, workloadspawn.FactoryLimits{MaxPreparedPlans: 1, MaxPreparedBytes: 1 << 20, MaxSnapshotBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.manager = pool.NewManager(pool.ManagerConfig{ManagedAuthority: s.authority}, pool.SandboxTemplate{}, db, s.queue.reg, nil)
+	t.Cleanup(func() {
+		if err := s.manager.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	defer factory.Close()
+	if err := s.manager.InstallFactory(ctx, factory); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := db.GetIAMPolicy(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := database.WorkloadPauseRequest{OwnerID: owner, ExpectedGeneration: raw.Artifact.Generation,
+		ExpectedPolicyRevision: policy.Revision, ExpectedAuthorityEpoch: policy.AuthorityEpoch}
+	if err := s.Pause(t.Context(), req); !errors.Is(err, database.ErrOperatorDenied) {
+		t.Fatalf("untrusted pause: %v", err)
+	}
+	stale := req
+	stale.ExpectedPolicyRevision++
+	if err := s.Pause(ctx, stale); !errors.Is(err, database.ErrIAMConflict) {
+		t.Fatalf("stale installed revision: %v", err)
+	}
+	stale = req
+	stale.ExpectedAuthorityEpoch++
+	if err := s.Pause(ctx, stale); !errors.Is(err, database.ErrWorkloadArtifactConflict) {
+		t.Fatalf("stale durable epoch: %v", err)
+	}
+	if s.manager.CurrentArtifact(owner) != factory.ArtifactRevision() || factory.Retired() {
+		t.Fatal("denied pause invalidated Factory")
+	}
+	s.queue.reg.PublishEvent = func(_ string, _ any) {
+		lock := s.queue.reg.MutationLock(owner)
+		if !lock.TryLock() {
+			t.Error("notification ran under owner lock")
+			return
+		}
+		lock.Unlock()
+		if err := s.authority.ChangeHostState(func() {
+			if s.manager.CurrentFactory(owner) != nil {
+				t.Error("notification preceded invalidation")
+			}
+		}); err != nil {
+			t.Error(err)
+		}
+	}
+	if err := s.Pause(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	fn, err := s.queue.reg.Get(owner)
+	if err != nil || fn.Status != "inactive" || !factory.Retired() || s.manager.CurrentArtifact(owner) != "" {
+		t.Fatalf("pause did not close the actual Factory and publish inactive cache state: %v", err)
+	}
+	if err := s.Pause(ctx, req); !errors.Is(err, database.ErrWorkloadArtifactConflict) {
+		t.Fatalf("old pause CAS was reusable: %v", err)
 	}
 }

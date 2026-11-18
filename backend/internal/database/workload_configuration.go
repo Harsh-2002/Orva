@@ -182,6 +182,9 @@ func (db *Database) PrepareWorkloadConfiguration(ctx context.Context, owner stri
 		return nil, workloadArtifactStorageError(ctx, "configuration prepare")
 	}
 	defer tx.Rollback()
+	if err := workloadCheckPauseTx(ctx, tx, owner); err != nil {
+		return nil, err
+	}
 	before, err := readWorkloadArtifactSnapshotTx(ctx, tx, owner)
 	if err != nil {
 		return nil, err
@@ -236,6 +239,9 @@ func (db *Database) checkWorkloadConfigurationTx(ctx context.Context, tx *sql.Tx
 	}
 	actor, expiry, err := authorizeOperatorPermissionTx(ctx, tx, ref, required)
 	if err != nil {
+		return actor, expiry, err
+	}
+	if err := workloadCheckPauseTx(ctx, tx, p.before.Artifact.OwnerID); err != nil {
 		return actor, expiry, err
 	}
 	if !sameSourceState(current, p.sources) {

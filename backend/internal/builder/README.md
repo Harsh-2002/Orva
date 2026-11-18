@@ -10,6 +10,13 @@ boot/migrations/router and nil MCP dependencies remain unchanged.
 `RequireDeployIAM` are scratch composition only. Required-but-missing service
 denies, never selecting synchronous/legacy fallback.
 
+The operator-pause fixture records durable intent separately from an inactive
+deployment awaiting installation. `PublicationQueue.Pause` disables admission
+and invalidates the current Factory without deleting stored policy. Earlier
+queued deployments and prepared installations cannot reopen it. The `installed`
+phase records installation, not policy approval. No resume path is exposed:
+reopening admission requires a fresh installation and review lifecycle.
+
 **Managed-store-only:** `DataDir/functions/<owner>` must not exist at submission,
 build or installation. Legacy directories are refused, not adopted. Concrete
 stores must be provisioned outside all legacy version/cache/GC namespaces.
@@ -29,9 +36,10 @@ boot/restore and production activation are not qualified.
    quarantined or review-required authority requires ADMIN, including disabled/
    revoked attached contents. READ is not an extra blanket requirement.
    Missing sources/state/reference denies.
-   Already-inactive targets refuse capture; this path cannot implicitly activate
-   an operator-disabled function. Explicit activation and fresh submission are
-   required instead.
+   Inactive targets normally refuse capture. In operator-pause mode, an
+   unpaused target with matching review-required deployment and generation
+   evidence may accept a fresh capture without being activated. Durable pause
+   intent and inactive targets without that evidence still refuse capture.
 3. Execution takes the shared build/rollback lock and checks durable capture.
    Compilation happens outside owner/IAM locks, using the existing plain
    no-dependency Node/Python managed-output profile. Actual returned code/runtime

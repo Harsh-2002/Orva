@@ -231,6 +231,45 @@ func (s *PublicationQueue) buildAndPublish(job BuildJob) error {
 	return nil
 }
 
+// Pause records operator intent without installing, approving or resuming code.
+func (s *PublicationQueue) Pause(ctx context.Context, req database.WorkloadPauseRequest) error {
+	if s == nil || ctx == nil || !s.manager.ManagedBy(s.authority) {
+		return ErrPublicationUnavailable
+	}
+	ref, ok := auth.OperatorFromContext(ctx)
+	if !ok {
+		return database.ErrOperatorDenied
+	}
+	if err := s.managedNamespace(req.OwnerID); err != nil {
+		return err
+	}
+	lock := s.queue.reg.MutationLock(req.OwnerID)
+	lock.Lock()
+	var retire func()
+	cancel, err := s.authority.DeactivateOwnerDeferred(req.OwnerID, req.ExpectedPolicyRevision, func() error {
+		_, fn, err := s.queue.db.PauseWorkloadFunctionAsOperator(ctx, ref, req)
+		if err != nil {
+			return err
+		}
+		retire = s.manager.InvalidateOwnerFactoryUnderGate(req.OwnerID)
+		s.queue.reg.CacheCommitted(fn)
+		return nil
+	})
+	lock.Unlock()
+	if errors.Is(err, workloadiam.ErrConflict) {
+		return database.ErrIAMConflict
+	}
+	if err != nil {
+		return err
+	}
+	cancel()
+	retire()
+	if s.queue.reg.PublishEvent != nil {
+		s.queue.reg.PublishEvent("function", map[string]string{"action": "updated", "id": req.OwnerID})
+	}
+	return nil
+}
+
 // Install is a separate fresh-lease operation. It grants no permissions; source-aware
 // Review must bind the resulting actual current Factory afterward.
 func (s *PublicationQueue) Install(ctx context.Context, deployment string) (string, error) {

@@ -20,7 +20,12 @@ func (a *Authority) RetireOwnerDeferred(owner string, persist func() error) (fun
 		a.retired = map[string]bool{}
 	}
 	a.retired[owner] = true
+	delete(a.deactivated, owner)
 	delete(a.policies, owner)
+	return a.revokeOwnerRegistrationsUnderGate(owner), nil
+}
+
+func (a *Authority) revokeOwnerRegistrationsUnderGate(owner string) func() {
 	a.registrationMu.Lock()
 	defer a.registrationMu.Unlock()
 	cancels := []context.CancelFunc{}
@@ -40,5 +45,5 @@ func (a *Authority) RetireOwnerDeferred(owner string, persist func() error) (fun
 		for _, cancel := range cancels {
 			cancel()
 		}
-	}, nil
+	}
 }

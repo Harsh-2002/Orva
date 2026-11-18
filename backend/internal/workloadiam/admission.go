@@ -26,6 +26,7 @@ type Authority struct {
 	gate               sync.RWMutex
 	policies           map[string]*Evaluator
 	retired            map[string]bool
+	deactivated        map[string]bool
 	registrationMu     sync.Mutex
 	registrations      map[*Admission]struct{}
 	asyncRegistrations map[*AsyncAdmission]struct{}
@@ -122,18 +123,25 @@ func (a *Authority) EmitSpanObserved(observe func() Context, r Request, effect f
 
 // allows requires the gate, and never loads from storage on a cache miss.
 func (a *Authority) allows(c Context, r Request) bool {
-	caller := a.policies[c.Principal.FunctionID]
+	caller := a.admissionPolicy(c.Principal.FunctionID)
 	if !caller.Allows(c, r) {
 		return false
 	}
 	switch r.Operation {
 	case OpInvoke, OpStreamOpen, OpStreamNext, OpJobsEnqueue:
-		return AllowsEdge(caller, a.policies[r.Resource.Function.ID], c, r)
+		return AllowsEdge(caller, a.admissionPolicy(r.Resource.Function.ID), c, r)
 	case OpCronsUpsert:
-		return AllowsEdge(caller, a.policies[r.Resource.OwnCron.TargetID], c, r)
+		return AllowsEdge(caller, a.admissionPolicy(r.Resource.OwnCron.TargetID), c, r)
 	default:
 		return true
 	}
+}
+
+func (a *Authority) admissionPolicy(owner string) *Evaluator {
+	if a.deactivated[owner] {
+		return nil
+	}
+	return a.policies[owner]
 }
 
 // TargetState describes an acquired worker, never SDK-supplied claims.
@@ -203,7 +211,7 @@ func (call *Admission) Context() context.Context {
 }
 
 func (a *Authority) validTarget(id string, target TargetState) bool {
-	e := a.policies[id]
+	e := a.admissionPolicy(id)
 	return target.Active && e != nil && e.valid && target.Principal.FunctionID == id &&
 		validHostID(target.Principal.WorkerID) && target.Principal.ArtifactRevision == e.metadata.ApprovedArtifact
 }
