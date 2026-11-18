@@ -123,11 +123,24 @@ which violet is correct.
 
 ## Non-obvious
 
+- Cron descriptions are advisory: `cronDescription.js` spells out known aliases
+  and exact whole-second `@every` intervals. Complex durations/time-zone prefixes
+  retain literal copy pending server validation; the backend remains authoritative.
+
 - CronJobs keeps authority separate from Enabled. Staged management requires the
   server's advisory admin capability plus a current snapshot and inspected string
   revisions, but server commit-time checks remain authoritative. A 409 or failed
   refresh retains errors and marks the snapshot stale; no automatic CAS retry or
   implicit resume occurs. Request ownership ends on deactivation/unmount.
+
+- `HistoryInspector` is opt-in through the Jobs/Cron `historyEnabled` prop and
+  `history-controls.html`, never production routing. Reads have abortable
+  sequence/lifetime ownership; serialized mutations have an independent lane
+  and remain pending across deactivation without publishing late acknowledgments.
+  Failed changes retain drafts per exact archive kind/UUID and invalidate both
+  inspection and capacity. Only a correlated refresh restores freshness; new
+  confirmation is still required. ADMIN capability is advisory. No old payload,
+  executable archive, automatic name binding or permission grant is introduced.
 
 - **The staged Permissions page is not its future request controller.** Preserve
   owner-scoped response ordering; never publish a stale response as a save

@@ -211,6 +211,7 @@ func BuildAgentRegistry(deps Deps, perms permSet) *Registry {
 	registerFixtureTools(rc)
 	registerTraceTools(rc)
 	registerIAMTools(rc)
+	registerHistoryTools(rc)
 
 	return reg
 }

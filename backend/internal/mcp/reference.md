@@ -8,8 +8,19 @@
 > to create NEW OPERATOR-origin work. Capacity is 100,000 canonical metadata
 > records / 64 MiB including reservations; 90 days permits explicit audited purge,
 > never automatic expiry. Function deletion reserves first and fails closed on
-> insufficient capacity. CLI/MCP/AI history tools, UI, independent managed-deletion
-> acceptance and restore quarantine/cut-over remain pending. See the repository
+> insufficient capacity. Optional `Deps.History` adds `list_work_history`,
+> `get_work_history`, `get_work_history_capacity`, `purge_work_history` and
+> `reissue_work_history` to external MCP and the shared AI registry. Each takes
+> `{request: ...}` using the corresponding strict original-raw HTTP request shape;
+> mutations enforce confirmation/review in the service, not merely tool hints.
+> Capacity counters and archive revisions remain decimal strings. Normal nil
+> dependencies expose no history catalog. `orva history` uses bounded original
+> request files/stdin and JSON stdout; confirmed mutations still require the
+> service's live authorization. Optional Jobs/Schedules history controls use
+> independent metadata/draft state and explicit new-work review; normal views
+> do not enable them. CLI/service and component tests are not real-browser or
+> cross-surface SDK qualification. Those workflows, actual AI turns and restore
+> quarantine/cut-over remain separate gates. See the repository
 > `docs/API.md` and `backend/internal/workloadhistory/README.md`; do not activate
 > the partial fixture in production.
 

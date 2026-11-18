@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"unicode/utf8"
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -21,7 +20,7 @@ type HTTPAdapter struct {
 }
 
 func (a *HTTPAdapter) Register(mux *http.ServeMux) {
-	for _, op := range []string{"list", "get", "purge", "reissue"} {
+	for _, op := range []string{"list", "get", "capacity", "purge", "reissue"} {
 		op := op
 		mux.HandleFunc("POST /api/v1/work-history/"+op, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
@@ -35,53 +34,12 @@ func (a *HTTPAdapter) Register(mux *http.ServeMux) {
 				return
 			}
 			ctx := auth.WithOperator(r.Context(), p)
-			raw, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+8193))
-			if err != nil || len(raw) > (1<<20)+8192 || !utf8.Valid(raw) || !strictJSON(raw) {
+			raw, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBytes+1))
+			if err != nil || !ValidRequestJSON(raw) {
 				respond.Error(w, 400, "VALIDATION", "invalid history request", "")
 				return
 			}
-			decode := func(v any) error {
-				d := json.NewDecoder(bytes.NewReader(raw))
-				d.DisallowUnknownFields()
-				return d.Decode(v)
-			}
-			var out any
-			switch op {
-			case "list":
-				var in struct {
-					TargetID string                   `json:"target_id"`
-					After    database.HistorySelector `json:"after"`
-					Limit    int                      `json:"limit"`
-				}
-				err = decode(&in)
-				if err == nil {
-					out, err = a.Service.List(ctx, in.TargetID, in.After, in.Limit)
-				}
-			case "get":
-				var in database.HistorySelector
-				err = decode(&in)
-				if err == nil {
-					out, err = a.Service.Get(ctx, in)
-				}
-			case "purge":
-				var in struct {
-					Selected []database.HistorySelector `json:"selected"`
-					Confirm  bool                       `json:"confirm"`
-				}
-				err = decode(&in)
-				if err == nil {
-					err = a.Service.Purge(ctx, in.Selected, in.Confirm)
-					out = map[string]bool{"purged": err == nil}
-				}
-			case "reissue":
-				var in database.HistoryReissue
-				err = decode(&in)
-				if err == nil {
-					var id string
-					id, err = a.Service.Reissue(ctx, in)
-					out = map[string]string{"new_id": id, "origin": "operator"}
-				}
-			}
+			out, err := a.Service.Execute(ctx, op, raw)
 			if err != nil {
 				status := 400
 				code := "VALIDATION"

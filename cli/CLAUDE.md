@@ -146,6 +146,12 @@ inspects effective/source-aware access and edits only inline authority. Both use
 the optional server-side management contract. Command registration does not
 activate IAM on a normal server; unavailable instances return an error.
 
+`orva history` is a client of the optional metadata-only history HTTP service.
+It sends bounded original request files/stdin, prints raw JSON without numeric
+conversion and uses the shared confirmation gate. It does not manufacture
+`reviewed`/`confirm`, infer fresh target names or restore old work. Missing server
+routes deny; command registration does not activate history.
+
 1. Create `cli/commands/<name>.go` with `package commands`.
 2. Define `var <name>Cmd = &cobra.Command{…}` + an `init()` for flags.
 3. Add `<name>Cmd` to the `root.AddCommand(...)` list in `RegisterClient` (`root.go`)

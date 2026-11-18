@@ -375,6 +375,41 @@ Secrets ride along with the function as `process.env.STRIPE_KEY` /
 
 ### Schedules + background jobs
 
+#### Deleted-work history (optional server composition)
+
+`orva history list|get|capacity|purge|reissue` delegates to the same strict
+history HTTP service as optional MCP tools and history controls. Normal servers
+do not register that service: an unavailable-route error is expected, not an
+invitation to resume archived work through the live jobs API.
+
+```sh
+orva history list                           # first 100 metadata entries
+orva history capacity                       # decimal-string use/reservations/caps
+orva history get --request selector.json
+orva history list --request page.json       # target_id / after:{kind,id} / limit
+orva history reissue --request fresh.json --yes
+orva history purge --request purge.json --yes
+orva history get --request - < selector.json
+```
+
+All output is JSON on stdout, including the default output mode. Status is on
+stderr; `--quiet` silences it. `--request` is an original UTF-8 JSON file, or `-`
+for stdin, bounded to 1 MiB + 8 KiB. Get, purge and reissue require it; list and
+capacity default to `{"limit":100}` and `{}`. Filename completion suggests JSON
+files, never resolves a historical name into a new UUID. Duplicate/unknown
+fields still reach the strict server validator unchanged. No automatic retry
+or reconstruction from archived metadata occurs.
+
+READ permits inspection. Purge/reissue require live ADMIN plus interactive
+confirmation or `--yes`; that CLI confirmation does not insert or override the
+request's mandatory `confirm:true` or `reviewed:true`. A job reissue request
+contains `source:{kind:"job",id}`, an exact NEW `target_id`, fresh `payload`,
+`scheduled_at` and `max_attempts`. Cron requires fresh `name`, `expression`,
+`timezone` and explicit `enabled` instead. The service creates a NEW
+OPERATOR-origin work ID with old-to-new audit, never resumes/adopts an archive.
+Purge selects exact kind/UUIDs with `confirm:true`; 90 days is eligibility, not
+TTL. Reservations cannot purge. See `docs/API.md` for the request contract.
+
 The opt-in IAM cron fixture adds `orva cron resume <id> --fn <owner-uuid>
 --config-revision <decimal> --authority-generation <decimal>`. It requires current
 admin and resumes the original authority at the next future fire, without

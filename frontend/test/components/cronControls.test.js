@@ -33,12 +33,31 @@ it('shows authority, source, revision and enabled separately; read-only cannot m
   expect(wrapper.text()).not.toContain('Active')
   expect(wrapper.text()).toContain('Resume unavailable')
   expect(wrapper.text()).toContain(row.config_revision)
-  expect(wrapper.text()).toContain('Descriptor: @daily')
+  expect(wrapper.text()).toContain('Every day at 00:00')
   expect(wrapper.text()).not.toContain('Invalid format')
   expect(wrapper.findAllComponents(JobAuthority)).toHaveLength(4)
   expect(wrapper.findAll('button').some(button => /Resume schedule|Delete|New schedule/.test(button.text()))).toBe(false)
   expect(wrapper.find('[title="Enable schedule"]').exists()).toBe(false)
   expect(api.resumeCronSchedule).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['@every 2s', 'Every 2 seconds'],
+  ['@every 1h30m', 'Every 1 hour 30 minutes'],
+  ['@hourly', 'Every hour at minute 0'],
+  ['@every 1.5s', 'Schedule expression: @every 1.5s (server validation required)'],
+  ['@unknown', 'Unrecognized descriptor: @unknown'],
+])('renders advisory wording for %s in both responsive branches without changing authority', async (expression, description) => {
+  api.listCronSchedules.mockResolvedValue(response([{ ...row, cron_expression: expression }], false))
+  wrapper = mountPage()
+  await flushPromises()
+  const descriptions = wrapper.findAll('div, span').filter(node => node.text().replace(/\s+/g, ' ') === `${description} · UTC`)
+  expect(descriptions.length).toBeGreaterThanOrEqual(2)
+  expect(wrapper.text()).not.toContain('Invalid format')
+  expect(wrapper.text()).toContain(row.config_revision)
+  expect(wrapper.text()).toContain('Read-only')
+  expect(api.resumeCronSchedule).not.toHaveBeenCalled()
+  expect(api.updateCronSchedule).not.toHaveBeenCalled()
 })
 
 it('uses the inspected string CAS and retains terminal 409 through refresh without an optimistic active claim', async () => {

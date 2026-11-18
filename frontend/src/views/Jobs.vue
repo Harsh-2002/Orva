@@ -11,10 +11,22 @@
         </p>
       </div>
       <div class="flex items-center gap-2 text-xs text-foreground-muted">
+        <Button
+          v-if="historyEnabled"
+          variant="secondary"
+          @click="historyOpen = !historyOpen"
+        >
+          History
+        </Button>
         Background queue · {{ totalCount }} jobs
       </div>
     </div>
 
+    <HistoryInspector
+      v-if="historyEnabled"
+      v-show="historyOpen"
+      :active="historyOpen"
+    />
     <!-- Status filter strip.
          Mobile (<sm): chips scroll horizontally inside the strip with
          scroll-snap so the active filter doesn't get lost.
@@ -355,6 +367,7 @@
 
 <script setup>
 defineOptions({ name: 'JobsView' })
+defineProps({ historyEnabled: { type: Boolean, default: false } })
 
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
@@ -368,6 +381,8 @@ import LoadError from '@/components/common/LoadError.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import { runtimeLabel } from '@/utils/runtime'
 import JobAuthority from '@/components/jobs/JobAuthority.vue'
+import HistoryInspector from '@/components/history/HistoryInspector.vue'
+const historyOpen = ref(false)
 
 const confirmStore = useConfirmStore()
 

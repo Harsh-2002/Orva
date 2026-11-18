@@ -14,6 +14,17 @@ Initialize the existing staged jobs/cron schemas, explicitly initialize
 Normal nil-hook deletion remains the legacy path. Enabled history never falls
 back to legacy deletion after a preparation or archival error.
 
+`Execute` is the strict original-raw request boundary for the opt-in HTTP adapter,
+external MCP and shared AI registry. It rejects duplicate/unknown fields, invalid
+UTF-8, oversized/deep or trailing JSON before typed decoding. `capacity` requires
+READ and reports canonical used/reserved rows/bytes and caps as decimal strings,
+90-day purge eligibility and advisory live `can_manage`. With explicit
+`mcp.Deps.History`, five operation-specific tools delegate to this same service;
+nil keeps the normal catalog unchanged. Service transactions still enforce
+current ADMIN and explicit confirmation/review, independently of catalog visibility
+and AI approval policy. Loopback tests qualify these adapters, not CLI/UI,
+real-runtime cross-surface execution, browser Chat or a provider turn.
+
 ## Boundary and ordering
 
 The shared REST/MCP function-deletion registry path holds the function mutation
@@ -68,7 +79,12 @@ restores an old policy, creator grant, payload, work ID or key. Missing/purged
 history denies. An SDK/channel principal cannot submit operator provenance.
 
 The optional HTTP adapter is documented in `docs/API.md`; it is not registered
-on normal servers. CLI, external MCP/AI history tools and history UI are pending.
+on normal servers. External MCP/shared-registry adapters are explicit opt-in;
+`orva history` delegates original bounded request files/stdin to the same HTTP
+contract. Optional Jobs/Cron history inspection and fresh-work review share
+`HistoryInspector`; normal views leave it off. Component tests and the real
+loopback CLI/MCP/HTTP checks do not qualify the real-browser/SDK cross-surface
+workflow, which remains a separate gate.
 
 ## Evidence and limits
 

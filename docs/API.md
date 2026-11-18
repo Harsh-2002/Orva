@@ -10,9 +10,9 @@ routes remain unchanged; see `backend/internal/workloadpolicy/OWNER_DELETION.md`
 ## Internal opt-in deleted-work history (not normal routes)
 
 The scratch `workloadhistory.HTTPAdapter` registers POST
-`/api/v1/work-history/{list,get,purge,reissue}` only when explicitly supplied with
+`/api/v1/work-history/{list,get,capacity,purge,reissue}` only when explicitly supplied with
 the service and a trusted live authenticator. Normal router construction does
-not register these endpoints. READ is required for list/get; ADMIN is required
+not register these endpoints. READ is required for list/get/capacity; ADMIN is required
 for purge/reissue, rechecked against live credentials. See
 [`workloadhistory/README.md`](../backend/internal/workloadhistory/README.md).
 
@@ -20,6 +20,11 @@ for purge/reissue, rechecked against live credentials. See
   in `(kind,id)` order, including a `reserved` flag. Omit target to inspect all.
 - `get`: `{kind,id}`; returns one metadata entry. Archives are non-executable;
   payload is unavailable.
+- `capacity`: `{}`; returns `rows_used`, `bytes_used`, `rows_reserved`,
+  `bytes_reserved`, `max_rows` and `max_bytes` as decimal strings,
+  `purge_eligibility_days:90`, and advisory `can_manage`. These are canonical
+  serialized metadata budgets, not database file size; reservations are included
+  in the hard 100,000-row / 64-MiB caps. Capability is not a durable grant.
 - `purge`: `{selected:[{kind,id}], confirm:true}`; 1–32 exact records, no
   duplicates, no reservations, and only records eligible after 90 days.
 - `reissue`: `{source:{kind:"job"|"cron",id}, target_id, payload, reviewed:true,

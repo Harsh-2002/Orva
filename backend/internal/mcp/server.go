@@ -35,6 +35,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -61,6 +62,7 @@ type Deps struct {
 	AsyncIAM     *workloadasync.Service
 	CronEnabled  bool
 	CronIAM      *workloadasync.Service
+	History      *workloadhistory.Service
 
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
@@ -164,6 +166,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	registerTraceTools(rc)
 	registerDocsTools(rc)
 	registerIAMTools(rc)
+	registerHistoryTools(rc)
 	registerResources(s, deps, perms)
 	return s
 }

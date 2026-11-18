@@ -9,23 +9,37 @@
           Run functions on a cron schedule.
         </p>
       </div>
-      <Button
-        v-if="canManage"
-        :disabled="blocked"
-        @click="openCreate"
-      >
-        <PlusCircle class="w-4 h-4" />
-        New schedule
-      </Button>
-      <Button
-        ref="refreshControl"
-        variant="secondary"
-        :disabled="refreshing || saving"
-        @click="loadJobs"
-      >
-        Refresh
-      </Button>
+      <div class="flex gap-2">
+        <Button
+          v-if="historyEnabled"
+          variant="secondary"
+          @click="historyOpen = !historyOpen"
+        >
+          History
+        </Button>
+        <Button
+          v-if="canManage"
+          :disabled="blocked"
+          @click="openCreate"
+        >
+          <PlusCircle class="w-4 h-4" />
+          New schedule
+        </Button>
+        <Button
+          ref="refreshControl"
+          variant="secondary"
+          :disabled="refreshing || saving"
+          @click="loadJobs"
+        >
+          Refresh
+        </Button>
+      </div>
     </div>
+    <HistoryInspector
+      v-if="historyEnabled"
+      v-show="historyOpen"
+      :active="historyOpen"
+    />
 
     <LoadError
       v-if="loadError"
@@ -535,6 +549,10 @@
 </template>
 
 <script setup>
+defineProps({ historyEnabled: { type: Boolean, default: false } })
+import HistoryInspector from '@/components/history/HistoryInspector.vue'
+const historyOpen = ref(false)
+import { humanizeCron } from '@/utils/cronDescription'
 import { EMPTY } from '@/utils/format'
 import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@lucide/vue'
@@ -683,47 +701,6 @@ const updateCronFromSimple = () => {
       form.value.cron = `${minute} ${hour} ${dayOfMonth} * *`
       break
   }
-}
-
-// A cron field is only describable in words when it is a single in-range
-// integer. Ranges, lists, steps and day names ("1-5", "1,3,5", "*/2", "MON")
-// index nothing in a weekday table and pad to nonsense in a clock reading, so
-// they must fall through to the literal expression instead of being spelled
-// out. `0 9 * * 1-5` used to render "Every undefined at 09:00".
-const plainField = (field, lo, hi) => {
-  if (!/^\d{1,2}$/.test(field)) return false
-  const n = Number(field)
-  return n >= lo && n <= hi
-}
-
-const humanizeCron = (cron) => {
-  if (!cron) return 'Invalid expression'
-  if (cron.trim().startsWith('@')) return `Descriptor: ${cron}`
-
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return 'Invalid format (use 5 fields)'
-
-  const [min, hour, day, month, dow] = parts
-
-  if (cron === '* * * * *') return 'Every minute'
-
-  const atTime = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
-
-  if (plainField(min, 0, 59) && hour === '*' && day === '*' && month === '*' && dow === '*') {
-    return `Every hour at minute ${min}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && dow === '*') {
-    return `Every day at ${atTime}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && plainField(dow, 0, 6)) {
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    return `Every ${days[Number(dow)]} at ${atTime}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && plainField(day, 1, 31) && month === '*' && dow === '*') {
-    return `On day ${day} of every month at ${atTime}`
-  }
-
-  return `Custom: ${cron}`
 }
 
 const formatDate = (date) => {

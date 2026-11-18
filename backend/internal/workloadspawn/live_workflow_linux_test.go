@@ -114,7 +114,13 @@ func TestLiveWorkflow(t *testing.T) {
 	}
 	functions := map[string]*liveFunction{}
 	initial := []*workloadiam.Evaluator{}
-	callsEnabled := os.Getenv("ORVA_LIVE_CALLS") == "1"
+	streamsEnabled := os.Getenv("ORVA_LIVE_STREAMS") == "1"
+	callsEnabled := os.Getenv("ORVA_LIVE_CALLS") == "1" || streamsEnabled
+	functionTimeoutMS := int64(10000)
+	if streamsEnabled {
+		// Fixture function configuration only: long revocation streams outlive 10 s.
+		functionTimeoutMS = 30000
+	}
 	for _, lang := range []string{"node", "python"} {
 		store := newQualificationStore(t)
 		rid := sealQualificationRuntime(t, store, os.Getenv("ORVA_RUNTIME_PACKAGE_DIR"), lang, true)
@@ -124,10 +130,13 @@ func TestLiveWorkflow(t *testing.T) {
 		if callsEnabled {
 			entry, source = liveCallsSource(lang)
 		}
+		if streamsEnabled {
+			entry, source = liveStreamsSource(lang)
+		}
 		cid, _ := sealQualificationCode(t, store, id, entry, source, "fixture.txt", "live-kv")
 		defer reclaimQualified(t, store, cid)
 		fn := &database.Function{ID: id, Name: "scratch-" + lang, Runtime: lang, Status: "active", AuthMode: "platform_key", Entrypoint: entry, CodeHash: digest(source),
-			Version: 1, MemoryMB: 256, CPUs: 1, TimeoutMS: 10000, MaxConcurrency: 1, NetworkMode: "none", SDK: true,
+			Version: 1, MemoryMB: 256, CPUs: 1, TimeoutMS: functionTimeoutMS, MaxConcurrency: 1, NetworkMode: "none", SDK: true,
 			EnvVars: map[string]string{"SCRATCH_CONFIG": "frozen-config"}}
 		liveMust(t, db.InsertFunction(fn))
 		demo := []byte(`"scratch-value"`)
@@ -180,6 +189,7 @@ func TestLiveWorkflow(t *testing.T) {
 	var traceMu sync.Mutex
 	events := []any{}
 	sdkExecutions := map[string]sandbox.WorkloadIdentity{}
+	streamOps := map[string]*streamOpLog{}
 	recordEvent := func(v any) {
 		traceMu.Lock()
 		defer traceMu.Unlock()
@@ -213,25 +223,45 @@ func TestLiveWorkflow(t *testing.T) {
 			SecretsLookup: func(string) map[string]string { t.Error("managed spawn consulted mutable legacy secrets"); return nil },
 			SDKHandler: func(ctx context.Context, caller sandbox.SDKCaller, op string, args json.RawMessage) (any, *sandbox.SDKError) {
 				state, ok := caller.WorkloadState()
+				started := time.Now().UnixNano()
+				traceMu.Lock()
+				sdkExecutions[state.ExecutionID] = state.Identity
+				traceMu.Unlock()
 				result, sdkErr := host.Handle(ctx, caller, op, args)
 				code := "OK"
 				if sdkErr != nil {
 					code = sdkErr.Code
 				}
-				traceMu.Lock()
-				sdkExecutions[state.ExecutionID] = state.Identity
-				traceMu.Unlock()
-				event := map[string]any{"kind": "sdk", "op": op, "code": code, "known": ok, "identity": state.Identity,
+				if op == "invoke.stream.next" || op == "invoke.stream.close" {
+					// Per-frame accounting happens after the host returned, outside admission.
+					traceMu.Lock()
+					ops := streamOps[state.ExecutionID]
+					if ops == nil {
+						ops = &streamOpLog{}
+						streamOps[state.ExecutionID] = ops
+					}
+					switch {
+					case op == "invoke.stream.close":
+						ops.Close = append(ops.Close, started)
+					case sdkErr == nil:
+						ops.NextOK = append(ops.NextOK, started)
+					default:
+						ops.NextDenied = append(ops.NextDenied, started)
+					}
+					traceMu.Unlock()
+					return result, sdkErr
+				}
+				event := map[string]any{"kind": "sdk", "op": op, "code": code, "known": ok, "identity": state.Identity, "at_ns": started,
 					"execution": state.ExecutionID, "phase": state.Phase, "ready": state.Ready, "alive": state.Alive, "has_lease": state.Lease != ""}
 				if caller.Exec != nil {
 					event["trace"], event["span"], event["depth"] = caller.Exec.TraceID, caller.Exec.SpanID, caller.Exec.Depth
 					event["has_deadline"] = !caller.Exec.Deadline.IsZero()
 				}
-				if op == "invoke" {
-					if sdkErr == nil {
-						event["reply"] = result
-					} else {
+				if op == "invoke" || op == "invoke.stream.open" {
+					if sdkErr != nil {
 						event["message"] = sdkErr.Message
+					} else if op == "invoke" {
+						event["reply"] = result
 					}
 					observed := []any{}
 					for id, slot := range targetWorkers {
@@ -301,7 +331,13 @@ func TestLiveWorkflow(t *testing.T) {
 		mux.Handle("/mcp", orvamcp.NewHandler(orvamcp.Deps{DB: db, Registry: reg, IAM: service, Version: "scratch-managed"}))
 	} else {
 		mux.Handle("GET /api/v1/functions/{id}/permissions", adapter)
-		mux.Handle("PUT /api/v1/functions/{id}/permissions", adapter)
+		// acked_ns is taken after the policy service returned, so any frame handoff
+		// that starts later began after publication completed.
+		mux.Handle("PUT /api/v1/functions/{id}/permissions", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sw := &statusRecorder{ResponseWriter: w, code: 200}
+			adapter.ServeHTTP(sw, r)
+			recordEvent(map[string]any{"kind": "policy_ack", "owner": r.PathValue("id"), "status": sw.code, "acked_ns": time.Now().UnixNano()})
+		}))
 		mux.Handle("POST /api/v1/functions/{id}/permissions/review", adapter)
 	}
 	mux.HandleFunc("GET /api/scratch/functions", func(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +353,45 @@ func TestLiveWorkflow(t *testing.T) {
 		respond.JSON(w, 200, items)
 	})
 	mux.HandleFunc("/fn/", func(w http.ResponseWriter, r *http.Request) {
+		if streamsEnabled && strings.HasSuffix(r.URL.Path, "/stream") {
+			r = r.WithContext(trace.WithTraceID(r.Context(), trace.NewTraceID()))
+			sw := &scratchStreamWriter{ResponseWriter: w, lookup: func(execution string) (sandbox.WorkloadIdentity, bool) {
+				traceMu.Lock()
+				defer traceMu.Unlock()
+				id, ok := sdkExecutions[execution]
+				return id, ok
+			}}
+			invokeHandler.ServeHTTP(sw, r)
+			execution := w.Header().Get("X-Orva-Execution-ID")
+			var row *database.Execution
+			for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+				if got, e := db.GetExecution(execution); e == nil {
+					row = got
+					break
+				}
+			}
+			time.Sleep(400 * time.Millisecond)
+			traceMu.Lock()
+			identity := sdkExecutions[execution]
+			ops := streamOpLog{}
+			if p := streamOps[execution]; p != nil {
+				ops = *p
+			}
+			traceMu.Unlock()
+			children := []*database.Execution{}
+			if row != nil {
+				if got, e := db.ListByTraceID(row.TraceID); e == nil {
+					children = got
+				}
+			}
+			sw.mu.Lock()
+			lines, total, status := append([]streamLine(nil), sw.lines...), sw.bytes, sw.status
+			sw.mu.Unlock()
+			recordEvent(map[string]any{"kind": "stream", "execution": execution, "worker": identity, "status": status,
+				"total_bytes": total, "lines": lines, "record": row, "children": children,
+				"next_ok_at": append([]int64{}, ops.NextOK...), "next_denied_at": append([]int64{}, ops.NextDenied...), "close_at": append([]int64{}, ops.Close...)})
+			return
+		}
 		rec := httptest.NewRecorder()
 		if callsEnabled {
 			r = r.WithContext(trace.WithTraceID(r.Context(), trace.NewTraceID()))
@@ -439,6 +514,15 @@ func TestLiveWorkflow(t *testing.T) {
 			owners[f.fn.Runtime] = id
 		}
 		liveCallsChecks(t, call, keys, owners)
+		if streamsEnabled {
+			liveStreamsChecks(t, &streamHooks{call: call, keys: keys, owners: owners, db: db,
+				events: func() []any {
+					traceMu.Lock()
+					defer traceMu.Unlock()
+					return append([]any(nil), events...)
+				},
+				targetWorker: func(owner string) *sandbox.Worker { return targetWorkers[owner].Load() }})
+		}
 	}
 	liveMust(t, os.WriteFile(filepath.Join(evidence, "ready"), []byte("backend self-checks passed\n"), 0600))
 	if os.Getenv("ORVA_LIVE_HOLD") == "1" {

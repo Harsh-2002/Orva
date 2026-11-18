@@ -1,4 +1,4 @@
-# Live scratch IAM: KV and two-sided buffered calls
+# Live scratch IAM: KV, two-sided buffered calls and streams
 
 This isolated fixture connects the unchanged guided Permissions view through the
 real request controller and HTTP adapter to `workloadpolicy.Service`, actual
@@ -15,17 +15,42 @@ The scratch operation selector uses the existing common controls and server
 target metadata; the approved Permissions page and guided wizards are unchanged.
 
 The pool and buffered-call workflows have scoped independent acceptance, not
-production activation. The calls increment was qualified against `9752c79` plus
-the exact pool patch `95ceaccd76d37a86305b3432168234bddf049bf32944ef8034e4a0b92c0a69f4`.
-Streaming is explicitly disabled in the scratch selector and unavailable in the
-authored handlers: real stream revocation is **not** qualified by this candidate.
-The existing policy action is `functions.invoke` (including streams in the
-underlying operation matrix), not a new `functions.invoke.stream` action.
+production activation. This streams increment is based on primary
+`9752c79` plus the exact pool patch
+`95ceaccd76d37a86305b3432168234bddf049bf32944ef8034e4a0b92c0a69f4` and the exact
+calls patch `bfac5febf7130751c53db91a8cd3c42e61ec77e634a0d5c5cd7cef102bfa4714`.
+The existing policy action is `functions.invoke`, which the underlying operation
+matrix applies to buffered calls and to stream open and next. There is no
+`functions.invoke.stream` action and none was added.
+
+`ORVA_LIVE_STREAMS=1` (implies calls) adds real streaming. The sealed handlers
+gain a `stream-source` callee, which yields timed chunks through the runtime's own
+streaming protocol, and a `stream-call` caller, which reads them with the public
+SDK stream API and forwards each chunk on its public response. The caller reduces
+errors to the generic `IAM_DENIED` or `CALL_ERROR`, so hidden target names and
+messages never reach the response. The fixture's stream route is
+`/fn/<caller>/stream`; the writer flushes every chunk unchanged and only records
+bounded line timestamps. Fixture functions use a 30 s timeout so a 12 s stream can
+be revoked through the UI; this is test configuration, not a production gate.
+
+What the streams checks establish, in both Node to Python and Python to Node:
+outbound permission alone and inbound acceptance alone each deny with no callee
+output and no callee execution row; both together deliver genuine chunks with
+host-derived callee context; revoking the caller permission, and separately the
+callee acceptance, cuts a running stream, cancels the callee execution and kills
+its worker; Stop from the keyboard also cancels the callee. Bytes already handed
+off before a revocation was acknowledged are admitted data and may still reach the
+client (the checks allow at most two); what must never happen is a fresh frame
+handoff that begins after the acknowledgement. The existing target import may run
+before handler admission, so a denial does not prevent module import in the callee.
+Oversized stream heads, chunks and errors are covered by the existing sdkhost unit
+tests only; the real-runtime run does not exercise them.
 
 It does **not** install production routes, boot schemas, MCP tools, normal
 browser-session identity, production pool activation or complete SDK enforcement.
-No deployment/editor state is involved. The shell visibly says
-“Live scratch IAM · KV and buffered calls · not production-ready”.
+Jobs, cron and spans stay denied. No deployment/editor state is involved. The
+shell visibly says “Live scratch IAM · KV, buffered calls and streams ·
+not production-ready”.
 
 ## Disposable guest only
 
@@ -55,7 +80,7 @@ go vet ./backend/internal/{pool,proxy,sdkhost,workloadiam,workloadpolicy,workloa
 go test -c -o /tmp/live.test ./backend/internal/workloadspawn
 mkdir -m 700 /evidence
 cd backend/internal/workloadspawn
-ORVA_LIVE_WORKFLOW=disposable-vm ORVA_LIVE_CALLS=1 ORVA_LIVE_HOLD=1 \
+ORVA_LIVE_WORKFLOW=disposable-vm ORVA_LIVE_STREAMS=1 ORVA_LIVE_HOLD=1 \
 ORVA_RUNTIME_PACKAGE_DIR=/packages ORVA_RUNTIME_RECIPE_OUTPUT=/evidence \
 ORVA_RUNTIME_NODE_SHA256=34c7b8f1559a55018827fef7f96a540afb8cfeba665ee89dbbe3170852284ed3 \
 ORVA_RUNTIME_PYTHON_SHA256=ff692cfc7da5bc142b027b34194da7653db79fe1277945c2363227eb04c56ed5 \
@@ -108,6 +133,7 @@ playwright-cli -s=live-iam open --config=/evidence/playwright-private.json
 playwright-cli -s=live-iam snapshot
 playwright-cli -s=live-iam run-code --filename=/src/test/live-iam/browser.js
 playwright-cli -s=live-iam run-code --filename=/src/test/live-iam/calls-browser.js
+playwright-cli -s=live-iam run-code --filename=/src/test/live-iam/streams-browser.js
 playwright-cli -s=live-iam close
 touch /evidence/stop
 ```
@@ -135,6 +161,17 @@ lease observations, acquired target identity and actual F2F child SQLite trace
 rows. Denied calls must have no callee execution. Both Node→Python and
 Python→Node complete the UI workflow with 390px night and 1440px day captures.
 
+Save the third script's returned JSON as `/evidence/streams-browser-result.json`
+and run `python3 -I verify-streams-evidence.py /evidence`. For each direction it
+checks one-sided denials, the five-chunk completion, the keyboard Stop, and both
+in-flight revocations against the server's own stream record, SDK open admission
+against the acquired callee worker, the policy acknowledgement time, the F2F child
+SQLite rows (cancelled, not succeeded) and the audit revisions. It also asserts the
+callee worker was replaced after cancellation. The UI stays honest: delivered
+chunks remain listed after a denial, nothing after a terminal marker or Stop is
+applied, and changing the shown function neither cancels nor relabels a running
+stream; only Stop does.
+
 The HTTP adapter's optional metadata source runs only after authenticated operator
 read access, before mutation, outside admission. It returns at most 256 visible
 active/current function IDs and names; invalid/duplicate/oversized data fail
@@ -150,7 +187,7 @@ preserve the existing qualification limits. See `backend/internal/pool/README.md
 for ownership, lock ordering and production-writer limitations.
 
 Export only reviewed logs, response evidence, recipe manifests and screenshots
-to `/tmp/opencode/iam-pool-workflow/`. Stop the owned fixture/Vite process and
+to `/tmp/opencode/iam-live-streams/`. Stop the owned fixture/Vite process and
 delete the owned MSB after active QA. Keep the detached source worktree for
 independent review. Full production cut-over and unrelated lifecycle matrices
 are separate acceptance gates, not implied by this milestone.

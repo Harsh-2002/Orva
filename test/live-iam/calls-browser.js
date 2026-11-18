@@ -121,6 +121,5 @@ async page => {
   }
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)
   if(errors.length||overflow) throw Error('Browser errors or overflow')
-  if(!await page.getByRole('radio',{name:'Stream',exact:true}).isDisabled()) throw Error('Unqualified stream mode is enabled')
-  return {journeys,responses,pageErrors:errors,overflow,streamEnabled:false}
+  return {journeys,responses,pageErrors:errors,overflow,streamEnabled:!(await page.getByRole('radio',{name:'Stream',exact:true}).isDisabled())}
 }

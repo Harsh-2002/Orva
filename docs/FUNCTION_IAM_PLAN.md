@@ -536,7 +536,8 @@ Current delivery checkpoints, not substitutes for the complete gates below:
   Exact verified source is integrated. Fresh UID-1001 server/UI builds,
   canonical lint/tests, six-package race tests, frontend lint (one unchanged
   Editor warning), 106 Node tests, 240 component tests and scratch UI build
-  passed in a disposable VM; its removal was verified. Streams remain pending.
+  passed in a disposable VM; its removal was verified. Stream acceptance followed
+  separately, as recorded below.
 - Reusable-policy semantics have independent decision review as recorded below.
   Management parity, production lifecycle wiring, async provenance and
   boot/restore qualification remain incomplete.
@@ -815,9 +816,37 @@ and policy together. Serving wiring remains absent until the full proof gates.
   server/UI/slim-CLI builds, canonical lint/tests and full affected-package race
   checks passed, including database (623 seconds). Race-enabled real coordinated
   Node/Python history, distinct-function jobs and cron lifecycles passed; the
-  combined VM was removed. Public history adapters have separate scoped QA, but
-  are not part of this combined run. Complete CLI/UI/browser workflow, restore,
+  combined VM was removed. That core-only run did not qualify public history
+  controls; their later acceptance is recorded separately below. Restore,
   broader lifecycle and full E2E/cut-over remain unaccepted.
+
+- History adapters/CLI/UI, the live controls fixes, advisory cron descriptions
+  and the real-stream fixture now have scoped independent acceptance and are
+  integrated. The combined 49-path snapshot passed clean locked frontend checks
+  (110 unit and 312 component tests), UID-1001 server/slim-CLI builds, canonical
+  lint/tests and eight affected-package race suites. All five scratch builds
+  passed; only the existing Editor warning remains. Real Node/Python history
+  profiles each passed 60 checks, including fresh operator-origin SDK effects,
+  current-actor purge audits, canonical/reserved ledger reconciliation, resolved
+  day/night themes, KeepAlive restoration and visible cron wording.
+  KV/calls/streams correlation verifiers passed, stream controls were enabled,
+  and no fresh handoff after revocation acknowledgement was observed. Separate
+  managed-mode execution passed. Terminal UID-1001 verification matched all
+  1,036 source hashes/modes; orchestration exited zero and cleanup was verified.
+  Own runner permission/PATH and hidden-responsive-locator failures remain
+  recorded; no candidate assertions were removed. The external purge-audit
+  probe's corrected `actor.ID` path and stronger browser regression are retained
+  in the repository. Screenshots with fixture payloads are excluded from safe
+  evidence. Real oversized stream frames remain unit-only qualification.
+  Normal serving/router/catalog/boot activation, restore, full E2E and broader
+  accessibility/resource stress are not accepted by this staged integration.
+
+- The isolated spans candidate remains on HOLD for immutable decision-revision
+  provenance. Independent identity, queue ownership/bounds, retry and real
+  Node/Python span checks passed, but do not waive that omission. Separate
+  supported-Python initialization-race and cron-fixture contention corrections
+  await independent acceptance. Configuration publication, queued-build
+  submitter capture, remaining writers and boot/restore are still open gates.
 
 - Conditional browser-session UUID capture has scoped independent acceptance.
   Once the explicit identity schema is installed, new session rows receive

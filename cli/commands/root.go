@@ -80,6 +80,7 @@ func commandGroups() map[*cobra.Command]string {
 
 		cronCmd:     groupEventing,
 		jobsCmd:     groupEventing,
+		historyCmd:  groupEventing,
 		webhooksCmd: groupEventing,
 		channelsCmd: groupEventing,
 
@@ -127,6 +128,7 @@ func RegisterClient(root *cobra.Command) {
 		invokeCmd,
 		iamCmd,
 		jobsCmd,
+		historyCmd,
 		keysCmd,
 		kvCmd,
 		loginCmd,

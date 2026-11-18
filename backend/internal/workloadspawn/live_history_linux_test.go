@@ -153,7 +153,7 @@ func TestLiveHistoryLifecycle(t *testing.T) {
 			p.DB = db
 			p.SDKAuth = authenticator
 			invoke := &handlers.InvokeHandler{Registry: reg, Proxy: p, DB: db, Metrics: metrics.New(), DataDir: t.TempDir()}
-			token := "fixture-" + ids.New()
+			token := "orva_" + strings.ReplaceAll(ids.New(), "-", "")
 			hash := sha256.Sum256([]byte(token))
 			ref := auth.OperatorReference{Kind: "api_key", ID: ids.New()}
 			liveMust(t, db.InsertAPIKey(&database.APIKey{ID: ref.ID, Name: "history-reviewer", KeyHash: hex.EncodeToString(hash[:]), Prefix: "fixture", Permissions: `["read","admin"]`}))
@@ -209,7 +209,11 @@ func TestLiveHistoryLifecycle(t *testing.T) {
 			cron := &database.AsyncCron{CronSchedule: database.CronSchedule{FunctionID: old.ID, Name: "old-clock", CronExpr: "@every 1h", Timezone: "UTC", Enabled: true, Payload: `{"tag":"old-private-cron"}`}}
 			liveMust(t, async.CreateCronOperator(operatorCtx, ref, cron))
 			authenticate := func(r *http.Request) (*auth.Principal, error) {
-				digest := sha256.Sum256([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")))
+				credential := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+				if credential == "" {
+					credential = r.Header.Get("X-Orva-API-Key")
+				}
+				digest := sha256.Sum256([]byte(credential))
 				key, err := db.GetAPIKeyByHash(hex.EncodeToString(digest[:]))
 				if err != nil {
 					return nil, err
@@ -231,6 +235,9 @@ func TestLiveHistoryLifecycle(t *testing.T) {
 				deleteHandler.Delete(w, r.WithContext(auth.WithOperator(r.Context(), principal)))
 			})
 			(&workloadhistory.HTTPAdapter{Service: history, Authenticate: authenticate}).Register(mux)
+			if historyLiveControlsEnabled() {
+				registerHistoryLiveControls(t, mux, db, databasePath, reg, async, history, authenticate)
+			}
 			server := httptest.NewServer(mux)
 			defer server.Close()
 			request := func(method, path string, in any, out any) {
@@ -366,6 +373,9 @@ func TestLiveHistoryLifecycle(t *testing.T) {
 				}
 			}
 			t.Log("actual private SDK original job; function DELETE HTTP atomically removes named attachment/advances membership/audits old UUID -> metadata-only history -> old IDs deny -> reviewed new-UUID operator reissue -> real sealed managed job+cron SDK effects/audit correlate")
+			if historyLiveControlsEnabled() {
+				liveHistoryControls(t, db, databasePath, server, async, ref, token, lang, old.ID, fresh.ID, original.ID, cron.ID, reissuedCron.ID)
+			}
 		})
 	}
 }

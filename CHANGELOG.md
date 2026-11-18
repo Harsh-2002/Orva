@@ -61,6 +61,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Added
 
+- Staged metadata-only history inspection, explicit fresh-work reissue and
+  audited purge through shared UI, CLI and MCP/AI adapters. Normal server routes,
+  catalogs and boot schemas remain inactive pending coordinated IAM cut-over.
+
 - Staged reusable-policy management: immutable version pins, source-aware
   Permissions components, `orva iam` commands and shared MCP/AI adapters.
   These require internal service wiring; normal servers do not expose IAM

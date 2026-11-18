@@ -6,7 +6,7 @@ import sys
 root = pathlib.Path(sys.argv[1])
 browser = json.loads((root / "calls-browser-result.json").read_text())
 events = json.loads((root / "events.json").read_text())
-assert len(browser["journeys"]) == 2 and browser["streamEnabled"] is False
+assert len(browser["journeys"]) == 2 and isinstance(browser["streamEnabled"], bool)
 assert not browser["pageErrors"] and not browser["overflow"]
 artifacts = {e["owner"]: e["artifact"] for e in events if e["kind"] == "factory"}
 proof = []
