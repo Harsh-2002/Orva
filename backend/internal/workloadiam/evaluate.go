@@ -12,6 +12,18 @@ type Evaluator struct {
 	metadata Metadata
 	policy   Policy
 	valid    bool
+	deny     bool
+}
+
+// CompileDeny preserves policy metadata without admitting any workload, even
+// standing operator work that would otherwise require only an artifact match.
+func CompileDeny(m Metadata) (*Evaluator, error) {
+	e, err := Compile(m, Policy{SchemaVersion: SchemaVersion, Allow: []Statement{}, Inbound: []Acceptance{}})
+	if err != nil {
+		return nil, err
+	}
+	e.deny = true
+	return e, nil
 }
 
 func Compile(m Metadata, p Policy) (*Evaluator, error) {

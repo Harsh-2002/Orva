@@ -17,8 +17,10 @@ transactionally, and publishes inactive review-required deny while invalidating
 the old actual Factory under the same gate. Fresh concrete-pair Install and
 source-aware Review are separate. Opt-in managed rollback promotes a verified
 historical deployment ID without rewriting history and also publishes inactive
-review-required deny. Durable pause blocks promotion. No symlink promotion,
-legacy rollback/GC adoption or autoresume; see `builder/README.md`.
+review-required deny. Durable pause blocks rollback; internal resume uses the
+same promotion association with the exact current sealed pair and a fresh deny
+generation. Resume is not routed or boot-wired. No symlink promotion, legacy
+rollback/GC adoption or autoresume; see `builder/README.md`.
 
 `workloadhistory` is an internal opt-in deletion/history service. Its explicit
 schema and registry hook are absent from normal boot/router construction.
@@ -342,9 +344,9 @@ CAS saves validate signed revisions and atomically append digest/actor audit
 records (32 retained per live function). Policy and audit rows cascade on
 function deletion; host-level deletion audit remains a cut-over obligation.
 Storage is not admin authorization or live artifact verification.
-`IAMPolicyRecord.AdmissionEvaluator` preserves revision metadata but compiles
-empty authority for quarantined/review-required records; the future loader must
-use it rather than compiling retained grants directly.
+`IAMPolicyRecord.AdmissionEvaluator` preserves revision and approval metadata
+but denies protected and standing work for quarantined/review-required records;
+the future loader must use it rather than compiling retained grants directly.
 
 `secrets.Manager.SnapshotForIAM` strictly decrypts caller-supplied snapshot rows
 into a bounded owned map or returns an error without partial output. It checks

@@ -56,13 +56,12 @@ func (r *IAMPolicyRecord) AdmissionEvaluator() (*workloadiam.Evaluator, error) {
 	if err != nil || canonical != r.PolicyJSON {
 		return nil, ErrIAMInvalidPolicy
 	}
+	if r.ReviewRequired || r.Quarantined {
+		return workloadiam.CompileDeny(r.Metadata)
+	}
 	p, err := workloadiam.Decode([]byte(canonical))
 	if err != nil {
 		return nil, ErrIAMInvalidPolicy
-	}
-	if r.ReviewRequired || r.Quarantined {
-		p.Allow = []workloadiam.Statement{}
-		p.Inbound = []workloadiam.Acceptance{}
 	}
 	return workloadiam.Compile(r.Metadata, p)
 }

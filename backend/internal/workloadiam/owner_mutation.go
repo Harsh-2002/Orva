@@ -41,3 +41,32 @@ func (a *Authority) DeactivateOwnerDeferred(owner string, revision uint64, persi
 	a.deactivated[owner] = true
 	return a.revokeOwnerRegistrationsUnderGate(owner), nil
 }
+
+// ResumeOwnerDeferred replaces deactivation only with an exact deny successor
+// after durable publication. Signal cancellations outside the owner lock.
+func (a *Authority) ResumeOwnerDeferred(expected Metadata, candidate *Evaluator, persist func() error) (func(), error) {
+	if a == nil || persist == nil || candidate == nil || !candidate.deny {
+		return nil, ErrInvalid
+	}
+	frozen, err := copyEvaluator(candidate)
+	if err != nil {
+		return nil, err
+	}
+	next := expected
+	next.Revision++
+	if expected.Revision == 0 || next.Revision == 0 || frozen.Metadata() != next {
+		return nil, ErrConflict
+	}
+	owner := expected.OwnerID
+	a.gate.Lock()
+	defer a.gate.Unlock()
+	if a.retired[owner] || !a.deactivated[owner] || a.policies[owner].Metadata() != expected {
+		return nil, ErrConflict
+	}
+	if err := persist(); err != nil {
+		return nil, err
+	}
+	a.policies[owner] = frozen
+	delete(a.deactivated, owner)
+	return a.revokeOwnerRegistrationsUnderGate(owner), nil
+}

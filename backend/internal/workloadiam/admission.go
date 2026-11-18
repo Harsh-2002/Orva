@@ -60,6 +60,9 @@ func copyEvaluator(e *Evaluator) (*Evaluator, error) {
 	if e == nil || !e.valid {
 		return nil, ErrInvalid
 	}
+	if e.deny {
+		return CompileDeny(e.metadata)
+	}
 	frozen, err := Compile(e.metadata, e.policy)
 	if err != nil {
 		return nil, ErrInvalid
@@ -138,10 +141,11 @@ func (a *Authority) allows(c Context, r Request) bool {
 }
 
 func (a *Authority) admissionPolicy(owner string) *Evaluator {
-	if a.deactivated[owner] {
+	e := a.policies[owner]
+	if a.deactivated[owner] || (e != nil && e.deny) {
 		return nil
 	}
-	return a.policies[owner]
+	return e
 }
 
 // TargetState describes an acquired worker, never SDK-supplied claims.

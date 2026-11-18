@@ -14,8 +14,16 @@ The operator-pause fixture records durable intent separately from an inactive
 deployment awaiting installation. `PublicationQueue.Pause` disables admission
 and invalidates the current Factory without deleting stored policy. Earlier
 queued deployments and prepared installations cannot reopen it. The `installed`
-phase records installation, not policy approval. No resume path is exposed:
-reopening admission requires a fresh installation and review lifecycle.
+phase records installation, not policy approval.
+
+Internal `PublicationQueue.Resume` requires live ADMIN, exact pause and current
+authority/configuration, and the same verifiable sealed pair from an original or
+promoted deployment. It consumes pause intent and records a fresh, inactive
+review-required generation in the promotion table without rewriting history.
+A lease acquired before retirement keeps the pair pinned through commit;
+retirement can still block a later fresh Install. Neither resume nor installation
+authorizes protected or standing operator work: a separate source-aware review
+is required. There is no resume route, MCP/AI tool, CLI command, or boot wiring.
 
 **Managed-store-only:** `DataDir/functions/<owner>` must not exist at submission,
 build or installation. Legacy directories are refused, not adopted. Concrete
