@@ -75,7 +75,7 @@ func TestManagedOutputExtractionBounds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path}
+			j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path, metadata: t.TempDir()}
 			archive := createTestArchive(t, map[string]string{"handler.js": "plain text"})
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -126,7 +126,7 @@ func TestManagedOutputArchiveTypeConflict(t *testing.T) {
 	if err := os.WriteFile(archive, raw.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
-	j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path}
+	j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path, metadata: t.TempDir()}
 	if _, err := j.extract(t.Context(), archive); !errors.Is(err, artifactfs.ErrUnsupported) {
 		t.Fatal("archive metadata conflict rewritten:", err)
 	}
@@ -149,7 +149,7 @@ func TestManagedOutputRejectsRawParentComponents(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: limits, ReservedBytes: 1024, ArchiveBytes: 1 << 20}}, stage: stage, path: path}
+			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: limits, ReservedBytes: 1024, ArchiveBytes: 1 << 20}}, stage: stage, path: path, metadata: t.TempDir()}
 			if _, err := j.extract(t.Context(), createTestArchive(t, map[string]string{name: "plain"})); !errors.Is(err, artifactfs.ErrUnsupported) {
 				t.Fatalf("raw parent component normalized rather than rejected: %v", err)
 			}

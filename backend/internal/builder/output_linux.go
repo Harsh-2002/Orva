@@ -449,6 +449,9 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := j.attachSource(ctx); err != nil {
+		return nil, fmt.Errorf("attach original build source: %w", err)
+	}
 	manifest, digest, err := j.produce(ctx)
 	if err != nil {
 		return nil, err
@@ -526,14 +529,24 @@ func managedProfile(fn *database.Function, path string) (p managedBuildProfile, 
 		}
 	}
 	if p.compile {
-		if err := verifyTypeScriptDeclared(filepath.Join(path, "package.json")); err != nil {
-			return p, fmt.Errorf("%w: %w", ErrOutputProfile, err)
+		_, p.entrypoint, err = ManagedTypeScriptOutput(root, fn.Entrypoint)
+		if err != nil {
+			return p, err
 		}
-		p.entrypoint = compiledEntrypoint(fn.Entrypoint, readTSConfigOutDir(root))
 	} else if ext == ".ts" {
 		return p, fmt.Errorf("%w: TypeScript requires tsconfig.json", ErrOutputProfile)
 	}
 	return p, ValidateArchive(path, fn.Runtime, fn.Entrypoint)
+}
+
+// ManagedTypeScriptOutput derives the same compiler target before building or
+// projecting authored files from a legacy TypeScript deployment.
+func ManagedTypeScriptOutput(root *os.Root, entrypoint string) (dir, entry string, err error) {
+	if err := verifyTypeScriptDeclared(filepath.Join(root.Name(), "package.json")); err != nil {
+		return "", "", fmt.Errorf("%w: %w", ErrOutputProfile, err)
+	}
+	dir = readTSConfigOutDir(root)
+	return dir, compiledEntrypoint(entrypoint, dir), nil
 }
 
 func (b *Builder) runManagedSteps(ctx context.Context, fn *database.Function, path string, profile managedBuildProfile) error {

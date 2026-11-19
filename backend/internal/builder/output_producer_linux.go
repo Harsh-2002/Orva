@@ -27,6 +27,9 @@ func outputPath(name string, max int) bool {
 
 // extract admits only bounded data files/directories, never archive links or author metadata authority.
 func (j *outputJob) extract(ctx context.Context, archive string) (string, error) {
+	if j.metadata == "" {
+		return "", artifactfs.ErrInvalid
+	}
 	cfg := j.owner.cfg
 	fd, err := syscall.Open(archive, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
@@ -39,7 +42,15 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 		return "", artifactfs.ErrCapacity
 	}
 	hash := sha256.New()
-	raw := io.TeeReader(f, hash)
+	source, err := os.OpenFile(filepath.Join(j.metadata, artifactfs.BuildSourceName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer source.Close()
+	if err := source.Chmod(0600); err != nil {
+		return "", err
+	}
+	raw := io.TeeReader(io.LimitReader(f, cfg.ArchiveBytes+1), io.MultiWriter(hash, source))
 	gz, err := gzip.NewReader(raw)
 	if err != nil {
 		return "", err
@@ -74,6 +85,9 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 		}
 		name := filepath.Clean(h.Name)
 		if !filepath.IsLocal(name) || !outputPath(name, cfg.Limits.PathBytes) || len(h.PAXRecords) != 0 || len(h.Xattrs) != 0 {
+			return "", artifactfs.ErrUnsupported
+		}
+		if name == artifactfs.BuildSourceName || strings.HasPrefix(name, artifactfs.BuildSourceName+"/") {
 			return "", artifactfs.ErrUnsupported
 		}
 		if headersSeen[name] {
@@ -169,12 +183,35 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 	if err != nil || before.Size() != after.Size() || before.ModTime() != after.ModTime() {
 		return "", artifactfs.ErrIntegrity
 	}
+	if st, err := source.Stat(); err != nil || st.Size() != before.Size() {
+		return "", artifactfs.ErrIntegrity
+	}
+	if err := source.Close(); err != nil {
+		return "", err
+	}
 	for path, mode := range directories {
 		if err := syscall.Chmod(path, mode); err != nil {
 			return "", err
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (j *outputJob) attachSource(ctx context.Context) error {
+	f, err := os.Open(filepath.Join(j.metadata, artifactfs.BuildSourceName))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	dst, err := os.OpenFile(filepath.Join(j.path, artifactfs.BuildSourceName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	if err := dst.Chmod(0600); err != nil {
+		return errors.Join(err, dst.Close())
+	}
+	_, err = outputCopy(ctx, dst, f, j.owner.cfg.Limits.FileBytes)
+	return errors.Join(err, dst.Close())
 }
 
 type outputContextReader struct {
