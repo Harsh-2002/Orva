@@ -485,6 +485,7 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 			Perm:        t.Perm,
 			ReadOnly:    t.ReadOnly,
 			Destructive: t.Destructive,
+			Sensitive:   t.Sensitive,
 		})
 	}
 	dispatch := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {

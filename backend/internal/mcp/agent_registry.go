@@ -52,6 +52,10 @@ type AgentTool struct {
 	ReadOnly    bool            `json:"read_only"`
 	Destructive bool            `json:"destructive"`
 	Schema      json.RawMessage `json:"schema"` // JSON Schema for arguments
+	// Sensitive lists dot-separated paths of one-time credentials in the result
+	// (e.g. "secret"). Chat shows them live once and never stores or re-sends them;
+	// the external MCP client still receives them.
+	Sensitive []string `json:"sensitive,omitempty"`
 
 	invoke func(ctx context.Context, args json.RawMessage) (any, error)
 }
@@ -99,6 +103,17 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args json.RawMessa
 	return t.invoke(ctx, args)
 }
 
+type regOptions struct{ sensitive []string }
+
+// regOption adjusts one regAddTool declaration.
+type regOption func(*regOptions)
+
+// withOneTimeResult marks result fields (dot-separated JSON paths) that carry a
+// credential shown only once. Every tool that mints one must declare it.
+func withOneTimeResult(paths ...string) regOption {
+	return func(o *regOptions) { o.sensitive = append(o.sensitive, paths...) }
+}
+
 // regAddTool declares one tool. It is generic over the input/output types so
 // the JSON schema is inferred from In and the handler is type-checked, exactly
 // like mcpsdk.AddTool. Pass the existing handler closure verbatim — no need to
@@ -108,7 +123,12 @@ func regAddTool[In, Out any](
 	perm string,
 	def *mcpsdk.Tool,
 	h mcpsdk.ToolHandlerFor[In, Out],
+	opts ...regOption,
 ) {
+	var o regOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if !rc.perms.Has(perm) {
 		return // permission-gated: invisible to this principal on both fronts
 	}
@@ -163,6 +183,7 @@ func regAddTool[In, Out any](
 			ReadOnly:    readOnly,
 			Destructive: destructive,
 			Schema:      schemaJSON,
+			Sensitive:   o.sensitive,
 			invoke: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var in In
 				if len(args) > 0 {

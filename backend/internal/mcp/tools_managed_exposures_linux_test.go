@@ -288,3 +288,48 @@ func TestManagedInboundWebhookSecretOnlyOnCreate(t *testing.T) {
 		t.Fatalf("uppercase trigger id: %v", err)
 	}
 }
+
+// Every tool that mints a one-time credential must declare it, in the legacy and
+// the managed catalog, and the declared path must exist in the real output.
+func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
+	f := newManagedExposureFixture(t)
+	all := permSet{permRead: true, permWrite: true, permAdmin: true}
+	legacy := Deps{DB: f.db, Registry: f.registry}
+	want := map[string][]string{"create_api_key": {"key"}, "create_webhook": {"secret"}, "create_inbound_webhook": {"secret"}}
+	for label, deps := range map[string]Deps{"legacy": legacy, "managed": f.deps} {
+		reg := BuildAgentRegistry(deps, all)
+		for _, tool := range reg.Tools() {
+			if w, ok := want[tool.Name]; ok {
+				if !slices.Equal(tool.Sensitive, w) {
+					t.Fatalf("%s %s sensitive=%v want %v", label, tool.Name, tool.Sensitive, w)
+				}
+			} else if len(tool.Sensitive) != 0 {
+				t.Fatalf("%s %s unexpectedly sensitive", label, tool.Name)
+			}
+		}
+	}
+	if BuildAgentRegistry(f.deps, all).Get("create_api_key") != nil {
+		t.Fatal("managed catalog unexpectedly mints API keys")
+	}
+	_, ctx := f.key(t, `["read","write","admin"]`)
+	outputs := map[string]any{}
+	var err error
+	// create_api_key and create_webhook exist in the legacy catalog only.
+	if outputs["create_api_key"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if outputs["create_webhook"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_webhook", []byte(`{"name":"w","url":"https://example.com/hook"}`)); err != nil {
+		t.Fatal(err)
+	}
+	outputs["create_inbound_webhook"], err = f.call(ctx, all, "create_inbound_webhook", map[string]any{"function_id": f.owner, "name": "signed", "version": "0", "expected": f.expected()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range outputs {
+		raw, _ := json.Marshal(out)
+		var m map[string]json.RawMessage
+		if json.Unmarshal(raw, &m) != nil || m[want[name][0]] == nil {
+			t.Fatalf("%s output lacks declared path %v: %s", name, want[name], raw)
+		}
+	}
+}

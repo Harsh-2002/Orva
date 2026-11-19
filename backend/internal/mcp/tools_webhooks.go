@@ -211,6 +211,7 @@ func registerWebhookTools(rc *regCtx) {
 			sub.SecretPreview = secret[:8] + "…"
 			return nil, CreateWebhookOutput{Subscription: toSubscriptionView(sub), Secret: secret}, nil
 		},
+		withOneTimeResult("secret"),
 	)
 
 	regAddTool(rc, permWrite,

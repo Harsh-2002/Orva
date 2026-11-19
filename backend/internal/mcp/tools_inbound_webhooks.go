@@ -155,6 +155,7 @@ func registerInboundWebhookTools(rc *regCtx) {
 				Secret:         secret,
 			}, nil
 		},
+		withOneTimeResult("secret"),
 	)
 
 	regAddTool(rc, permAdmin,

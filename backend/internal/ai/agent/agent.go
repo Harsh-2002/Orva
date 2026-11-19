@@ -38,6 +38,10 @@ type Tool struct {
 	Perm        string // read | write | invoke | admin
 	ReadOnly    bool
 	Destructive bool
+	// Sensitive lists dot-separated JSON paths in the tool's result that carry a
+	// one-time credential. Only the live tool_result frame sees the real value;
+	// the audit row, conversation message and model history store a placeholder.
+	Sensitive []string
 }
 
 // Dispatcher executes a tool by name with raw JSON arguments and returns the
@@ -408,20 +412,31 @@ func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row 
 	durMS := finished.Sub(started).Milliseconds()
 	row.FinishedAt = &finished
 	row.DurationMS = &durMS
-	row.Result = resultJSON
+	// Everything durable or model-visible gets the redacted copy; only the live
+	// frame below carries the one-time value.
+	liveJSON := resultJSON
+	stored, oneTime := resultJSON, false
+	if err == nil {
+		stored, oneTime = redactResult(resultJSON, r.byName[row.ToolName].Sensitive)
+	}
+	row.Result = stored
 	_ = r.store.UpdateToolCall(row)
-	r.persistToolResult(convID, row, resultJSON)
+	r.persistToolResult(convID, row, stored)
 	// Same {}-degradation hazard as the tool_call frame: a dispatcher that
 	// returns non-JSON output would fail the frame's marshal and the sink
 	// would drop the id/status the UI needs to settle the call's spinner.
-	resultPayload := json.RawMessage(resultJSON)
+	resultPayload := json.RawMessage(liveJSON)
 	if !json.Valid(resultPayload) {
-		resultPayload = json.RawMessage(mustJSON(resultJSON))
+		resultPayload = json.RawMessage(mustJSON(liveJSON))
 	}
-	_ = sink.Send("tool_result", map[string]any{
+	frame := map[string]any{
 		"id": row.ID, "call_id": row.CallID, "status": row.Status,
 		"result": resultPayload,
-	})
+	}
+	if oneTime {
+		frame["one_time"] = true
+	}
+	_ = sink.Send("tool_result", frame)
 }
 
 // ─── persistence + history helpers ───────────────────────────────────────────
@@ -582,4 +597,60 @@ func emptyToObj(s string) string {
 		return "{}"
 	}
 	return s
+}
+
+// RedactedPlaceholder replaces one-time credential fields in anything stored.
+const RedactedPlaceholder = "[redacted: shown once to the operator]"
+
+// redactResult replaces each present sensitive path with the placeholder and
+// reports whether anything was replaced. A sensitive tool whose result cannot be
+// parsed fails closed: the whole result is replaced.
+func redactResult(raw string, paths []string) (string, bool) {
+	if len(paths) == 0 {
+		return raw, false
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return mustJSON(RedactedPlaceholder), true
+	}
+	changed := false
+	for _, p := range paths {
+		if redactPath(doc, strings.Split(p, ".")) {
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, false
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return mustJSON(RedactedPlaceholder), true
+	}
+	return string(b), true
+}
+
+func redactPath(node any, path []string) bool {
+	switch n := node.(type) {
+	case []any:
+		changed := false
+		for _, el := range n {
+			if redactPath(el, path) {
+				changed = true
+			}
+		}
+		return changed
+	case map[string]any:
+		v, ok := n[path[0]]
+		if !ok {
+			return false
+		}
+		if len(path) == 1 {
+			n[path[0]] = RedactedPlaceholder
+			return true
+		}
+		return redactPath(v, path[1:])
+	}
+	return false
 }

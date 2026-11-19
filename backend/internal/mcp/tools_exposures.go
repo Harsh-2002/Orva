@@ -65,6 +65,10 @@ func registerExposureTools(rc *regCtx, routes bool) {
 			}
 		}
 		destructive := item.destructive
+		var opts []regOption
+		if item.op == "inbound_create" {
+			opts = append(opts, withOneTimeResult("secret"))
+		}
 		regAddTool(rc, perm, &mcpsdk.Tool{Name: item.name,
 			Description: "Opt-in exact-CAS public exposure management. Inspect first. Live ADMIN required for either protected owner, WRITE for truly empty review-free owners. Does not change SDK authority, artifact approval or secrets. Delete requires confirm:true; webhook create returns its new signature secret once.",
 			InputSchema: workloadtrigger.RequestSchema(item.op), Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: item.op == "inspect", DestructiveHint: &destructive}},
@@ -74,7 +78,7 @@ func registerExposureTools(rc *regCtx, routes bool) {
 					return nil, nil, err
 				}
 				return nil, exposureToolProjection(rc.deps, item.op, out), nil
-			})
+			}, opts...)
 	}
 }
 
