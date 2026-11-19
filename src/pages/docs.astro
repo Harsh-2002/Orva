@@ -41,11 +41,6 @@ const serverEnvironment = [
     'auto-detected',
     'Delegated cgroup v2 subtree for CPU, memory, and process limits.',
   ],
-  [
-    'ORVA_INTERNAL_API_BASE',
-    'auto-detected',
-    'Internal SDK base URL; override only if sandbox-to-host routing detection is wrong.',
-  ],
 ] as const;
 
 // Every example here is taken from main and is meant to run as written. The
@@ -285,6 +280,14 @@ def handler(event):
               downstream. <span class="num">0</span> means unlimited.
             </dd>
           </div>
+          <div>
+            <dt><span class="num">sdk</span></dt>
+            <dd>
+              The current SDK permission switch. Enable <span class="num">Allow Orva SDK</span> in the function
+              editor's Settings panel (or use the API/CLI) for handlers that use SDK operations. New functions default
+              to <span class="num">false</span>; this permission is independent of outbound networking.
+            </dd>
+          </div>
         </dl>
       </section>
 
@@ -293,8 +296,12 @@ def handler(event):
         <h2>The SDK</h2>
         <p>
           The <span class="num">orva</span> package is preinstalled in every sandbox. There is nothing to add to
-          a manifest and no network call to fetch it. Note that anything reaching outside the sandbox still needs
-          <span class="num">network_mode: egress</span>.
+          a manifest and no network call to fetch it. On current main, SDK operations require the function's
+          <span class="num">sdk: true</span> permission and use a private inherited per-worker channel; they work
+          with <span class="num">network_mode: none</span>. Only function-authored outbound network requests
+          require <span class="num">network_mode: egress</span>. Upgrade the server and runtime adapters
+          together to use this behavior; source behavior does not establish that an existing deployment has
+          upgraded.
         </p>
 
         <h3>KV</h3>
@@ -497,9 +504,13 @@ $ orva logs my-fn --follow`}
 
         <h3>Credentials</h3>
         <p>
-          The SDK credential handed to a sandbox is bound to that worker and to a single spawn. It is released
-          when the sandbox is reaped, so a redeploy genuinely invalidates a leaked copy rather than merely
-          appearing to.
+          SDK calls use the private worker channel, not an SDK bearer token, internal HTTP route, or
+          control-plane network exemption. The channel is closed when its worker is reaped. SDK authority
+          remains governed by the current <span class="num">sdk</span> permission. The approved Function IAM plan
+          has an inert foundation under implementation; IAM and workload-scoped authorization are not active or
+          approved for rollout. See the
+          <a class="link" href={`${repo}/blob/main/docs/FUNCTION_IAM_PLAN.md`}>Function IAM plan</a>
+          for its implementation status and design.
           <a class="link" href={`${repo}/blob/main/docs/SECURITY.md`}>SECURITY.md</a> sets out each credential class
           and exactly what revoking it reaches.
         </p>
@@ -522,6 +533,11 @@ $ orva logs my-fn --follow`}
           Config snippets for Cursor, VS Code, Codex CLI, OpenCode, Zed, Windsurf, Claude Desktop and ChatGPT
           are in the reference. Agent channels let you bundle a set of functions and expose them as tools in
           their own right.
+        </p>
+        <p>
+          This Astro page is the public website guide. The <span class="num">get_orva_docs</span> MCP tool serves
+          the canonical reference embedded in the Orva server binary, not this page; updating website prose does
+          not update that tool. Upgrade the server to receive an updated embedded reference.
         </p>
       </section>
 
