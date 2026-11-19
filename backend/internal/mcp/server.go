@@ -73,6 +73,11 @@ type Deps struct {
 
 	WorkloadLifecycle *builder.PublicationQueue // explicit scratch-only lifecycle tools
 
+	// ReplayExecution re-runs a captured execution through the managed pool
+	// (the same handler as POST /api/v1/executions/{id}/replay). Managed only;
+	// nil leaves the replay tool unregistered.
+	ReplayExecution http.HandlerFunc
+
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
 	NsjailBin string

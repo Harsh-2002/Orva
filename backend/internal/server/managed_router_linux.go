@@ -26,6 +26,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
@@ -169,9 +170,11 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
 			InvalidateKey: ops.invalidateKey()}
+		tools.PoolMgr, tools.NsjailBin, tools.Version = manager, ops.NsjailBin, version.Version
 		if invoke != nil {
 			// Channel tokens invoke only through this managed proxy and pool.
 			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+			tools.ReplayExecution = managedReplayHandler(db, reg, manager, invoke, ops).Replay
 		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
 		if chat != nil {
@@ -213,11 +216,7 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 	if invoke == nil {
 		return
 	}
-	replay := &handlers.ReplayHandler{DB: db, Registry: reg, Pool: manager, Metrics: invoke.Metrics,
-		SDKAuth: invoke.Proxy.SDKAuth, Managed: true}
-	if ops.Hub != nil {
-		replay.PublishEvent = ops.Hub.Publish
-	}
+	replay := managedReplayHandler(db, reg, manager, invoke, ops)
 	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, managedWrite, replay.Replay))
 }
 
@@ -288,6 +287,17 @@ func mountManagedAccess(mux *http.ServeMux, db *database.Database, ops *managedR
 	mux.HandleFunc("PUT /api/v1/channels/{id}/functions", requireManagedOperator(db, managedAdmin, channels.SetFunctions))
 	mux.HandleFunc("POST /api/v1/channels/{id}/rotate", requireManagedOperator(db, managedAdmin, channels.Rotate))
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Delete))
+}
+
+func managedReplayHandler(db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
+) *handlers.ReplayHandler {
+	replay := &handlers.ReplayHandler{DB: db, Registry: reg, Pool: manager, Metrics: invoke.Metrics,
+		SDKAuth: invoke.Proxy.SDKAuth, Managed: true}
+	if ops.Hub != nil {
+		replay.PublishEvent = ops.Hub.Publish
+	}
+	return replay
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,

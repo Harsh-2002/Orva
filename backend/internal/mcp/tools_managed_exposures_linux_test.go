@@ -308,13 +308,14 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 			}
 		}
 	}
-	if BuildAgentRegistry(f.deps, all).Get("create_api_key") != nil {
-		t.Fatal("managed catalog unexpectedly mints API keys")
+	// Managed is the only serving mode: its catalog carries the same key tools.
+	if BuildAgentRegistry(f.deps, all).Get("create_api_key") == nil {
+		t.Fatal("managed catalog cannot mint API keys")
 	}
 	_, ctx := f.key(t, `["read","write","admin"]`)
 	outputs := map[string]any{}
 	var err error
-	// create_api_key and create_webhook exist in the legacy catalog only.
+	// create_webhook exists in the legacy catalog only.
 	if outputs["create_api_key"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
 		t.Fatal(err)
 	}

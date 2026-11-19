@@ -59,3 +59,52 @@ func TestManagedServerToolsShareRestrictedCatalog(t *testing.T) {
 		t.Fatal("external MCP catalog did not use the shared managed registration")
 	}
 }
+
+// The managed catalog carries the shared operator surfaces at the legacy
+// tiers, and none of the tools that dispatch function code except replay.
+func TestManagedCatalogOperatorSurfaces(t *testing.T) {
+	f := iamSurfaceSetup(t)
+	base := Deps{ManagedServer: true, DB: f.db, Registry: f.registry, IAM: f.service}
+	withReplay := base
+	withReplay.ReplayExecution = func(http.ResponseWriter, *http.Request) {}
+	admin := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
+	read := permSet{permRead: true}
+	write := permSet{permWrite: true}
+
+	names := func(deps Deps, perms permSet) map[string]bool {
+		out := map[string]bool{}
+		for _, tool := range BuildAgentRegistry(deps, perms).Tools() {
+			out[tool.Name] = true
+		}
+		return out
+	}
+	tiers := map[string][]string{
+		"read": {"list_executions", "get_execution", "get_execution_logs", "list_traces", "get_trace",
+			"get_function_baseline", "system_health", "system_metrics", "list_activity"},
+		"write": {"delete_execution", "bulk_delete_executions", "replay_execution"},
+		"admin": {"system_storage", "system_vacuum", "list_api_keys", "create_api_key", "delete_api_key",
+			"list_channels", "get_channel"},
+	}
+	all, readOnly, writeOnly := names(withReplay, admin), names(withReplay, read), names(withReplay, write)
+	for tier, tools := range tiers {
+		for _, tool := range tools {
+			if !all[tool] {
+				t.Fatalf("managed catalog is missing %s", tool)
+			}
+			if got := readOnly[tool]; got != (tier == "read") {
+				t.Fatalf("%s tier %s visible to a read-only key: %v", tool, tier, got)
+			}
+			if got := writeOnly[tool]; got != (tier == "write") {
+				t.Fatalf("%s tier %s visible to a write-only key: %v", tool, tier, got)
+			}
+		}
+	}
+	if names(base, admin)["replay_execution"] {
+		t.Fatal("replay is registered without a managed replay path")
+	}
+	for _, prohibited := range []string{"invoke_function", "test_function_with_fixture", "list_runtimes", "update_function"} {
+		if all[prohibited] {
+			t.Fatalf("legacy tool %q leaked into the managed catalog", prohibited)
+		}
+	}
+}

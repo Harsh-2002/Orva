@@ -205,6 +205,15 @@ func registerInvokeTools(rc *regCtx) {
 		},
 	)
 
+	registerExecutionTools(rc)
+}
+
+// registerExecutionTools is shared by the legacy catalog and the managed one:
+// execution history reads no function code and dispatches nothing.
+func registerExecutionTools(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "invoke"
+
 	regAddTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:        "list_executions",
