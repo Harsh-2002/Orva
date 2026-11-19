@@ -120,7 +120,7 @@ func sealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	return lease.Identity(), nil
 }
 
-var missingManualAlternative = regexp.MustCompile(`^/usr/share/man/man[1-9]/[A-Za-z0-9_.+-]+\.[1-9]\.gz$`)
+var missingManualAlternative = regexp.MustCompile(`^/usr/share/man/([a-z]{2}(_[A-Z]{2})?/)?man[1-9]/[A-Za-z0-9_.+-]+\.[1-9]\.gz$`)
 
 // Slim Debian-based images omit the manuals but retain update-alternatives'
 // documentation links. Drop only these inert dangling links from the copy;

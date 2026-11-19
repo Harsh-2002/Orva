@@ -13,7 +13,10 @@ func TestEnrollmentRuntimeCopy(t *testing.T) {
 	if err := os.MkdirAll(d, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for name, target := range map[string]string{"awk.1.gz": "/usr/share/man/man1/mawk.1.gz", "escape": "/bin/absent"} {
+	for name, target := range map[string]string{
+		"awk.1.gz": "/usr/share/man/man1/mawk.1.gz", "which.de1.gz": "/usr/share/man/de/man1/which.debianutils.1.gz",
+		"escape": "/bin/absent",
+	} {
 		if err := os.Symlink(target, filepath.Join(d, name)); err != nil {
 			t.Fatal(err)
 		}
