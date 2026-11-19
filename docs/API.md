@@ -1225,7 +1225,7 @@ runtime readiness. `GET /api/v1/routes` lists up to 256 mappings, each with its
 `version` (decimal string) and `published`, and a `truncated` flag; it needs
 live READ. Normal serving is unchanged.
 
-The managed catalog (internal opt-in `StartManaged` composition; external MCP and Chat share it)
+The managed catalog (`orva serve` in durable managed mode, via `StartManaged`; external MCP and Chat share it)
 adds eight tools over the same service and the same exact-CAS contract:
 READ `list_routes` (bounded, each row with decimal-string `version` and
 `published`, plus `truncated`), `list_inbound_webhooks` (exact owner

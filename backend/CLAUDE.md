@@ -24,8 +24,7 @@ Managed MCP/Chat route and inbound-webhook tools (`tools_managed_exposures_linux
 register only with `Deps.Triggers`, delegate to `workloadtrigger.Service` and share
 the exposure schema with `registerExposureTools`; the normal catalog is unchanged.
 Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
-Restore clears publications before admission; managed MCP/Chat and webhooks
-are not part of this route slice.
+Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation
 and mark it inactive in the deny publication transaction. Explicit installation
