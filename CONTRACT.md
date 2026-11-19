@@ -240,8 +240,12 @@ never been executed.
   source, best effort. Credential values are read only from succeeded
   `create_api_key` / `create_webhook` / `create_inbound_webhook` calls (the shared
   `onetime.Fields`). Their own result loses the credential field (wholesale if it
-  is not valid JSON), as does the identical result in the matching `ai_messages`
-  role=`tool` row. Within the same conversation the exact value (≥16 characters)
+  is not valid JSON). The call's own `ai_messages` role=`tool` message is found by
+  call id (the first one after the assistant message that requested the call, so a
+  reused id elsewhere is not reached; content equality only when the call has no
+  call id) and treated the same way from its current content: credential field
+  removed, or the whole content replaced if it is not valid JSON, in the same
+  atomic final step as the audit row. Within the same conversation the exact value (≥16 characters)
   is also replaced in `ai_messages.content`/`parts`, `ai_tool_calls.args`/`result`
   and `ai_conversations.title`: inside decoded string leaves of JSON columns
   (re-marshalled, never patched as raw text; a JSON column that does not parse is
@@ -262,7 +266,8 @@ never been executed.
   values (they are never persisted elsewhere), so they are rewritten last and all
   together. If the remaining budget cannot cover them the pass stops before
   touching any, and the boot that resumes at that phase always finishes it, so a
-  boot can exceed either bound by at most that batch's minting rows (≤ 50). It adds
+  boot can exceed either bound by at most that batch's minting rows and their tool
+  messages (≤ 100). It adds
   `idx_ai_tc_tool` (additive). It exists because those credentials were stored
   and re-sent to the model in clear; it does not guarantee that every copy is
   gone. The list and paths are the single shared `onetime.Fields` that live Chat

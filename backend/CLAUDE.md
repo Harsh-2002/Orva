@@ -352,11 +352,14 @@ read and write; point re-reads and minting rows filtered in Go count). A bound
 commits the work done and persists the minting cursor plus
 `chat_credential_scrub_pos` (conversation, phase m/t/title/f, rowid) so the next
 boot resumes without rescans. Per conversation the order is messages, tool calls,
-title, then the batch's own minting rows, which hold the only copy of the values
-(never persisted) and are therefore rewritten together in one step: if the budget
-cannot cover them all the pass stops before touching any and the next boot, which
-resumes at that phase, always finishes it. That is the one place a boot may exceed
-the bounds, by at most one batch's minting rows (≤ `chatScrubBatchRows`).
+title, then the batch's own minting rows and their tool messages, which hold the
+only copy of the values (never persisted) and are therefore rewritten together in
+one step: if the budget cannot cover them all the pass stops before touching any
+and the next boot, which resumes at that phase, always finishes it. That is the
+one place a boot may exceed the bounds, by at most 2 × `chatScrubBatchRows` rows.
+The tool message is found by call id (first one after the requesting assistant
+message; content equality only without a call id), so an earlier batch's text
+rewrite cannot break the match; unparseable content is replaced wholesale.
 Values come only from succeeded calls of the tools in `onetime.Fields`; a failed
 call is never replaced wholesale, but copies of a value inside it are scrubbed.
 JSON columns are rewritten through decoded string leaves (unparseable ones are

@@ -749,8 +749,8 @@ func checkFinalPhaseScenario(t *testing.T, db *Database, a, b string, maxBoots, 
 			t.Fatalf("unfinished after %d boots", maxBoots)
 		}
 		st := db.scrubChatCredentials()
-		if st.scanned > reads+2 || st.rewritten > writes+2 {
-			t.Fatalf("boot %d beyond bound plus the 2-row final phase: %+v", boots, st)
+		if st.scanned > reads+4 || st.rewritten > writes+4 {
+			t.Fatalf("boot %d beyond bound plus the 4-row final phase (2 minting rows and their tool messages): %+v", boots, st)
 		}
 		if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
 			for _, v := range []string{a, b} {
@@ -800,5 +800,81 @@ func TestScrubChatCredentialsFinalPhaseIsNeverSplitDefaultBudget(t *testing.T) {
 	}
 	if multi == 0 {
 		t.Fatal("no run exhausted the default budget in the first boot")
+	}
+}
+
+// A later batch's succeeded minting result is malformed JSON. An earlier batch
+// may already have rewritten the text of its tool message, so it no longer equals
+// the audit result: the tool message is correlated by call id and replaced
+// wholesale with the audit row, and no plaintext remains when the marker is set.
+func TestScrubChatCredentialsMalformedResultToolMessageByCallID(t *testing.T) {
+	for _, batch := range []int{1, 50} {
+		t.Run(fmt.Sprintf("batch%d", batch), func(t *testing.T) {
+			db := newTestDB(t)
+			setScrubBudget(t, batch, 10000, 10000)
+			a, b := secretOf(13), secretOf(14)
+			seedChatCall(t, db, scrubSeed{"m", "a", "create_api_key", `{"key":"` + a + `"}`}, "")
+			seedChatCall(t, db, scrubSeed{"m", "b", "create_webhook", `{"secret":"` + b + `"} trailing copy ` + a}, "")
+			resetScrub(t, db)
+			for boots := 0; db.GetSystemConfigString(chatScrubMarkerKey, "") != "true"; boots++ {
+				if boots > 20 {
+					t.Fatal("unfinished")
+				}
+				db.scrubChatCredentials()
+			}
+			text := chatText(t, db)
+			for _, v := range []string{a, b} {
+				if strings.Contains(text, v) {
+					t.Fatalf("plaintext %s remains with the marker set:\n%s", v[:9], text)
+				}
+			}
+			want := `"` + scrubPlaceholder + `"`
+			if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'b'`); got != want {
+				t.Fatalf("audit result = %s", got)
+			}
+			if got := column(t, db, `SELECT content FROM ai_messages WHERE conversation_id = 'm' AND role = 'tool' AND parts LIKE '%"b"%'`); got != want {
+				t.Fatalf("tool message = %s, want a wholesale replacement", got)
+			}
+		})
+	}
+}
+
+// Correlation by call id takes the first tool message after the requesting
+// assistant message, so a provider that reuses a call id elsewhere in the
+// conversation does not lose another call's message.
+func TestScrubChatCredentialsCallIDReuseDoesNotReachOtherMessages(t *testing.T) {
+	db := newTestDB(t)
+	secret := secretOf(15)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO ai_conversations (id) VALUES ('d')`)
+	part := `[{"type":"tool_result","call_id":"dup","status":"succeeded"}]`
+	msg := func(id, role, content, parts string, seq int) {
+		exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, 'd', ?, ?, ?, ?)`, id, role, content, parts, seq)
+	}
+	msg("a0", "assistant", "first call", "[]", 1)
+	msg("t0", "tool", `{"items":["keepme"]}`, part, 2) // an earlier call that used the same id
+	msg("a1", "assistant", "mint", "[]", 3)
+	bad := `{"key":"` + secret + `"} trailing`
+	msg("t1", "tool", bad, part, 4)
+	msg("a2", "assistant", "later", "[]", 5)
+	msg("t2", "tool", `{"items":["alsokeep"]}`, part, 6) // a later call that reuses the id
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, message_id, call_id, tool_name, args, result, status) VALUES ('mint','d','a1','dup','create_api_key','{}',?,'succeeded')`, bad)
+	resetScrub(t, db)
+	db.scrubChatCredentials()
+	if db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+		t.Fatal("not finished")
+	}
+	if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 't1'`); got != `"`+scrubPlaceholder+`"` {
+		t.Fatalf("the minting call's own tool message = %s", got)
+	}
+	for id, want := range map[string]string{"t0": `{"items":["keepme"]}`, "t2": `{"items":["alsokeep"]}`} {
+		if got := column(t, db, `SELECT content FROM ai_messages WHERE id = ?`, id); got != want {
+			t.Errorf("%s was altered through a reused call id: %s", id, got)
+		}
 	}
 }

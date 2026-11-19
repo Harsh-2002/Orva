@@ -162,17 +162,22 @@ const (
 )
 
 type mintRow struct {
-	rowid                                    int64
-	id, conversationID, tool, callID, status string
-	result                                   sql.NullString
+	rowid                                               int64
+	id, conversationID, tool, callID, messageID, status string
+	result                                              sql.NullString
 }
 
 // convWork is everything one conversation's pass needs, derived from freshly
 // read minting rows before any write of the batch.
 type convWork struct {
-	values []string           // longest first
-	mints  map[string]mintRow // audit row id -> row, those whose result changes
-	corr   []resultCorrelation
+	values []string            // longest first
+	mints  map[string]mintRow  // audit row id -> row, those whose result changes
+	corr   []resultCorrelation // content-equality fallback, used only without a call id
+	// toolMsgs maps the id of each minting call's own role=tool message (found by
+	// call id, after the call's assistant message) to the tool name. They are
+	// rewritten in the final step, from their current content: structurally if it
+	// parses, wholesale if it does not.
+	toolMsgs map[string]string
 }
 
 // resultCorrelation finds the role=tool message that stores a minting result.
@@ -244,11 +249,28 @@ func (db *Database) scrubChatBatch(cursor int64, pos *scrubPos, b *scrubBudget, 
 		st.minted++
 		w := work[r.conversationID]
 		if w == nil {
-			w = &convWork{mints: map[string]mintRow{}}
+			w = &convWork{mints: map[string]mintRow{}, toolMsgs: map[string]string{}}
 			work[r.conversationID] = w
 		}
 		w.mints[r.id] = r
-		w.corr = append(w.corr, resultCorrelation{orig: r.result.String, redacted: redacted, callPart: callIDPart(r.callID)})
+		// The tool message is correlated by call id, not by content: an earlier
+		// batch may already have rewritten its text, so it need not equal the
+		// audit result any more. Content equality is only the fallback for a call
+		// that has no call id.
+		target := ""
+		if r.callID != "" {
+			var err error
+			if target, err = findToolMessage(tx, r.conversationID, r.messageID, callIDPart(r.callID)); err != nil {
+				return batchResult{}, err
+			}
+			b.reads++
+			st.scanned++
+		}
+		if target != "" {
+			w.toolMsgs[target] = r.tool
+		} else {
+			w.corr = append(w.corr, resultCorrelation{orig: r.result.String, redacted: redacted, callPart: callIDPart(r.callID)})
+		}
 		if values, ok := onetime.Values(r.result.String, paths); ok {
 			for _, v := range values {
 				if len(v) >= chatScrubMinValueLen {
@@ -324,14 +346,14 @@ func fetchMintRows(tx *sql.Tx, cursor, hi int64, limit int, b *scrubBudget, st *
 	sort.Strings(names)
 	var all []mintRow
 	for _, name := range names {
-		rows, err := tx.Query(`SELECT rowid, id, conversation_id, tool_name, COALESCE(call_id,''), status, result
+		rows, err := tx.Query(`SELECT rowid, id, conversation_id, tool_name, COALESCE(call_id,''), COALESCE(message_id,''), status, result
 			FROM ai_tool_calls WHERE tool_name = ? AND rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`, name, cursor, hi, limit)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var r mintRow
-			if err := rows.Scan(&r.rowid, &r.id, &r.conversationID, &r.tool, &r.callID, &r.status, &r.result); err != nil {
+			if err := rows.Scan(&r.rowid, &r.id, &r.conversationID, &r.tool, &r.callID, &r.messageID, &r.status, &r.result); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -411,7 +433,7 @@ func (w *convWork) scrubConversation(tx *sql.Tx, conv string, start scrubPos, b 
 	// resume at this phase, which then always finishes. That resumed boot is the one
 	// place a bound can be exceeded, by at most this batch's minting rows.
 	forced := start.Phase == phaseFinal
-	k := len(w.mints)
+	k := len(w.mints) + len(w.toolMsgs)
 	if !forced && (b.readsLeft() < k || b.maxWrites-b.writes < k) {
 		return &scrubPos{Phase: phaseFinal}, nil
 	}
@@ -446,7 +468,7 @@ func (w *convWork) messagesPhase(tx *sql.Tx, conv string, after rowKey, b *scrub
 			got++
 			b.reads++
 			st.scanned++
-			if _, _, changed := w.message(role, content, parts); changed {
+			if _, _, changed := w.message(id, role, content, parts, false); changed {
 				cands = append(cands, messageCand{id: id, key: k, previous: prev})
 			}
 			prev = k
@@ -465,7 +487,7 @@ func (w *convWork) messagesPhase(tx *sql.Tx, conv string, after rowKey, b *scrub
 			if err != nil {
 				return nil, err
 			}
-			cn, p, changed := w.message(role, content, parts)
+			cn, p, changed := w.message(c.id, role, content, parts, false)
 			if !changed {
 				continue
 			}
@@ -552,7 +574,57 @@ func (w *convWork) finalPhase(tx *sql.Tx, b *scrubBudget, st *scrubStats) error 
 			return err
 		}
 	}
+	ids := make([]string, 0, len(w.toolMsgs))
+	for id := range w.toolMsgs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := w.rewriteToolMessage(tx, id, b, st); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// rewriteToolMessage re-reads a minting call's tool message and writes it with
+// its credential field redacted (the whole content if it is not valid JSON) and
+// the batch's values replaced.
+func (w *convWork) rewriteToolMessage(tx *sql.Tx, id string, b *scrubBudget, st *scrubStats) error {
+	var role, content, parts string
+	err := tx.QueryRow(`SELECT role, content, parts FROM ai_messages WHERE id = ?`, id).Scan(&role, &content, &parts)
+	b.reads++
+	st.scanned++
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	c, p, changed := w.message(id, role, content, parts, true)
+	if !changed {
+		return nil
+	}
+	if _, err := tx.Exec(`UPDATE ai_messages SET content = ?, parts = ? WHERE id = ?`, c, p, id); err != nil {
+		return err
+	}
+	b.writes++
+	st.rewritten++
+	return nil
+}
+
+// findToolMessage returns the first role=tool message carrying the call id after
+// the assistant message that requested the call: a provider that reuses a call
+// id later in the conversation does not reach another call's message.
+func findToolMessage(tx *sql.Tx, conv, assistantMsgID, callPart string) (string, error) {
+	var id string
+	err := tx.QueryRow(`SELECT id FROM ai_messages WHERE conversation_id = ?1 AND role = 'tool' AND instr(parts, ?2) > 0
+		AND seq > COALESCE((SELECT seq FROM ai_messages WHERE id = ?3), -1) ORDER BY seq, rowid LIMIT 1`,
+		conv, callPart, assistantMsgID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
 }
 
 // rewriteToolCall re-reads one tool call by id and writes the scrubbed copy.
@@ -581,8 +653,16 @@ func (w *convWork) rewriteToolCall(tx *sql.Tx, id string, b *scrubBudget, st *sc
 }
 
 // message computes one message's scrubbed content and parts.
-func (w *convWork) message(role, content, parts string) (string, string, bool) {
+func (w *convWork) message(id, role, content, parts string, final bool) (string, string, bool) {
 	c := content
+	if tool, own := w.toolMsgs[id]; own {
+		if !final {
+			return content, parts, false // rewritten with the minting rows, atomically
+		}
+		if red, ch := onetime.Redact(c, onetime.Fields[tool]); ch {
+			c = red
+		}
+	}
 	if role == "tool" {
 		for _, k := range w.corr {
 			if c == k.orig && (k.callPart == "" || strings.Contains(parts, k.callPart)) {

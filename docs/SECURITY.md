@@ -1059,16 +1059,17 @@ value once, as before.
 Credentials stored by earlier builds are scrubbed on a best-effort basis, starting
 on the first boot after upgrading (`chat_credential_scrub_done`). The value of
 each succeeded `create_api_key`, `create_webhook` or `create_inbound_webhook` call
-is replaced by the placeholder in the stored result and its tool message, and
+is replaced by the placeholder in the stored result and in the call's own tool
+message (found by call id; the whole message if it is not valid JSON), and
 exact copies (16+ characters) elsewhere in the same conversation are replaced too:
 inside the decoded strings of JSON columns, and in plain text only where the value
 stands alone (neighbours are not letters, digits, `_` or `-`). Failed calls supply
 no value and are not replaced wholesale, but an exact copy of a succeeded call's
 value inside one is scrubbed. Other conversations, rows without the value and JSON
 that does not parse are left as they are. Each boot reads and rewrites at most
-10,000 rows apiece (except that the minting calls' own results, at most 50 rows
-per batch, are always rewritten together, never split across boots, so the
-credential values are not lost mid-way) and resumes where it stopped, so a large
+10,000 rows apiece (except that the minting calls' own results and tool messages,
+at most 100 rows per batch, are always rewritten together, never split across
+boots, so the credential values are not lost mid-way) and resumes where it stopped, so a large
 history can take several boots. It cannot reach copies outside the database (logs, exports,
 backups, provider-side prompt logs), altered forms of a value (truncated,
 re-encoded, split) or a value too short to match safely. It does not promise that
