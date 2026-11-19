@@ -490,6 +490,33 @@ func TestManagedServingLive(t *testing.T) {
 		})
 	}
 	if cli := os.Getenv("ORVA_MANAGED_CLI"); cli != "" {
+		t.Run("slim-cli-runtime-discovery", func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			env := append(os.Environ(), "ORVA_CONFIG="+configPath, "ORVA_ENDPOINT=", "ORVA_API_KEY=")
+			login := func(key string) ([]byte, error) {
+				cmd := exec.CommandContext(ctx, cli, "login", "--endpoint", listener.URL, "--api-key", "-", "--test")
+				cmd.Env = env
+				cmd.Stdin = strings.NewReader(key)
+				return cmd.CombinedOutput()
+			}
+			if out, err := login("orva_invalid_fixture"); err == nil || !bytes.Contains(out, []byte("credentials rejected")) {
+				t.Fatalf("CLI did not reject invalid credentials: %v", err)
+			}
+			if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+				t.Fatalf("failed login unexpectedly touched config: %v", err)
+			}
+			if out, err := login(fixtureKey); err != nil || bytes.Contains(out, []byte("too old to verify")) {
+				t.Fatalf("CLI did not verify valid credentials: %v", err)
+			}
+			cmd := exec.CommandContext(ctx, cli, "__complete", "deploy", "--runtime", "")
+			cmd.Env = env
+			out, err := cmd.Output()
+			managedMust(t, err)
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if len(lines) != 3 || lines[0] != "node" || lines[1] != "python" || !strings.HasPrefix(lines[2], ":") {
+				t.Fatalf("expected node and python completion results")
+			}
+		})
 		t.Run("slim-cli", func(t *testing.T) {
 			cmd := exec.CommandContext(ctx, cli, "iam", "permissions", "get", node.ID, "--output", "json")
 			cmd.Env = append(os.Environ(), "ORVA_ENDPOINT="+listener.URL, "ORVA_API_KEY="+fixtureKey)

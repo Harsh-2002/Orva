@@ -114,6 +114,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
+	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
 	mountManagedAccess(mux, db, ops)
 	mountManagedWebhooks(mux, db, ops)
@@ -226,9 +227,10 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 }
 
 // mountManagedObservability mounts traces, the activity feed, the SSE event
-// stream and the system endpoints with the legacy permission tiers: read for
-// views, admin for storage and vacuum. Health and the Prometheus /metrics alias
-// stay unauthenticated, as on the legacy router, for probes and scrapers.
+// stream, the system endpoints and the static runtime/syscall inventory with
+// the legacy permission tiers: read for views, admin for storage and vacuum.
+// Health and the Prometheus /metrics alias stay unauthenticated, as on the
+// legacy router, for probes and scrapers.
 func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *registry.Registry, manager *pool.Manager,
 	dataDir string, ops *managedRouteDeps,
 ) {
@@ -260,6 +262,13 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		gateRoute(mux, db, ops, "GET /api/v1/system/storage", managedAdmin, storage.GetStorage)
 		gateRoute(mux, db, ops, "POST /api/v1/system/vacuum", managedAdmin, storage.Vacuum)
 	}
+	// Static inventory only: no owner, artifact or dispatch. `orva login --test`
+	// probes /api/v1/runtimes before saving a key and shell completion lists
+	// runtimes, so both must answer here at the legacy read tier.
+	runtime := &handlers.RuntimeHandler{}
+	gateRoute(mux, db, ops, "GET /api/v1/runtimes", managedRead, runtime.List)
+	syscalls := &handlers.SyscallHandler{}
+	gateRoute(mux, db, ops, "GET /api/v1/syscalls", managedRead, syscalls.List)
 }
 
 // mountManagedAccess mounts API keys, OAuth connected applications, browser

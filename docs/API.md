@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  66 and 22 respectively. Channel credentials are accepted at `/mcp` and expose
+  69 and 23 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -58,6 +58,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
 | Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
 | Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
 | | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |
@@ -708,6 +709,15 @@ Operator-facing function resources use the normal API-key/session auth:
 - `GET|POST /api/v1/functions/{id}/cron`
 - `PUT|DELETE /api/v1/functions/{id}/cron/{schedule_id}`
 - `GET /api/v1/cron` — list schedules across all functions.
+
+The managed listener also exposes the five fixture CRUD routes above. Use a
+function name or UUID for `{id}`. `GET` requires `read`; `POST`, `PUT`, and
+`DELETE` require `write`. Saving a fixture stores a request preset without
+invoking the function. Managed MCP and Chat share `list_fixtures` (`read`),
+`save_fixture` and `delete_fixture` (both `write`). Each tool rechecks the
+operator's live credential and required tier before accessing stored presets,
+including for inactive functions. `test_function_with_fixture` is not available
+in managed MCP or Chat.
 
 KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
 JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are
