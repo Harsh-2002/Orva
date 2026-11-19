@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
@@ -194,6 +195,20 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	b.DB = db
 	fw := firewall.NewManager(db, in.dataDir)
 	b.SetEgressPolicy(fw.EgressPolicy)
+	// Every managed egress spawn resolves its policy from this same manager.
+	// Without this source the pool refuses each egress spawn with
+	// ErrEgressPolicyMissing, so the operator's rules would never be in force.
+	runtime.pool.SetEgressPolicy(fw.EgressPolicy)
+	// NSTUN loads its rules once at worker start, so a new generation only
+	// reaches warm managed workers when their egress pools are retired.
+	fw.SetOnPolicyChange(func(gen string) {
+		retired := runtime.pool.RetireEgressPools()
+		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
+		runtime.hub.Publish("firewall.policy_applied", map[string]any{
+			"generation":    gen,
+			"retired_pools": retired,
+		})
+	})
 	publication, err := builder.NewPublicationQueue(b, db, reg, authority, runtime.pool, sm, assets.Code, assets.Runtime)
 	if err != nil {
 		return nil, err

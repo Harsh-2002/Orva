@@ -292,6 +292,18 @@ func (m *Manager) TargetState(owner string, worker *sandbox.Worker) workloadiam.
 		FunctionID: owner, WorkerID: s.Identity.WorkerID, ArtifactRevision: s.Identity.ArtifactRevision}}
 }
 
+// egressPolicyForSpawn resolves the compiled policy an egress worker loads.
+// Fail-closed: a pool with no policy source never spawns an egress worker.
+func (m *Manager) egressPolicyForSpawn(networkMode string) (string, string, error) {
+	if networkMode != "egress" {
+		return "", "", nil
+	}
+	if m.tmpl.EgressPolicy == nil {
+		return "", "", sandbox.ErrEgressPolicyMissing
+	}
+	return m.tmpl.EgressPolicy()
+}
+
 func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sandbox.Worker, error) {
 	if m.closing.Load() || !g.active.Load() {
 		return nil, errPoolRetired
@@ -308,15 +320,9 @@ func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sand
 		return nil, errPoolRetired
 	}
 	facts, tmpl := g.factory.Resources(), m.tmpl
-	var policy, revision string
-	if facts.NetworkMode == "egress" {
-		if tmpl.EgressPolicy == nil {
-			return nil, sandbox.ErrEgressPolicyMissing
-		}
-		policy, revision, err = tmpl.EgressPolicy()
-		if err != nil {
-			return nil, err
-		}
+	policy, revision, err := m.egressPolicyForSpawn(facts.NetworkMode)
+	if err != nil {
+		return nil, err
 	}
 	if facts.SDK && tmpl.SDKHandler == nil {
 		return nil, errors.New("managed SDK host unavailable")
