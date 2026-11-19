@@ -55,13 +55,13 @@ unreleased range, and the sections below as the record for everything before it.
   the standard witness even if data is retained; the sealed stores then
   become unrecoverable on that host. New systemd units do not restart on 78.
 
-### Internal queued IAM publication (not activated)
+### Managed queued IAM publication
 
-- Adds explicit managed-store queued capture/publication and optional REST/MCP/
-  shared-AI adapters. Normal serving/boot remains unchanged; no public breaking
-  behavior is enabled. New output publishes inactive review-required DENY,
-  followed by separate fresh Factory installation and review. Legacy filesystem
-  mixing, dependencies/TypeScript, restore and automatic resume remain unqualified.
+- Managed REST and MCP use queued capture/publication, also shared by the
+  optional in-product AI adapter.
+  New output publishes inactive review-required DENY, followed by separate
+  fresh Factory installation and review. Legacy filesystem mixing and
+  automatic resume remain unsupported.
 
 ### Fixed
 
