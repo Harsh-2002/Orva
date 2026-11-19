@@ -2166,7 +2166,7 @@ roots and their descendants remain reserved for all methods. Inspect
 `route_published` separately from the stored mapping; after restore the mapping
 is inactive until a fresh, authorized CAS upsert.
 
-The managed catalog (`orva serve` managed mode, external MCP and Chat share it)
+The managed catalog (internal opt-in `StartManaged` composition; external MCP and Chat share it)
 adds eight tools over the same service and the same exact-CAS contract:
 READ `list_routes` (bounded, each row with decimal-string `version` and
 `published`, plus `truncated`), `list_inbound_webhooks` (exact owner
