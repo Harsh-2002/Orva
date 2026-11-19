@@ -8,7 +8,7 @@
 #
 # Builds both binaries fresh, walks every subcommand via `--help`, captures
 # leaf command paths, and diffs them. Server binary additionally has
-# serve/setup — those are filtered out before the diff.
+# serve, setup and managed enroll — those are filtered out before the diff.
 
 set -uo pipefail
 
@@ -89,18 +89,17 @@ enumerate_commands "$OUT/orva-server" "" 0 | sort -u > "$OUT/server.txt"
 slim_count=$(wc -l < "$OUT/slim.txt")
 server_count=$(wc -l < "$OUT/server.txt")
 [[ "$slim_count" -ge 50 ]] || die "enumerated only $slim_count slim CLI commands; help parser is incomplete"
-# The server binary adds exactly two top-level commands the slim CLI lacks:
-# serve and setup. (`init` was removed -- it wrote an orva.yaml nothing read
-# and pointed at a --config flag that does not exist.)
-[[ "$server_count" -ge $((slim_count + 2)) ]] || \
+# Check the exact host-only paths as well as the shared client commands.
+[[ "$server_count" -eq $((slim_count + 4)) ]] || \
     die "enumerated only $server_count server commands for $slim_count client commands"
 for required in activity deploy functions invoke login system upgrade; do
     grep -qx "$required" "$OUT/slim.txt" || die "required top-level command missing from snapshot: $required"
 done
 
-# Server has additional serve/setup top-level commands; strip them
-# before diffing so we compare the client-side surface only.
-grep -vE '^(serve|setup)( |$)' "$OUT/server.txt" > "$OUT/server-client-only.txt"
+for required in serve setup managed 'managed enroll'; do
+    grep -qx "$required" "$OUT/server.txt" || die "server-only command missing: $required"
+done
+grep -vxE 'serve|setup|managed|managed enroll' "$OUT/server.txt" > "$OUT/server-client-only.txt"
 
 log "slim CLI commands: $slim_count"
 log "server CLI commands (server-only filtered): $(wc -l < "$OUT/server-client-only.txt")"

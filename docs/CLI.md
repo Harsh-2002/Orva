@@ -1027,7 +1027,7 @@ a fully clean slate.
 
 The `orva` you install via `install-cli.sh` / `install-cli.ps1` is the
 **slim CLI build** — it can talk to any remote orvad, but it doesn't
-have `orva serve` or `orva setup`. Those live in the
+have `orva serve`, `orva setup`, or `orva managed enroll`. Those live in the
 server binary at `/opt/orva/bin/orva` after a `scripts/install.sh`
 deployment.
 
@@ -1039,7 +1039,7 @@ precedence between them.
 
 That matters only for the server-only subcommands: both binaries expose the
 same surface for talking to a remote server, so day-to-day behaviour is
-identical, but `serve` and `setup` exist only on the full server binary. Run
+identical, but `serve`, `setup` and `managed enroll` are server-only. Run
 `orva --help` if you are unsure which one you have — the slim CLI does not list
 them. The slim build is just smaller.
 
@@ -1050,6 +1050,7 @@ them. The slim build is just smaller.
 | Windows | ✅ (amd64, arm64) | ❌ |
 | Size | ~20 MB | ~55 MB |
 | `orva serve` | ❌ | ✅ |
+| `orva managed enroll` | ❌ | ✅ |
 | `orva setup` | ❌ | ✅ |
 | All other subcommands | ✅ | ✅ |
 
