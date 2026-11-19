@@ -213,6 +213,10 @@ func fileHash(ctx context.Context, p string, want stamp) (string, error) {
 }
 
 func scan(ctx context.Context, root string, limits Limits, reserved int64) (map[string]observed, error) {
+	return scanTree(ctx, root, limits, reserved, nil)
+}
+
+func scanTree(ctx context.Context, root string, limits Limits, reserved int64, check func(string, os.FileInfo) error) (map[string]observed, error) {
 	out := make(map[string]observed)
 	groups := make(map[inodeKey][]string)
 	var bytes int64
@@ -228,6 +232,11 @@ func scan(ctx context.Context, root string, limits Limits, reserved int64) (map[
 		info, err := os.Lstat(p)
 		if err != nil {
 			return ErrIntegrity
+		}
+		if check != nil {
+			if err := check(rel, info); err != nil {
+				return err
+			}
 		}
 		st := info.Sys().(*syscall.Stat_t)
 		before := metadata(st)

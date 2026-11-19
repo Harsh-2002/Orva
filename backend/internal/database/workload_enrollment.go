@@ -38,8 +38,10 @@ CREATE TABLE workload_enrollment_functions (
  revision_digest TEXT NOT NULL CHECK(length(revision_digest)=64),
  excluded INTEGER NOT NULL CHECK(excluded IN (0,1)),
  note TEXT NOT NULL
-);
-CREATE TABLE workload_enrollment_runtimes (
+);` + managedRuntimeSchema
+
+const managedRuntimeSchema = `
+CREATE TABLE IF NOT EXISTS workload_enrollment_runtimes (
  runtime TEXT PRIMARY KEY CHECK(runtime IN ('node','python')),
  generation TEXT NOT NULL CHECK(length(generation)=36)
 );`
@@ -227,10 +229,8 @@ func enrollLegacyFunctionTx(ctx context.Context, tx *sql.Tx, plan LegacyEnrollme
 	return appendIAMAudit(ctx, tx, &r, actor)
 }
 
-// RecordManagedRuntimeGenerations records the runtimes a fresh managed install
-// sealed, so serve finds them without an environment override. An existing
-// selection is preserved: re-running setup must never rebind a running
-// instance's runtime underneath it.
+// RecordManagedRuntimeGenerations fills missing selections under the outer
+// managed startup lock, after the caller has verified the sealed artifacts.
 func (db *Database) RecordManagedRuntimeGenerations(ctx context.Context, generations map[string]string) error {
 	if len(generations) == 0 {
 		return nil
@@ -240,15 +240,21 @@ func (db *Database) RecordManagedRuntimeGenerations(ctx context.Context, generat
 			return ErrManagedOwnerInvalid
 		}
 	}
-	tx, err := db.write.BeginTx(ctx, nil)
+	conn, err := db.write.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA synchronous=FULL`); err != nil {
+		return err
+	}
+	defer conn.ExecContext(context.Background(), `PRAGMA synchronous=NORMAL`)
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workload_enrollment_runtimes (
- runtime TEXT PRIMARY KEY CHECK(runtime IN ('node','python')),
- generation TEXT NOT NULL CHECK(length(generation)=36)
-)`); err != nil {
+	if _, err := tx.ExecContext(ctx, managedRuntimeSchema); err != nil {
 		return err
 	}
 	for runtime, generation := range generations {
@@ -261,8 +267,7 @@ func (db *Database) RecordManagedRuntimeGenerations(ctx context.Context, generat
 	return tx.Commit()
 }
 
-// LegacyEnrollmentRuntimes returns only explicit enrollment selections. Fresh
-// managed provisioning may supply its own runtime generations instead.
+// LegacyEnrollmentRuntimes returns the durable managed runtime selections.
 func (db *Database) LegacyEnrollmentRuntimes(ctx context.Context) (map[string]string, error) {
 	out := make(map[string]string)
 	var exists bool

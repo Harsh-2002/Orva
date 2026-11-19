@@ -71,21 +71,8 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 	db, _, err := recovery.StartBound(ctx, ownerID, func(ctx context.Context, db *database.Database) error {
 		return db.InitManagedServingSchemas(ctx)
 	}, func(ctx context.Context, db *database.Database) error {
-		defaults, err := db.LegacyEnrollmentRuntimes(ctx)
+		runtimes, err := managedRuntimeSelections(ctx, in, db)
 		if err != nil {
-			return err
-		}
-		runtimes := in.RuntimeGenerations
-		if len(defaults) != 0 {
-			runtimes = make(map[sandbox.Language]string, len(defaults)+len(in.RuntimeGenerations))
-			for lang, generation := range defaults {
-				runtimes[sandbox.Language(lang)] = generation
-			}
-			for lang, generation := range in.RuntimeGenerations {
-				runtimes[lang] = generation
-			}
-		}
-		if err := sealUnrecordedRuntimes(ctx, in, db, defaults, runtimes); err != nil {
 			return err
 		}
 		service, err = newManagedServer(ctx, db, managedServerInput{
@@ -116,44 +103,59 @@ func (s *ManagedInstance) Close(ctx context.Context) error {
 	return errors.Join(err, s.coordinator.Close())
 }
 
-// sealUnrecordedRuntimes makes a fresh managed install runnable: it seals each
-// installed runtime tree whose generation is neither recorded nor supplied, and
-// records it, so the next boot needs no environment override. A recorded
-// selection is never replaced — resealing would rebind a running instance's
-// runtime underneath its workers.
-func sealUnrecordedRuntimes(ctx context.Context, in ManagedOptions, db *database.Database,
-	recorded map[string]string, runtimes map[sandbox.Language]string,
-) error {
-	if in.RootfsDir == "" {
-		return nil
+func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *database.Database) (map[sandbox.Language]string, error) {
+	recorded, err := db.LegacyEnrollmentRuntimes(ctx)
+	if err != nil {
+		return nil, err
 	}
-	sealed := make(map[string]string)
+	var store *artifactfs.Store
+	sealed := make(map[string]string, 2)
 	for _, lang := range []sandbox.Language{sandbox.Node, sandbox.Python} {
-		if recorded[string(lang)] != "" || runtimes[lang] != "" {
+		if in.RootfsDir == "" || recorded[string(lang)] != "" || in.RuntimeGenerations[lang] != "" {
 			continue
 		}
 		tree, err := filepath.Abs(filepath.Join(in.RootfsDir, string(lang)))
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if _, err := os.Stat(tree); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Lstat(tree); errors.Is(err, fs.ErrNotExist) {
 			continue
 		} else if err != nil {
-			return err
+			return nil, err
 		}
-		bindings, err := in.Artifacts.Bindings(ctx)
-		if err != nil {
-			return err
+		if store == nil {
+			bindings, err := in.Artifacts.Bindings(ctx)
+			if err != nil {
+				return nil, err
+			}
+			store = bindings.Runtime
 		}
-		id, err := artifactfs.SealInstalledRuntime(ctx, bindings.Runtime, string(lang), tree)
+		id, err := artifactfs.SealInitialRuntime(ctx, store, string(lang), tree, func(root string) error {
+			return sandbox.CheckManagedRuntime(root, lang)
+		})
 		if err != nil {
-			return fmt.Errorf("seal %s runtime: %w", lang, err)
+			return nil, fmt.Errorf("seal installed %s runtime: %w", lang, err)
 		}
 		sealed[string(lang)] = id.Generation
-		runtimes[lang] = id.Generation
 	}
-	if len(sealed) == 0 {
-		return nil
+	if len(sealed) != 0 {
+		if err := db.RecordManagedRuntimeGenerations(ctx, sealed); err != nil {
+			return nil, fmt.Errorf("record sealed runtime generations: %w", err)
+		}
+		recorded, err = db.LegacyEnrollmentRuntimes(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return db.RecordManagedRuntimeGenerations(ctx, sealed)
+	runtimes := make(map[sandbox.Language]string, 2)
+	for lang, generation := range recorded {
+		runtimes[sandbox.Language(lang)] = generation
+	}
+	for lang, generation := range in.RuntimeGenerations {
+		runtimes[lang] = generation
+	}
+	if len(runtimes) == 0 {
+		return nil, errors.New("no sealed Node or Python runtime generation; install trusted rootfs trees with current adapters (without --skip-rootfs), then retry orva serve")
+	}
+	return runtimes, nil
 }
