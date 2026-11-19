@@ -51,6 +51,9 @@ class ManagedBuildStream {
   succeed(owner) {
     this.listeners.get('succeeded')({ data: JSON.stringify({ id: BUILD, function_id: owner, version: 3, status: 'succeeded' }) })
   }
+  fail(owner) {
+    this.listeners.get('failed')({ data: JSON.stringify({ id: BUILD, function_id: owner, status: 'failed', error_message: 'build failed' }) })
+  }
 }
 
 const h = vi.hoisted(() => ({
@@ -220,7 +223,11 @@ const settings = (revision, functionVersion = '1') => ({
     secret_entries: 1,
   },
 })
-const settingsAck = { data: { function_version: '2' } }
+const settingsExpected = {
+  function_version: '2', artifact_revision: '5', artifact_epoch: '3', generation: NEXT_GENERATION,
+  policy_revision: '6', authority_epoch: '4', approved_artifact: ARTIFACT,
+}
+const settingsAck = { data: { ...settingsExpected, review_required: true } }
 const secretExpected = {
   function_version: '2', artifact_revision: '5', artifact_epoch: '3', generation: NEXT_GENERATION,
   policy_revision: '7', authority_epoch: '4', approved_artifact: ARTIFACT,
@@ -642,6 +649,58 @@ describe('editor deploy in managed mode', () => {
     expect(body().textContent).toContain('Configuration changed elsewhere; reload to continue.')
   })
 
+  it.each(['submission', 'execution'])('offers exact settings installation after failed code %s, then separate review', async (failure) => {
+    const { editor } = await boot({ managed: true, autoBuild: false })
+    const submission = deferred()
+    editor.envVars = [{ key: 'EXISTING', value: 'changed' }]
+    h.post.mockReturnValueOnce(submission.promise)
+    const building = editor.runDeploy()
+    await settle()
+
+    expect(deployInlineCalls()).toHaveLength(1)
+    expect(byText('Install configuration')).toBeUndefined()
+    await editor.installManagedConfiguration()
+    expect(h.post).toHaveBeenCalledTimes(1)
+
+    if (failure === 'submission') {
+      submission.reject({ response: { status: 400, data: { error: { message: 'Build was not accepted' } } } })
+    } else {
+      submission.resolve({ data: { deployment_id: BUILD } })
+      await settle()
+      expect(byText('Install configuration')).toBeUndefined()
+      buildStream.fail('fn-a')
+    }
+    await building
+    await settle()
+
+    expect(body().textContent).toContain('Settings saved. Install configuration or retry the build.')
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]')).toBeNull()
+    editor.buildModalOpen = false
+    await nextTick()
+    h.post.mockResolvedValueOnce(installAck)
+    byText('Install configuration').click()
+    await settle()
+
+    expect(h.post.mock.calls[1]).toEqual([INSTALL_CONFIGURATION, { expected: settingsExpected }, { sensitive: true }])
+    expect(h.post).toHaveBeenCalledTimes(2)
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(configurationCalls()).toHaveLength(1)
+    expect(body().textContent).toContain('Configuration installed. Permissions review required.')
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]').textContent).toContain('Review permissions')
+  })
+
+  it('does not submit code or offer install for an unverified settings successor', async () => {
+    const { editor } = await boot({ managed: true })
+    editor.form.memory_mb = 128
+    h.put.mockResolvedValueOnce({ data: { ...settingsAck.data, artifact_epoch: '4' } })
+    await deploy()
+
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(h.post).not.toHaveBeenCalled()
+    expect(byText('Install configuration')).toBeUndefined()
+    expect(editor.buildError).toContain('Inspect the current configuration')
+  })
+
   it.each(['during load', 'after load'])('never pairs stale environment with settings expectations refreshed %s', async (when) => {
     const latest = settings(6, '2')
     const observation = deferred()
@@ -683,12 +742,16 @@ describe('editor deploy in managed mode', () => {
 
     await deploy()
     expect(editor.buildError).toBe('build submission failed')
+    expect(body().textContent).toContain('Check deployment history; build status is unverified.')
+    expect(byText('Install configuration')).toBeUndefined()
     await deploy()
 
     expect(putCalls('/functions/fn-a/configuration/settings')).toHaveLength(1)
     expect(deployInlineCalls()).toHaveLength(2)
     expect(configurationCalls()).toHaveLength(1)
     expect(editor.buildError).toBe('')
+    expect(byText('Install configuration')).toBeUndefined()
+    expect(byText('Install build')).toBeDefined()
 
     editor.form.memory_mb = 256
     await deploy()
@@ -846,6 +909,7 @@ describe('editor mutation ownership', () => {
     expect(editor.deploying).toBe(false)
     expect(editor.buildLogs).not.toContain('Updated function configuration')
     expect(editor.buildModalOpen).toBe(false)
+    expect(byText('Install configuration')).toBeUndefined()
   })
 
   it('deploys the original draft even when code and settings change while the PUT waits', async () => {

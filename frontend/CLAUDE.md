@@ -140,8 +140,11 @@ which violet is correct.
   choose **Install configuration**, then **Review permissions**. The editor
   installs only from the exact successor acknowledged by that write, not from
   a fresh guess; an install conflict clears the action and asks for a reload.
-  The receipt does not survive leaving the editor. Settings and deployment
-  publication retain their separate flow.
+  The receipt does not survive leaving the editor. A verified settings/env
+  publication uses the same exact install flow after a rejected submission or
+  failed build; a manual code retry does not repeat the settings PUT. While
+  the build is pending or unverified, no configuration install is shown.
+  A verified successful build replaces the receipt with its own install action.
 
 - Editor managed rollback promotes an exact deployment ID without restoring
   configuration. A verified inactive, review-required response offers explicit
