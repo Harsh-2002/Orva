@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"syscall"
 )
@@ -14,9 +15,13 @@ import (
 // It imports neither host capabilities nor set-id bits. Internal links are
 // preserved and independently verified by the normal runtime Seal profile.
 func SealInstalledRuntime(ctx context.Context, store *Store, owner, source string) (_ Identity, err error) {
-	if store == nil || store.boundKind != KindRuntime || !validOwner(KindRuntime, owner) {
+	if store == nil || store.binding == nil || store.boundKind != KindRuntime || !validOwner(KindRuntime, owner) {
 		return Identity{}, ErrInvalid
 	}
+	return sealInstalledRuntime(ctx, store, owner, source)
+}
+
+func sealInstalledRuntime(ctx context.Context, store *Store, owner, source string) (_ Identity, err error) {
 	resolved, err := filepath.EvalSymlinks(source)
 	if err != nil || !filepath.IsAbs(source) || resolved != source {
 		return Identity{}, errors.Join(ErrUnsupported, err)
@@ -27,13 +32,18 @@ func SealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	if err != nil {
 		return Identity{}, err
 	}
+	omitMissingRuntimeManuals(tree)
 	if err := checkLinks(KindRuntime, tree, limits); err != nil {
 		return Identity{}, err
 	}
 	if tree["."].entry.Type != TypeDirectory {
 		return Identity{}, ErrUnsupported
 	}
-	stage, err := store.Begin(ctx, maxRuntime)
+	var reserved int64 = 1
+	for _, item := range tree {
+		reserved += item.entry.Size
+	}
+	stage, err := store.Begin(ctx, reserved)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -108,6 +118,24 @@ func SealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	}
 	defer lease.Release()
 	return lease.Identity(), nil
+}
+
+var missingManualAlternative = regexp.MustCompile(`^/usr/share/man/man[1-9]/[A-Za-z0-9_.+-]+\.[1-9]\.gz$`)
+
+// Slim Debian-based images omit the manuals but retain update-alternatives'
+// documentation links. Drop only these inert dangling links from the copy;
+// everything else must pass the unchanged runtime verifier.
+func omitMissingRuntimeManuals(tree map[string]observed) {
+	for name, path := range tree {
+		e := path.entry
+		if e.Type == TypeSymlink && filepath.Dir(name) == "etc/alternatives" &&
+			filepath.Ext(name) == ".gz" && missingManualAlternative.MatchString(e.LinkTarget) {
+			parent := filepath.Dir(e.LinkTarget[1:])
+			if _, ok := tree[parent]; !ok {
+				delete(tree, name)
+			}
+		}
+	}
 }
 
 func copyInstalledRuntimeFile(from, to string, e Entry) error {
