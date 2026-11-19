@@ -734,9 +734,17 @@ Owner records, cgroup epochs, runtime rootfs trees or witness are exported.
 On the destination, stop all Orva writers and prepare a fresh, service-owned
 instance directory with locally installed Node/Python rootfs trees, current
 adapters, nsjail, and [delegated cgroups](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
-Independently provision B's external witness with
-`orva setup --managed-witness /private/b/witness`. Keep the archive outside the
-data directory and the witness outside the data and configured backup roots.
+Independently provision B's external witness. Run as the daemon user and set
+its location in the service environment if using a non-default path:
+
+```bash
+export ORVA_DATA_DIR=/srv/orva-b
+export ORVA_MANAGED_WITNESS_PATH=/private/b/witness
+orva setup --managed-witness "$ORVA_MANAGED_WITNESS_PATH"
+```
+
+Keep the archive outside the data directory and the witness outside the data
+and configured backup roots.
 You can start with an unopened provisioning marker, but not initialized Owner
 stores. Unset `ORVA_MANAGED_NODE_GENERATION` and
 `ORVA_MANAGED_PYTHON_GENERATION` so boot uses the newly sealed runtime IDs.
