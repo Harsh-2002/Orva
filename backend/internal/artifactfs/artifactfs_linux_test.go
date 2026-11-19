@@ -265,6 +265,39 @@ func TestManifestTampering(t *testing.T) {
 	}
 }
 
+func TestCodeSealNPMLinks(t *testing.T) {
+	for _, tc := range []struct {
+		name, target string
+		allow        bool
+	}{
+		{"package-bin", "../pkg/bin.js", true},
+		{"outside-dependencies", "../../handler.js", false},
+		{"chained-link", "../pkg/link.js", false},
+		{"directory", "../pkg", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t, testLimits())
+			st, p := begin(t, s, 100)
+			for _, d := range []string{"node_modules/.bin", "node_modules/pkg"} {
+				if err := os.MkdirAll(filepath.Join(p, d), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(t, filepath.Join(p, "handler.js"), "source")
+			write(t, filepath.Join(p, "node_modules/pkg/bin.js"), "bin")
+			for link, target := range map[string]string{"node_modules/pkg/link.js": "bin.js", "node_modules/.bin/pkg": tc.target} {
+				if err := os.Symlink(target, filepath.Join(p, link)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := sealManifest(t, st, KindCode, ids.New(), fixtureManifest(t, p))
+			if tc.allow && err != nil || !tc.allow && !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("allow=%v; seal error = %v", tc.allow, err)
+			}
+		})
+	}
+}
+
 func TestLinksAndSpecialFiles(t *testing.T) {
 	cases := []struct {
 		name, target string
