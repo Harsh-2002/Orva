@@ -41,6 +41,13 @@ type SystemHealthOutput struct {
 var startTime = time.Now()
 
 func registerSystemTools(rc *regCtx) {
+	registerSystemOpsTools(rc)
+	registerRuntimeTools(rc)
+}
+
+// registerSystemOpsTools is the instance-level health, metrics and storage set
+// shared with the managed catalog.
+func registerSystemOpsTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "system"
 	regAddTool(rc, permRead,
@@ -141,6 +148,9 @@ func registerSystemTools(rc *regCtx) {
 		},
 	)
 
+}
+
+func registerRuntimeTools(rc *regCtx) {
 	// ─── list_runtimes ──────────────────────────────────────────────
 	regAddTool(rc, permRead,
 		&mcpsdk.Tool{

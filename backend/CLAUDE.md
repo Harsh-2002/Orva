@@ -18,6 +18,9 @@ only valid exact associations; restore gets a deny evaluator before dispatch.
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. The authenticated final boot run selects same-boot exact fencing
 or typed epoch-and-parent removal, or a true kernel-cold opener.
+Managed Chat shares the managed MCP tool dependencies. Its instance-owned egress
+manager compiles before the listener opens and drains before SQLite closes.
+Missing policy denies provider traffic without disabling the Chat routes.
 Managed v2 downloads project source from exact current code leases. The
 offline restore command reseals under a fresh local Owner, commits rebinding
 and quarantine in staged SQLite, and publishes managed mode last. Same-Owner
@@ -32,6 +35,38 @@ Managed MCP/Chat route and inbound-webhook tools (`tools_managed_exposures_linux
 register only with `Deps.Triggers`, delegate to `workloadtrigger.Service` and share
 the exposure schema with `registerExposureTools`; the normal catalog is unchanged.
 Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
+
+Managed operator parity: `managedRoutesWithAsync` takes a final `*managedRouteDeps`
+(event `Hub`, managed `Metrics`, start time, nsjail path, one `InvalidateKey` and
+`InvalidateSession` closure shared by the REST handlers and `mcp.Deps`; nil is
+allowed). `newManagedRuntime` creates the hub and wires `reg.PublishEvent` and
+`invoke.PublishEvent`; `newManagedServer` calls `proxy.LoadCaptureConfig`, without
+which no request is ever captured and replay cannot work. Every route goes through
+`requireManagedOperator(db, tier, h)` with `managedRead`/`managedWrite`/
+`managedAdmin`, which must equal `requiredPermission` for the same method and path
+(`TestManagedRoutesRequireTheLegacyTier` pins representative routes); it calls
+`db.CheckOperatorPermission`, which checks exactly one permission against live
+rows. Do not reintroduce the old read-plus-admin boolean: services that need admin
+(deploy publication, creation, deletion, jobs, cron, IAM, history) enforce it at
+commit behind that front gate. `managedActivityMiddleware` wraps the dispatch with
+`loggerMiddleware`; authentication runs per handler, inside it, so the resolved
+actor reaches the row through a request-scoped `actorSlot` (set by
+`withActorOnly`, read by `ActorFromContext`). Adapters that authenticate themselves
+must use `managedActivityOperator`, not `managedOperator`, or their rows are
+anonymous. Replay is `ReplayHandler{Managed: true}`: it requires managed resources
+on the acquired worker, checks `AcceptsManagedVersion` against the current function
+version (`409 NOT_ACTIVE`) and takes the timeout from the Factory; the MCP
+`replay_execution` tool calls the same handler through `Deps.ReplayExecution`.
+`/api/v1/system/health` and `/metrics` stay unauthenticated like the normal router.
+`mcp.NewHandler` serves channel tokens in managed mode only when `Deps.Proxy` is
+set, and registers the ordinary invoke-only channel catalog, whose `invokeFunction`
+goes through `Proxy.Forward` and therefore the managed pool; managed never serves a
+non-`active` function from a prior code directory. `registerManagedOperationTools`
+shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools` and
+`registerKeyTools` with the normal catalog (73/28 unchanged; managed 69/23) and adds
+`list_activity`, `list_channels`, `get_channel` and `replay_execution`.
+Managed MCP and Chat share the DB-only `registerFixtureTools` with legacy mode,
+rechecking the live operator tier per call without registering fixture execution.
 Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation

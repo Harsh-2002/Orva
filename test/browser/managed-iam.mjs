@@ -218,7 +218,7 @@ async function checkViewport(page) {
 
 async function checkNavigation(page, mobile, name) {
   const nav = page.getByRole('navigation', { name: 'Main navigation' })
-  const items = ['Overview', 'Functions', 'Policies', 'Schedules', 'Jobs', 'Webhooks',
+  const items = ['Overview', 'Functions', 'Routes', 'Policies', 'Schedules', 'Jobs', 'Webhooks',
     'Invocations', 'Traces', 'Activity', 'Keys', 'Channels', 'Egress', 'Chat', 'Settings', 'Docs']
   const toggle = page.getByRole('button', { name: 'Open menu' })
   if (mobile) {

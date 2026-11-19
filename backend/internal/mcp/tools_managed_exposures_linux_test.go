@@ -311,22 +311,23 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 			}
 		}
 	}
+	legacyRegistry := BuildAgentRegistry(legacy, all)
 	for name := range want {
-		if BuildAgentRegistry(legacy, all).Get(name) == nil {
+		if legacyRegistry.Get(name) == nil {
 			t.Fatalf("onetime.Fields lists %s but no such tool is registered", name)
 		}
 	}
-	if BuildAgentRegistry(f.deps, all).Get("create_api_key") != nil {
-		t.Fatal("managed catalog unexpectedly mints API keys")
+	if BuildAgentRegistry(f.deps, all).Get("create_api_key") == nil {
+		t.Fatal("managed catalog cannot mint API keys")
 	}
 	_, ctx := f.key(t, `["read","write","admin"]`)
 	outputs := map[string]any{}
 	var err error
-	// create_api_key and create_webhook exist in the legacy catalog only.
-	if outputs["create_api_key"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
+	// create_webhook exists in the legacy catalog only.
+	if outputs["create_api_key"], err = legacyRegistry.Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	if outputs["create_webhook"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_webhook", []byte(`{"name":"w","url":"https://example.com/hook"}`)); err != nil {
+	if outputs["create_webhook"], err = legacyRegistry.Dispatch(ctx, "create_webhook", []byte(`{"name":"w","url":"https://example.com/hook"}`)); err != nil {
 		t.Fatal(err)
 	}
 	outputs["create_inbound_webhook"], err = f.call(ctx, all, "create_inbound_webhook", map[string]any{"function_id": f.owner, "name": "signed", "version": "0", "expected": f.expected()})

@@ -1089,10 +1089,16 @@ never returned by the API or echoed into the chat (asserted by the e2e
 suite). The system prompt also instructs the model never to print
 secret/key/token values it encounters while operating the instance.
 
-A provider's `base_url` is intentionally unrestricted (it may point at a
-local endpoint such as Ollama or LM Studio — a first-class homelab use
-case). Since configuring a provider is admin-only, the SSRF surface this
-opens is an admin-only one and is accepted by design.
+A provider's `base_url` is admin-configured and may point to a local endpoint
+such as Ollama or LM Studio. In managed mode both model discovery and chat
+turns require a compiled egress policy. A failed refresh retains the last
+compiled policy, not an unfiltered fallback. Model discovery makes direct
+connections and evaluates the actual dial address, including on redirects.
+Chat turns use Bifrost, which owns its transport: Orva checks resolved provider
+addresses once before the turn. An unknown endpoint or failed lookup does not
+prove a policy match. This is not dial-time enforcement against DNS changes
+and is not a substitute for network isolation. Existing Bifrost network
+restrictions and the policy's loopback exemption are unchanged.
 
 ## Layered isolation: what does and doesn't compose
 

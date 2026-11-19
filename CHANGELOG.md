@@ -28,6 +28,51 @@ unreleased range, and the sections below as the record for everything before it.
   dependencies; portable restore rebuilds them from the retained source and
   needs access to their registries.
 
+### Managed operator parity
+
+- The managed composition now mounts the operator surfaces the normal server
+  has: executions (list, get, logs, captured request, delete, bulk delete),
+  replay, traces, activity, the `/api/v1/events` stream, system health, metrics,
+  storage and vacuum, API keys, OAuth connected apps, browser sessions and
+  channels, and dashboard Chat. Health and `/metrics` stay unauthenticated,
+  as before.
+- Managed routes require exactly the permission the normal server requires:
+  `read` for GET, `write` for other methods, `admin` for keys, channels, the AI
+  assistant, backup, storage and vacuum. Deployment publication, creation,
+  deletion, jobs, cron, IAM and history still require live admin authority at
+  commit, so a key with only `write` is now admitted to those routes' front gate
+  and refused by the service. An `admin`-only key (no `read`) is accepted on
+  admin routes.
+- Replay runs only through the managed pool: the acquired Factory must match the
+  function's current version (`409 NOT_ACTIVE` otherwise) and supplies the
+  timeout. The managed server now loads the replay-capture setting at start, so
+  managed invocations store their request bodies (sensitive headers redacted);
+  set `replay_capture_enabled` to `0` to stop that.
+- Managed channel tokens are accepted at `/mcp` as an invoke-only catalog that
+  dispatches through managed admission. Admission is not approval: an installed
+  but unreviewed function still runs its handler (protected SDK operations stay
+  denied until review), so bundle only functions agents should be able to run.
+  The managed MCP and Chat catalog grows from 47/13 to 69/23 tools
+  (all-permissions / read-only key); it adds `replay_execution`,
+  `list_activity` and read-only `list_channels` and `get_channel`, and now
+  includes the API-key tools. The normal catalog is unchanged (73/28).
+- Managed MCP and Chat can list, save and delete saved request fixtures. Each
+  call rechecks live `read` or `write` permission. Running a fixture through
+  `test_function_with_fixture` remains unavailable in managed mode.
+- Managed Chat uses only the managed tool catalog. Model discovery and Chat
+  turns do not contact providers until the instance has a compiled egress
+  policy. Settings and conversation history remain available.
+- Eligible managed requests queue best-effort activity rows, attributed to the
+  key or session when resolved. Routine successful polling and feed requests
+  are excluded, and writer pressure can drop rows.
+- `invoke_function` and channel tools now return an error when the invocation
+  failed before any response was written, instead of an empty `200` result.
+  This applies to the normal server too.
+- Not yet on the managed composition: pool and firewall configuration, secrets,
+  KV, webhooks, runtimes and syscalls, account password change, and the
+  OAuth authorization server. `GET /api/v1/system/storage` reports the plain data
+  directory only, not sealed artifact stores.
+
 ### Upgrade notes
 
 - Managed backups use portable v2. Download with `orva backup download`

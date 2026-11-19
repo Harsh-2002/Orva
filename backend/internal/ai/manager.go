@@ -50,7 +50,8 @@ type Manager struct {
 	// egress is the operator's sandbox egress policy, applied to the daemon's
 	// own provider traffic. nil = unfiltered (tests, and any build that never
 	// wires it). Both fields are set once at boot; see SetEgressGuard.
-	egress firewall.Guard
+	egress      firewall.Guard
+	egressReady func() error
 	// providerHTTP is the guarded client for the model-catalog probe. Held so
 	// its connection pool is reused across probes rather than rebuilt per call.
 	providerHTTP *http.Client
@@ -153,8 +154,19 @@ func (m *Manager) SetEgressGuard(g firewall.Guard) {
 	m.providerHTTP = firewall.NewHTTPClient(g, firewall.SubsystemAIProviders, 15*time.Second)
 }
 
+// SetRequiredEgressGuard also refuses provider requests before policy is available.
+func (m *Manager) SetRequiredEgressGuard(g firewall.Guard, ready func() error) {
+	m.SetEgressGuard(g)
+	m.egressReady = ready
+	transport := m.providerHTTP.Transport.(*http.Transport)
+	// Check the actual provider address on every probe, including after a policy change.
+	transport.Proxy = nil
+	transport.DisableKeepAlives = true
+}
+
 // Close releases the LLM gateway pools.
 func (m *Manager) Close() {
+	m.providerHTTP.CloseIdleConnections()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.client != nil {
@@ -508,6 +520,11 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 // firewall.CheckEndpoint). An unknown endpoint is allowed rather than guessed —
 // inventing a destination would block turns the operator never blocked.
 func (m *Manager) checkProviderEgress(ctx context.Context, provider string) error {
+	if m.egressReady != nil {
+		if err := m.egressReady(); err != nil {
+			return err
+		}
+	}
 	if m.egress == nil || provider == "" {
 		return nil
 	}
@@ -920,6 +937,11 @@ type ModelInfo struct {
 // models plus a non-nil error string the UI can surface if the listing failed
 // (so the user can fall back to typing a model id).
 func (m *Manager) ProviderModels(id string) ([]ModelInfo, error) {
+	if m.egressReady != nil {
+		if err := m.egressReady(); err != nil {
+			return nil, err
+		}
+	}
 	cfg, err := m.db.GetProviderConfig(id)
 	if err != nil {
 		return nil, err

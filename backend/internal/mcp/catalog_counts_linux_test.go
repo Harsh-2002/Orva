@@ -28,6 +28,9 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 		DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 		AsyncEnabled: true, AsyncIAM: async, CronEnabled: true, CronIAM: async,
 		Triggers: new(workloadtrigger.Service),
+		// The serving composition always wires a replay path; without one the
+		// catalog silently omits replay_execution and the count is short by one.
+		ReplayExecution: func(http.ResponseWriter, *http.Request) {},
 	}
 	all := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
 	read := permSet{permRead: true}
@@ -42,8 +45,8 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 	}{
 		{"normal-admin", "orva_catalog_all_test", normal, all, "invoke_function", 73},
 		{"normal-read", "orva_catalog_read_test", normal, read, "list_functions", 28},
-		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 47},
-		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 13},
+		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 69},
+		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 23},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := NewHandler(tc.deps)
@@ -88,6 +91,13 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 			}
 			if tc.deps.ManagedServer && slices.Contains(external, "invoke_function") {
 				t.Fatal("managed catalog registered legacy invocation")
+			}
+			if tc.deps.ManagedServer {
+				// Replay is a WRITE tool: in both the external MCP and the Chat catalog
+				// (equal above) for a write-capable key, and absent for a read-only one.
+				if has := slices.Contains(external, "replay_execution"); has != tc.perms.Has(permWrite) {
+					t.Fatalf("replay_execution present=%v for perms %v", has, tc.perms)
+				}
 			}
 			if len(external) != tc.count {
 				t.Fatalf("catalog has %d tools, documented count %d", len(external), tc.count)
