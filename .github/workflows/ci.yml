@@ -318,7 +318,8 @@ jobs:
           python3 -m unittest discover -s backend/runtimes/test -p 'test_*.py'
 
       - name: go test
-        run: go test -count=1 -race ./...
+        # database alone runs ~14 min under -race; the 10 min default panics it.
+        run: go test -count=1 -race -timeout 30m ./...
 
       - name: go build (server binary)
         run: |

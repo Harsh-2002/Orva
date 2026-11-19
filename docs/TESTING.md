@@ -754,8 +754,10 @@ make test    # go test -count=1 ./...       — 23 s, all packages ok, zero skip
 ```
 
 **`make test` is not the CI command.** CI runs
-`go test -count=1 -race ./...` (2 m 14 s locally). A data race passes
-`make test` and reddens CI. Use the `-race` form before you claim green.
+`go test -count=1 -race -timeout 30m ./...`. The `database` package alone takes
+about 14 minutes under `-race`, so omit `-timeout` and Go's 10-minute default
+panics it. A data race passes `make test` and reddens CI. Use the `-race` form
+before you claim green.
 
 What this layer cannot tell you: anything involving nsjail, HTTP, the database
 on disk, the UI, the CLI as a shipped binary, or arm64.
