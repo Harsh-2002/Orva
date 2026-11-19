@@ -155,8 +155,7 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 			HTTPError(w, err)
 			return
 		}
-		ref, _ := auth.OperatorFromContext(r.Context())
-		rows, truncated, err := s.db.ListRouteExposures(r.Context(), ref)
+		rows, truncated, err := s.ListRoutes(r.Context())
 		if err != nil {
 			HTTPError(w, err)
 			return
@@ -196,8 +195,7 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 			HTTPError(w, database.ErrExposureInvalid)
 			return
 		}
-		ref, _ := auth.OperatorFromContext(r.Context())
-		rows, expected, truncated, err := s.db.ListInboundExposures(r.Context(), ref, r.PathValue("fn_id"))
+		rows, expected, truncated, err := s.ListInbound(r.Context(), r.PathValue("fn_id"))
 		if err != nil {
 			HTTPError(w, err)
 			return

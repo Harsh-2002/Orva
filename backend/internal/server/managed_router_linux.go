@@ -76,9 +76,11 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
 	var dispatch http.Handler = mux
+	var triggers *workloadtrigger.Service
 	if publication != nil {
 		if invoke != nil {
-			triggers, err := workloadtrigger.New(db, reg, authority)
+			var err error
+			triggers, err = workloadtrigger.New(db, reg, authority)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +131,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		}))
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
-			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history}
+			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
 		if chat != nil {
 			chat(mux, tools)

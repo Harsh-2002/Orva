@@ -82,6 +82,30 @@ func (s *Service) applyPrepared(ctx context.Context, ref database.OperatorCreden
 	return out, nil
 }
 
+// ListRoutes is the bounded READ-authorized mapping list shared by REST, MCP and AI.
+func (s *Service) ListRoutes(ctx context.Context) ([]database.RouteExposureRow, bool, error) {
+	if s == nil {
+		return nil, false, database.ErrExposureUnavailable
+	}
+	ref, ok := auth.OperatorFromContext(ctx)
+	if !ok {
+		return nil, false, database.ErrOperatorDenied
+	}
+	return s.db.ListRouteExposures(ctx, ref)
+}
+
+// ListInbound lists one exact-UUID owner's triggers with its CAS expectations.
+func (s *Service) ListInbound(ctx context.Context, owner string) ([]database.InboundExposureRow, map[string]database.ExposureOwnerExpected, bool, error) {
+	if s == nil {
+		return nil, nil, false, database.ErrExposureUnavailable
+	}
+	ref, ok := auth.OperatorFromContext(ctx)
+	if !ok {
+		return nil, nil, false, database.ErrOperatorDenied
+	}
+	return s.db.ListInboundExposures(ctx, ref, owner)
+}
+
 // Execute is the common strict boundary for REST, external MCP and shared AI.
 func (s *Service) Execute(ctx context.Context, op string, raw []byte) (map[string]any, error) {
 	if s == nil {

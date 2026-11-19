@@ -13,6 +13,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -26,6 +27,7 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 		Configuration: new(workloadconfig.Service), History: new(workloadhistory.Service),
 		DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 		AsyncEnabled: true, AsyncIAM: async, CronEnabled: true, CronIAM: async,
+		Triggers: new(workloadtrigger.Service),
 	}
 	all := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
 	read := permSet{permRead: true}
@@ -40,8 +42,8 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 	}{
 		{"normal-admin", "orva_catalog_all_test", normal, all, "invoke_function", 73},
 		{"normal-read", "orva_catalog_read_test", normal, read, "list_functions", 28},
-		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 39},
-		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 10},
+		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 47},
+		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 13},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := NewHandler(tc.deps)

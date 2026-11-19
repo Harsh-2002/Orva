@@ -22,6 +22,9 @@ func registerManagedServerTools(rc *regCtx) {
 	if rc.deps.CronEnabled && rc.deps.CronIAM != nil {
 		registerIAMCronTools(rc)
 	}
+	if rc.deps.Triggers != nil {
+		registerManagedExposureTools(rc)
+	}
 	if rc.deps.DeployIAM == nil {
 		return
 	}
