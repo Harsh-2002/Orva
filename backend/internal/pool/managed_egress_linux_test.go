@@ -29,7 +29,9 @@ func TestManagedEgressRotationRejectsLateSpawn(t *testing.T) {
 	}
 	limits := artifactfs.Limits{Generations: 3, Leases: 8, Staging: 1, Entries: 8,
 		PathBytes: 256, LinkBytes: 256, Bytes: 8192, FileBytes: 1024, ManifestBytes: 8192}
-	store, err := artifactfs.New(t.TempDir(), limits)
+	root := t.TempDir()
+	check(os.Chmod(root, 0700))
+	store, err := artifactfs.New(root, limits)
 	check(err)
 	t.Cleanup(func() { check(store.Close()) })
 	seal := func(kind artifactfs.Kind, owner string) string {

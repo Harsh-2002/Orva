@@ -30,7 +30,9 @@ func TestManagedFirewallPublicationPreservesInstalledFactories(t *testing.T) {
 	ctx := t.Context()
 	limits := artifactfs.Limits{Generations: 4, Leases: 8, Staging: 1, Entries: 8,
 		PathBytes: 256, LinkBytes: 256, Bytes: 8192, FileBytes: 1024, ManifestBytes: 8192}
-	store, err := artifactfs.New(t.TempDir(), limits)
+	root := t.TempDir()
+	managedMust(t, os.Chmod(root, 0700))
+	store, err := artifactfs.New(root, limits)
 	managedMust(t, err)
 	t.Cleanup(func() { managedMust(t, store.Close()) })
 	runtime := sealFirewallFixture(t, store, limits, artifactfs.KindRuntime, "node", "runtime")
