@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,6 +39,33 @@ func TestBackupWitnessExclusion(t *testing.T) {
 	}
 	if err := checkBackupPaths(witness.Name(), witness, []string{backupDir}, []string{filepath.Join(backupDir, "alias")}); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("witness alias: %v", err)
+	}
+}
+
+func TestWriteRetainedBuildSource(t *testing.T) {
+	root := t.TempDir()
+	source := []byte("original source bytes")
+	for name, body := range map[string][]byte{BuildSourceName: source, "compiled.js": []byte("generated")} {
+		if err := os.WriteFile(filepath.Join(root, name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := fixtureManifest(t, root)
+	l := &Lease{store: &Store{boundKind: KindCode, limits: Limits{Entries: 16, PathBytes: 4096, FileBytes: 4096, ManifestBytes: 4096, Bytes: 4096}},
+		rec: &record{reserved: 4096, durable: persistentRecord{Manifest: m}}, path: root, id: Identity{Kind: KindCode}}
+	var out bytes.Buffer
+	digest := fmt.Sprintf("%x", sha256.Sum256(source))
+	if err := l.WriteRetainedBuildSource(t.Context(), &out, digest); err != nil || !bytes.Equal(out.Bytes(), source) {
+		t.Fatalf("retained source = %q, %v", out.Bytes(), err)
+	}
+	if err := l.WriteRetainedBuildSource(t.Context(), io.Discard, fmt.Sprintf("%x", sha256.Sum256(nil))); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("incorrect association digest accepted: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "compiled.js"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WriteRetainedBuildSource(t.Context(), io.Discard, digest); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("changed tree accepted: %v", err)
 	}
 }
 

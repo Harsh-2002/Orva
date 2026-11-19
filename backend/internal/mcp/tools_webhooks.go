@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -211,7 +212,7 @@ func registerWebhookTools(rc *regCtx) {
 			sub.SecretPreview = secret[:8] + "…"
 			return nil, CreateWebhookOutput{Subscription: toSubscriptionView(sub), Secret: secret}, nil
 		},
-		withOneTimeResult("secret"),
+		withOneTimeResult(onetime.Fields["create_webhook"]...),
 	)
 
 	regAddTool(rc, permWrite,

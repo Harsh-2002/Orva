@@ -19,6 +19,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/ai/llm"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 )
 
 // maxRepeatedToolFailures is the loop-breaker budget: when the model re-issues
@@ -606,62 +607,8 @@ func emptyToObj(s string) string {
 }
 
 // RedactedPlaceholder replaces one-time credential fields in anything stored.
-const RedactedPlaceholder = "[redacted: shown once to the operator]"
+const RedactedPlaceholder = onetime.Placeholder
 
-// redactResult replaces each present sensitive path with the placeholder and
-// reports whether anything was replaced. A sensitive tool whose result is not
-// exactly one valid JSON value fails closed: the whole result is replaced.
-func redactResult(raw string, paths []string) (string, bool) {
-	if len(paths) == 0 {
-		return raw, false
-	}
-	// The whole result must be one valid JSON value: trailing bytes could hide a
-	// credential from the field walk below.
-	if !json.Valid([]byte(raw)) {
-		return mustJSON(RedactedPlaceholder), true
-	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var doc any
-	if err := dec.Decode(&doc); err != nil {
-		return mustJSON(RedactedPlaceholder), true
-	}
-	changed := false
-	for _, p := range paths {
-		if redactPath(doc, strings.Split(p, ".")) {
-			changed = true
-		}
-	}
-	if !changed {
-		return raw, false
-	}
-	b, err := json.Marshal(doc)
-	if err != nil {
-		return mustJSON(RedactedPlaceholder), true
-	}
-	return string(b), true
-}
-
-func redactPath(node any, path []string) bool {
-	switch n := node.(type) {
-	case []any:
-		changed := false
-		for _, el := range n {
-			if redactPath(el, path) {
-				changed = true
-			}
-		}
-		return changed
-	case map[string]any:
-		v, ok := n[path[0]]
-		if !ok {
-			return false
-		}
-		if len(path) == 1 {
-			n[path[0]] = RedactedPlaceholder
-			return true
-		}
-		return redactPath(v, path[1:])
-	}
-	return false
-}
+// redactResult is the shared onetime.Redact: a sensitive tool whose result is
+// not exactly one valid JSON value fails closed.
+func redactResult(raw string, paths []string) (string, bool) { return onetime.Redact(raw, paths) }

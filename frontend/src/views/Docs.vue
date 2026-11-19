@@ -1158,8 +1158,9 @@
             or sealed stores. On the stopped destination, run
             <code class="doc-chip">orva managed restore --archive FILE</code>
             to check the archive; add <code class="doc-chip">--confirm</code>
-            to rebuild it into a fresh local Owner. Review restored permissions
-            before re-enabling protected work.
+            to rebuild it into a fresh local Owner. The destination needs
+            access to any npm or pip registries used by the source. Review
+            restored permissions before re-enabling protected work.
           </p>
         </div>
       </div>

@@ -219,7 +219,7 @@ never been executed.
 ## 9. Must-not-break invariants
 
 - **SQLite migrations are additive-only** (`CREATE TABLE IF NOT EXISTS` + idempotent
-  `ALTER`), run on every boot. No `DROP`/destructive migrations. **Two carve-outs.**
+  `ALTER`), run on every boot. No `DROP`/destructive migrations. **Three carve-outs.**
   First, `migrate_to_uuidv7.go` rewrites primary keys and renames
   `<dataDir>/functions/<id>/` to match. Its child columns are derived from
   `PRAGMA foreign_key_list` — never hand-list them, that is how
@@ -234,7 +234,51 @@ never been executed.
   cleaned them up. It is one-shot behind `orphan_reclaim_done` in `system_config`,
   batched and capped so a huge table resumes next boot. **It must keep running
   inside `Migrate()`, before the async execution writer starts**; moving the call
-  site later turns a reclaim of dead rows into deletion of live ones.
+  site later turns a reclaim of dead rows into deletion of live ones. Third,
+  `scrubChatCredentials` (`database/ai_credential_scrub.go`) **rewrites** (never
+  drops) Chat history written before one-time credentials were redacted at the
+  source, best effort. Credential values are read only from succeeded
+  `create_api_key` / `create_webhook` / `create_inbound_webhook` calls (the shared
+  `onetime.Fields`). Their own result loses the credential field (wholesale if it
+  is not valid JSON). Nothing else is changed on a
+  name or a guess: a credential field in any other row, including the call's
+  correlated `ai_messages` role=`tool` message (the first one with its call id
+  after the assistant message that requested the call), is replaced only if its
+  current decoded value equals a credential taken from that conversation's
+  succeeded minting calls. When the call's result is malformed JSON no value can
+  be taken, so its tool message is replaced whole only if the correlation is
+  unambiguous (the requesting assistant message exists, exactly one audit row has
+  the call id in that turn, exactly one tool message has it before the next
+  assistant message, and its content is itself not valid JSON); otherwise it is
+  left untouched and only counted (logged at INFO as a count, never a value). With
+  no call id, content equality with the result is the only correlation. These
+  rewrites happen in the same atomic final step as the audit row. Within the same conversation the exact value (≥16 characters)
+  is also replaced in `ai_messages.content`/`parts`, `ai_tool_calls.args`/`result`
+  and `ai_conversations.title`: inside decoded string leaves of JSON columns
+  (re-marshalled, never patched as raw text; a JSON column that does not parse is
+  left alone) and, in plain text, only on token boundaries (neighbours outside
+  `[A-Za-z0-9_-]`). A failed call supplies no value and is never replaced
+  wholesale, but an exact copy of a value from a succeeded call inside its result
+  or arguments is scrubbed like any other copy. Rows without the value and other
+  conversations are not written. Each row is re-read immediately before it is
+  written. The pass is one-shot behind `chat_credential_scrub_done` and **hard
+  bounded per boot**: at most 10,000 rows read (every row a query returns,
+  including point re-reads and minting rows filtered in Go) and 10,000 rows
+  rewritten, floored at 16 reads and 1 write so every boot advances, checked
+  before every read and write. At a bound it commits what is done and persists
+  the minting-row cursor plus a conversation/phase/rowid position
+  (`chat_credential_scrub_pos`), so the next boot resumes there without rescanning
+  finished rows; a large history therefore takes several boots. The one exception
+  to the bound: the batch's own minting rows are the only record of the credential
+  values (they are never persisted elsewhere), so they are rewritten last and all
+  together. If the remaining budget cannot cover them the pass stops before
+  touching any, and the boot that resumes at that phase always finishes it, so a
+  boot can exceed either bound by at most that batch's minting rows and their tool
+  messages (≤ 100). It adds
+  `idx_ai_tc_tool` (additive). It exists because those credentials were stored
+  and re-sent to the model in clear; it does not guarantee that every copy is
+  gone. The list and paths are the single shared `onetime.Fields` that live Chat
+  redaction and the MCP registrations also read; a test fails if they drift.
 - `execution_requests`, `user_spans` and `execution_log_entries` have **no FK** to
   `executions` (intentional, for async insert ordering). The cascade is manual, via
   the single `executionChildTables` list, used by **both** `DeleteExecution` and

@@ -31,6 +31,9 @@ const router = createRouter({
         { path: '', name: 'dashboard', component: () => import('@/views/Dashboard.vue') },
         { path: 'ai', name: 'ai', component: () => import('@/views/AI.vue') },
         { path: 'functions', name: 'functions', component: () => import('@/views/FunctionsList.vue') },
+        // Managed-only: the router guard refuses this when the capability is
+        // absent, and ManagedRoutes re-checks it before drawing edit controls.
+        { path: 'routes', name: 'managed-routes', component: () => import('@/views/ManagedRoutes.vue'), meta: { managedIAM: true } },
         // props: true, not useRoute(), on every scoped view below: Layout.vue
         // keep-alives the router-view and Vue does not patch a cached
         // instance's props, so an off-screen view stops following the URL.

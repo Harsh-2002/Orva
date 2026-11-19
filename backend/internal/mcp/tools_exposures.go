@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -67,7 +68,7 @@ func registerExposureTools(rc *regCtx, routes bool) {
 		destructive := item.destructive
 		var opts []regOption
 		if item.op == "inbound_create" {
-			opts = append(opts, withOneTimeResult("secret"))
+			opts = append(opts, withOneTimeResult(onetime.Fields["create_inbound_webhook"]...))
 		}
 		regAddTool(rc, perm, &mcpsdk.Tool{Name: item.name,
 			Description: "Opt-in exact-CAS public exposure management. Inspect first. Live ADMIN required for either protected owner, WRITE for truly empty review-free owners. Does not change SDK authority, artifact approval or secrets. Delete requires confirm:true; webhook create returns its new signature secret once.",

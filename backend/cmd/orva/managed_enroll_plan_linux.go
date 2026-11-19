@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/backup"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/google/uuid"
@@ -197,7 +198,7 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		}
 	}()
 	if f.Runtime != "node" && f.Runtime != "python" {
-		f.reject("runtime is not plain Node or Python")
+		f.reject("runtime is not Node or Python")
 	}
 	if f.status != "active" || !enrollmentUUID(f.deployment) || !enrollmentDigest(f.CodeHash) {
 		f.reject("no current successful active deployment with a valid code hash")
@@ -230,8 +231,13 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 			fmt.Fprintf(h, "legacy-current:%q\n", link)
 		}
 	}
+	markers := make(map[string]bool)
 	for _, marker := range []string{"package.json", "requirements.txt", "node_modules", "tsconfig.json"} {
-		if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
+		if info, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
+			markers[marker] = true
+			if (marker == "node_modules" && !info.IsDir()) || (marker != "node_modules" && !info.Mode().IsRegular()) {
+				f.reject(marker + " is not a supported regular manifest or dependency directory")
+			}
 			if marker == "tsconfig.json" {
 				f.TypeScript = true
 			} else {
@@ -241,21 +247,65 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 			return err
 		}
 	}
-	if f.TypeScript || f.runEntrypoint != "" {
-		f.reject("managed builder does not support TypeScript or a compiled run entrypoint")
+	if (f.Runtime == "python" && (markers["package.json"] || markers["node_modules"] || markers["tsconfig.json"])) ||
+		(f.Runtime == "node" && markers["requirements.txt"]) {
+		f.reject("dependency manifests do not match the selected runtime")
 	}
-	if len(f.Dependencies) != 0 {
-		f.reject("managed builder does not support legacy dependency manifests or installed node_modules")
+	if markers["node_modules"] && !markers["package.json"] {
+		f.reject("node_modules exists without package.json; dependencies cannot be rebuilt")
 	}
 	ext := filepath.Ext(f.Entrypoint)
 	if !filepath.IsLocal(f.Entrypoint) || filepath.Clean(f.Entrypoint) != f.Entrypoint || f.Entrypoint == "." ||
 		strings.ContainsAny(f.Entrypoint, "\\\x00") || !utf8.ValidString(f.Entrypoint) ||
-		(f.Runtime == "node" && ext != ".js" && ext != ".cjs" && ext != ".mjs") ||
+		(f.Runtime == "node" && ext != ".js" && ext != ".cjs" && ext != ".mjs" && ext != ".ts") ||
 		(f.Runtime == "python" && ext != ".py") {
-		f.reject("entrypoint is not a supported relative .js, .cjs, .mjs or .py file")
+		f.reject("entrypoint is not a supported relative .js, .cjs, .mjs, .ts or .py file")
 	}
 	if f.network != "" && f.network != "none" {
 		f.reject("managed serving does not provision legacy egress")
+	}
+	var outDir string
+	if f.Reason == "" && f.TypeScript {
+		switch {
+		case !markers["tsconfig.json"]:
+			f.reject("TypeScript requires tsconfig.json")
+		case !markers["package.json"]:
+			f.reject("TypeScript requires package.json with a declared typescript dependency")
+		default:
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				return err
+			}
+			var run string
+			outDir, run, err = builder.ManagedTypeScriptOutput(root, f.Entrypoint)
+			root.Close()
+			switch {
+			case err != nil:
+				f.reject(err.Error())
+			case outDir == "." || strings.HasPrefix(f.Entrypoint, outDir+"/") ||
+				outDir == "node_modules" || strings.HasPrefix(outDir, "node_modules/"):
+				f.reject("TypeScript output must be in a separate project directory for enrollment")
+			case f.runEntrypoint != "" && f.runEntrypoint != run:
+				f.reject("legacy TypeScript run entrypoint does not match the compiler output path")
+			default:
+				if info, err := os.Lstat(filepath.Join(dir, outDir)); err != nil || !info.IsDir() {
+					f.reject("legacy TypeScript output directory is missing or not a directory")
+				}
+			}
+		}
+	} else if f.runEntrypoint != "" && f.runEntrypoint != f.Entrypoint {
+		f.reject("non-TypeScript deployment has a different legacy run entrypoint")
+	}
+	var pipFiles map[string]bool
+	if f.Reason == "" && markers["requirements.txt"] {
+		var err error
+		pipFiles, err = enrolledPipFiles(ctx, dir, f.Entrypoint)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			f.reject(err.Error())
+		}
 	}
 	out, err := os.OpenFile(f.archive(scratch), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -286,6 +336,15 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 			return err
 		}
 		fmt.Fprintf(h, "%q:%d:%d:%d:%d:%d:%d\n", rel, stat.Mode, stat.Size, stat.Nlink, stat.Ino, stat.Ctim.Sec, stat.Ctim.Nsec)
+		generated := (rel == ".orva-ready" && info.Mode().IsRegular()) || (rel == "node_modules" && markers["package.json"]) ||
+			(outDir != "" && rel == outDir) || pipFiles[rel] ||
+			(f.Runtime == "python" && filepath.Base(rel) == "__pycache__")
+		if generated {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		entries++
 		if entries >= 16384 {
 			f.reject("source tree exceeds managed builder entry bounds")
@@ -295,6 +354,9 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		}
 		if len(rel) > 4096 || !utf8.ValidString(rel) || strings.ContainsAny(rel, "\\\x00") || strings.HasPrefix(rel, "..") {
 			f.reject("source tree contains an unsupported path")
+		}
+		if rel == artifactfs.BuildSourceName || strings.HasPrefix(rel, artifactfs.BuildSourceName+"/") {
+			f.reject("source tree contains the reserved managed build-source path")
 		}
 		if !d.IsDir() && (!info.Mode().IsRegular() || stat.Nlink != 1) {
 			f.reject("source tree contains links or special files")
