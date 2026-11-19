@@ -43,12 +43,18 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	DownloadBackup(w, r, h.DB, h.Cfg.Data.Dir, func(_ context.Context, dst io.Writer, snapshot string) error {
+	downloadBackup(w, r, h.DB, h.Cfg.Data.Dir, false, func(_ context.Context, dst io.Writer, snapshot string) error {
 		return backup.ArchiveTo(dst, h.Cfg.Data.Dir, snapshot)
 	})
 }
 
-func DownloadBackup(w http.ResponseWriter, r *http.Request, db *database.Database, dataDir string,
+func DownloadManagedBackup(w http.ResponseWriter, r *http.Request, db *database.Database, dataDir string,
+	writeArchive func(context.Context, io.Writer, string) error,
+) {
+	downloadBackup(w, r, db, dataDir, true, writeArchive)
+}
+
+func downloadBackup(w http.ResponseWriter, r *http.Request, db *database.Database, dataDir string, managed bool,
 	writeArchive func(context.Context, io.Writer, string) error,
 ) {
 	tmp, err := os.CreateTemp(dataDir, "snapshot-*.db")
@@ -78,8 +84,16 @@ func DownloadBackup(w http.ResponseWriter, r *http.Request, db *database.Databas
 	// Disable any intermediate buffering proxies might do.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
+	if !managed {
+		_ = writeArchive(r.Context(), w, tmpPath)
+		return
+	}
 	tracked := &archiveResponse{ResponseWriter: w}
-	if err := writeArchive(r.Context(), tracked, tmpPath); err != nil && !tracked.started {
+	if err := writeArchive(r.Context(), tracked, tmpPath); err != nil {
+		if tracked.started {
+			// Signal an incomplete HTTP body so the client cannot report Saved.
+			panic(http.ErrAbortHandler)
+		}
 		w.Header().Del("Content-Disposition")
 		respond.Error(w, http.StatusInternalServerError, "BACKUP_FAILED", "Could not prepare backup", "")
 	}

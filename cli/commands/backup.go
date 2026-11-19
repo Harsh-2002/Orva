@@ -23,10 +23,9 @@ var backupCmd = &cobra.Command{
 	Short: "Download or restore a point-in-time snapshot",
 	Long: `Download a complete snapshot of the running Orva instance, or restore one.
 
-A snapshot is a single gzip-tar containing the SQLite database, every
-deployed function version, the secrets master key, and the bootstrap
-admin API key — exactly what's behind the Settings → Backup & Restore
-card in the dashboard.`,
+A snapshot contains SQLite and available instance keys in a gzip-tar.
+Legacy snapshots include deployed versions; managed snapshots include current
+authored source but not sealed stores or the host witness.`,
 }
 
 var backupDownloadCmd = &cobra.Command{
@@ -41,16 +40,16 @@ in the current directory. Override with --file / -f.`,
 
 var backupRestoreCmd = &cobra.Command{
 	Use:   "restore [archive]",
-	Short: "Restore a snapshot into the connected Orva instance",
+	Short: "Restore a legacy snapshot into the connected Orva instance",
 	Long: `Restore a snapshot previously produced by ` + "`orva backup download`" + `
 (or the dashboard's "Download backup" button).
 
-The server stops accepting new requests, verifies every file's sha256
-against the archive's manifest, performs an atomic swap of the live
-database + keys + function code trees, then exits so the supervisor
-(systemd / docker restart: unless-stopped) reopens the new files. The
-caller's connection is reset mid-stream — that's expected. Wait ~5s
-and reconnect.`,
+Managed archives must be restored offline with the server binary's
+orva managed restore command.
+
+After verifying the archive, the legacy server replaces the database,
+keys and function code, then exits so the supervisor reopens the files.
+Wait a few seconds and reconnect.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runBackupRestore,
 }
@@ -88,11 +87,7 @@ func runBackupDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("backup failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	// 0600, not os.Create's 0666&^umask. This archive contains the SQLite
-	// database, every deployed function version, the secrets master key and
-	// the bootstrap admin API key -- the command's own help text says so.
-	// World-readable on a shared jump host or CI runner hands all of that to
-	// every local user. O_EXCL also makes the clobber check above atomic.
+	// The archive contains credential material; never make it world-readable.
 	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err

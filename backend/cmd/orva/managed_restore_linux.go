@@ -131,10 +131,18 @@ func restoreManaged(ctx context.Context, dir, archive string, confirm, sameOwner
 	if err != nil {
 		return err
 	}
+	return publishPortableRestore(ctx, intent, scratch, step, func() error {
+		return rebuildPortable(ctx, root, nsjail, intent, stage, runtimes, step)
+	})
+}
+
+func publishPortableRestore(ctx context.Context, intent *servingmode.PortableRestore, scratch string,
+	step func(string) error, rebuild func() error,
+) error {
 	if err := step("intent"); err != nil {
 		return err
 	}
-	if err := rebuildPortable(ctx, root, nsjail, intent, stage, runtimes, step); err != nil {
+	if err := rebuild(); err != nil {
 		return fmt.Errorf("portable restore incomplete: %w", err)
 	}
 	if err := step("owner_closed"); err != nil {

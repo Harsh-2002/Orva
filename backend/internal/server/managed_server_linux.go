@@ -190,7 +190,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	}
 	handler, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, configuration, publication, in.dataDir,
 		runtime.invoke, runtime.async, mountChat, func(w http.ResponseWriter, r *http.Request) {
-			handlers.DownloadBackup(w, r, db, in.dataDir, func(ctx context.Context, dst io.Writer, snapshot string) error {
+			handlers.DownloadManagedBackup(w, r, db, in.dataDir, func(ctx context.Context, dst io.Writer, snapshot string) error {
 				stage, err := os.MkdirTemp(in.dataDir, "snapshot-sources-")
 				if err != nil {
 					return err
