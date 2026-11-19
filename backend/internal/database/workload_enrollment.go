@@ -227,6 +227,40 @@ func enrollLegacyFunctionTx(ctx context.Context, tx *sql.Tx, plan LegacyEnrollme
 	return appendIAMAudit(ctx, tx, &r, actor)
 }
 
+// RecordManagedRuntimeGenerations records the runtimes a fresh managed install
+// sealed, so serve finds them without an environment override. An existing
+// selection is preserved: re-running setup must never rebind a running
+// instance's runtime underneath it.
+func (db *Database) RecordManagedRuntimeGenerations(ctx context.Context, generations map[string]string) error {
+	if len(generations) == 0 {
+		return nil
+	}
+	for runtime, generation := range generations {
+		if (runtime != "node" && runtime != "python") || !validManagedOwnerID(generation) {
+			return ErrManagedOwnerInvalid
+		}
+	}
+	tx, err := db.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workload_enrollment_runtimes (
+ runtime TEXT PRIMARY KEY CHECK(runtime IN ('node','python')),
+ generation TEXT NOT NULL CHECK(length(generation)=36)
+)`); err != nil {
+		return err
+	}
+	for runtime, generation := range generations {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO workload_enrollment_runtimes(runtime,generation) VALUES(?,?)
+			 ON CONFLICT(runtime) DO NOTHING`, runtime, generation); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // LegacyEnrollmentRuntimes returns only explicit enrollment selections. Fresh
 // managed provisioning may supply its own runtime generations instead.
 func (db *Database) LegacyEnrollmentRuntimes(ctx context.Context) (map[string]string, error) {

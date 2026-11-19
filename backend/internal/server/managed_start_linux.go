@@ -5,7 +5,11 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
@@ -24,6 +28,11 @@ type ManagedOptions struct {
 	Output             builder.OutputConfig
 	RuntimeGenerations map[sandbox.Language]string
 	ChatGuard          firewall.Guard
+	// RootfsDir holds the installed per-language runtime trees. When a
+	// language has no recorded generation yet, startup seals its tree into the
+	// runtime store and records the generation, so a fresh managed install can
+	// run functions without an environment override. Empty disables sealing.
+	RootfsDir string
 }
 
 // ManagedInstance owns the managed listener's recovery lock and database.
@@ -76,6 +85,9 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 				runtimes[lang] = generation
 			}
 		}
+		if err := sealUnrecordedRuntimes(ctx, in, db, defaults, runtimes); err != nil {
+			return err
+		}
 		service, err = newManagedServer(ctx, db, managedServerInput{
 			artifacts: in.Artifacts, output: in.Output, runtimeGenerations: runtimes,
 			dataDir: recovery.DataDir(), nsjail: in.NsjailBin, chatGuard: in.ChatGuard,
@@ -102,4 +114,46 @@ func (s *ManagedInstance) Close(ctx context.Context) error {
 	err := s.database.Close()
 	s.database = nil
 	return errors.Join(err, s.coordinator.Close())
+}
+
+// sealUnrecordedRuntimes makes a fresh managed install runnable: it seals each
+// installed runtime tree whose generation is neither recorded nor supplied, and
+// records it, so the next boot needs no environment override. A recorded
+// selection is never replaced — resealing would rebind a running instance's
+// runtime underneath its workers.
+func sealUnrecordedRuntimes(ctx context.Context, in ManagedOptions, db *database.Database,
+	recorded map[string]string, runtimes map[sandbox.Language]string,
+) error {
+	if in.RootfsDir == "" {
+		return nil
+	}
+	sealed := make(map[string]string)
+	for _, lang := range []sandbox.Language{sandbox.Node, sandbox.Python} {
+		if recorded[string(lang)] != "" || runtimes[lang] != "" {
+			continue
+		}
+		tree, err := filepath.Abs(filepath.Join(in.RootfsDir, string(lang)))
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(tree); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		bindings, err := in.Artifacts.Bindings(ctx)
+		if err != nil {
+			return err
+		}
+		id, err := artifactfs.SealInstalledRuntime(ctx, bindings.Runtime, string(lang), tree)
+		if err != nil {
+			return fmt.Errorf("seal %s runtime: %w", lang, err)
+		}
+		sealed[string(lang)] = id.Generation
+		runtimes[lang] = id.Generation
+	}
+	if len(sealed) == 0 {
+		return nil
+	}
+	return db.RecordManagedRuntimeGenerations(ctx, sealed)
 }
