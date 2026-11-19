@@ -200,7 +200,7 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func (j *outputJob) attachSource(ctx context.Context) error {
+func (j *outputJob) attachSource(ctx context.Context, sourceHash string) error {
 	f, err := os.Open(j.source)
 	if err != nil {
 		return err
@@ -213,8 +213,15 @@ func (j *outputJob) attachSource(ctx context.Context) error {
 	if err := dst.Chmod(0600); err != nil {
 		return errors.Join(err, dst.Close())
 	}
-	_, err = outputCopy(ctx, dst, f, j.owner.cfg.Limits.FileBytes)
-	return errors.Join(err, dst.Close())
+	hash := sha256.New()
+	_, err = outputCopy(ctx, io.MultiWriter(dst, hash), f, j.owner.cfg.Limits.FileBytes)
+	if err := errors.Join(err, dst.Close()); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != sourceHash {
+		return artifactfs.ErrIntegrity
+	}
+	return nil
 }
 
 type outputContextReader struct {

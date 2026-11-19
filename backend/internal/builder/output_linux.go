@@ -456,7 +456,7 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := j.attachSource(ctx); err != nil {
+	if err := j.attachSource(ctx, sourceHash); err != nil {
 		return nil, fmt.Errorf("attach original build source: %w", err)
 	}
 	manifest, digest, err := j.produce(ctx)

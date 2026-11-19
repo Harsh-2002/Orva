@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -88,6 +89,37 @@ func TestManagedOutputExtractionBounds(t *testing.T) {
 			}
 			if _, _, err := j.produce(t.Context()); err == nil {
 				t.Fatal("unfenced stage admitted to manifest production")
+			}
+		})
+	}
+}
+
+func TestAttachSourceVerifiesExtractedArchive(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("changed=%t", changed), func(t *testing.T) {
+			const input = "original archive"
+			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: artifactfs.Limits{FileBytes: 1024}}},
+				path: t.TempDir(), source: filepath.Join(t.TempDir(), "archive")}
+			body := input
+			if changed {
+				body = "modified archive"
+			}
+			if err := os.WriteFile(j.source, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := j.attachSource(t.Context(), fmt.Sprintf("%x", sha256.Sum256([]byte(input))))
+			if changed {
+				if !errors.Is(err, artifactfs.ErrIntegrity) {
+					t.Fatalf("attached changed input: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(j.path, artifactfs.BuildSourceName))
+			if err != nil || string(got) != input {
+				t.Fatalf("attached archive: %q, %v", got, err)
 			}
 		})
 	}
