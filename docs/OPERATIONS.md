@@ -7,6 +7,22 @@ the archive's binding before replacing the installed database. Replace
 an incompatible ready restore with a verified matching archive; do not
 remove the recovery marker to force serving.
 
+## Serving startup exits 78
+
+Read the startup log before retrying. A data directory can be opened by only
+one cooperating daemon or recovery coordinator at a time. Use the outer,
+service-owned directory, with no symlinked components or group/world write
+access. Leave `ORVA_SERVING_MODE` unset unless you intend to assert the durable
+mode. An absent mode file is legacy; a malformed file is an error, not legacy.
+
+`orva serve` does not start in `provisioning` or `managed` mode. Managed mode
+stores SQLite under `managed/orva.db` and keeps an empty mode-0500 directory
+at `orva.db` so older binaries cannot open the original path. Do not remove
+the tombstone, edit the marker, or point a legacy binary at `managed/`. There
+is no public enrollment, downgrade, or interrupted-relocation command in this
+slice. The offline helper requires all daemons (including older releases) to
+be stopped and SQLite checkpointed with no WAL, SHM, or rollback journal.
+
 ## Internal restore-quarantine fixture
 
 `workloadrecovery` is an explicit Linux scratch composition, **not** the current

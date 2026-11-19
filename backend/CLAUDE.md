@@ -2,7 +2,11 @@
 
 `server.StartManaged` is an internal opt-in composition, not normal `serve`
 wiring. The caller owns the sealed artifact Owner and drains its HTTP listener
-before closing the instance. Startup restores durable pause and reconstructs
+before closing the instance. It requires matching durable managed mode and uses
+the managed subdirectory under the same outer flock as `serve`. Legacy `serve`
+refuses other modes and the root SQLite tombstone before opening the database.
+Offline relocation publishes the mode last; it does not enroll workloads.
+Startup restores durable pause and reconstructs
 only valid exact associations; restore gets a deny evaluator before dispatch.
 `scheduler.RunManaged` starts only shared-authority job/cron loops and drains
 before it returns. Legacy mutation routes and tools are not mounted in this

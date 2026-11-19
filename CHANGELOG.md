@@ -14,6 +14,14 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Upgrade notes
+
+- `orva serve` holds an exclusive data-directory lock and exits 78 (`EX_CONFIG`)
+  before opening SQLite if the layout cannot be used for legacy serving or
+  `ORVA_SERVING_MODE` does not match. Without a mode file, the existing layout
+  remains legacy. Managed serving is internal opt-in only; the environment does
+  not enable it. New systemd units do not restart on exit 78.
+
 ### Internal queued IAM publication (not activated)
 
 - Adds explicit managed-store queued capture/publication and optional REST/MCP/

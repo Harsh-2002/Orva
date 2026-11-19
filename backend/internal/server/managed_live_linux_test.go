@@ -29,6 +29,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/backend/internal/testutil/iamruntime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadrecovery"
@@ -66,6 +67,14 @@ func TestManagedServingLive(t *testing.T) {
 	}()
 	assets, err := owner.Bindings(ctx)
 	managedMust(t, err)
+	instanceID, err := owner.InstanceID(ctx)
+	managedMust(t, err)
+	layout, err := servingmode.Acquire(dataDir)
+	managedMust(t, err)
+	relocateErr := layout.RelocateToManaged(instanceID, ids.New())
+	managedMust(t, layout.Close())
+	managedMust(t, relocateErr)
+	managedDir := filepath.Join(dataDir, servingmode.Managed)
 	input := ManagedOptions{Artifacts: owner, DataDir: dataDir, NsjailBin: jail,
 		RuntimeGenerations: make(map[sandbox.Language]string), Output: builder.OutputConfig{
 			MetadataRoot: mkdir("build"), Limits: codeLimits, ReservedBytes: 1 << 20, MaxReservedBytes: 2 << 20,
@@ -80,7 +89,7 @@ func TestManagedServingLive(t *testing.T) {
 	}
 	const fixtureKey = "orva_scratch_managed_serving"
 	func() {
-		db, err := database.New(filepath.Join(dataDir, "orva.db"))
+		db, err := database.New(filepath.Join(managedDir, "orva.db"))
 		managedMust(t, err)
 		defer func() { managedMust(t, db.Close()) }()
 		managedMust(t, db.Migrate())
@@ -455,7 +464,7 @@ func TestManagedServingLive(t *testing.T) {
 		snapshot := filepath.Join(t.TempDir(), "snapshot.db")
 		managedMust(t, backup.SnapshotDB(db.ReadDB(), snapshot))
 		var archive bytes.Buffer
-		managedMust(t, backup.ArchiveTo(&archive, dataDir, snapshot))
+		managedMust(t, backup.ArchiveTo(&archive, managedDir, snapshot))
 		ownerID, err := owner.InstanceID(ctx)
 		managedMust(t, err)
 		listener.Close()

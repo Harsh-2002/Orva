@@ -44,10 +44,10 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 		return nil, err
 	}
 	var service *managedServer
-	recovery, err := workloadrecovery.Open(in.DataDir, workloadrecovery.Host{
+	recovery, err := workloadrecovery.OpenManaged(in.DataDir, workloadrecovery.Host{
 		Quiesce:         func(context.Context) error { return nil },
 		AdmissionClosed: func() bool { return service == nil },
-	})
+	}, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 		var err error
 		service, err = newManagedServer(ctx, db, managedServerInput{
 			artifacts: in.Artifacts, output: in.Output, runtimeGenerations: in.RuntimeGenerations,
-			dataDir: in.DataDir, nsjail: in.NsjailBin, chatGuard: in.ChatGuard,
+			dataDir: recovery.DataDir(), nsjail: in.NsjailBin, chatGuard: in.ChatGuard,
 		})
 		return err
 	})

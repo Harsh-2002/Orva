@@ -8,6 +8,7 @@ import (
 	_ "net/http/pprof" // registers /debug/pprof/* on http.DefaultServeMux (not Orva's mux)
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server"
+	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -45,17 +47,23 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the Orva server",
 		Long:  "Start the Orva API server and begin accepting requests.",
-		Run:   runServe,
+		Run: func(cmd *cobra.Command, args []string) {
+			if code := runServe(cmd, args); code != 0 {
+				os.Exit(code)
+			}
+		},
 	}
 	cmd.Flags().Int("port", 0, "listen port (overrides ORVA_PORT)")
 	return cmd
 }
 
-func runServe(cmd *cobra.Command, args []string) {
+const exitConfig = 78 // EX_CONFIG
+
+func runServe(cmd *cobra.Command, _ []string) int {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if port, _ := cmd.Flags().GetInt("port"); port != 0 {
@@ -63,6 +71,25 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 
 	setupLogger(cfg.Logging)
+
+	cfg.Data.Dir = filepath.Clean(cfg.Data.Dir)
+	if err := os.MkdirAll(cfg.Data.Dir, 0755); err != nil {
+		slog.Error("cannot prepare data directory", "error", err)
+		return exitConfig
+	}
+	layout, err := servingmode.Acquire(cfg.Data.Dir)
+	if err != nil {
+		slog.Error("cannot lock data directory for legacy serving", "error", err)
+		return exitConfig
+	}
+	defer layout.Close()
+	if err := layout.RequireLegacy(); err != nil {
+		slog.Error("refusing legacy startup", "error", err)
+		return exitConfig
+	}
+	cfg.Data.Dir = layout.Path()
+	cfg.Database.Path = filepath.Join(cfg.Data.Dir, "orva.db")
+	cfg.Sandbox.RootfsDir = filepath.Join(cfg.Data.Dir, "rootfs")
 
 	maybeStartPprof()
 
@@ -84,13 +111,13 @@ func runServe(cmd *cobra.Command, args []string) {
 	db, err := database.New(cfg.Database.Path)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
-		os.Exit(1)
+		return 1
 	}
 	defer db.Close()
 
 	if err := db.Migrate(); err != nil {
 		slog.Error("failed to run migrations", "error", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// The UUIDv7 migration renames function ids, and each function's code
@@ -103,7 +130,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		slog.Error("failed to reconcile function directories after id migration",
 			"error", err,
 			"hint", "function code is intact on disk; fix the cause and restart")
-		os.Exit(1)
+		return 1
 	}
 
 	// Rows written before entrypoint and run_entrypoint were separated hold
@@ -187,6 +214,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	slog.Info("shutting down")
 	srv.Shutdown(context.Background())
 	slog.Info("shutdown complete")
+	return 0
 }
 
 func setupLogger(cfg config.LoggingConfig) {

@@ -296,6 +296,13 @@ restore needs `supervisor="supervise-daemon"` in `/etc/init.d/orva`
 (`start-stop-daemon` never respawns); verify with
 `grep supervise-daemon /etc/init.d/orva`.
 
+New systemd units also set `RestartPreventExitStatus=78`. An exit 78 is a
+[startup configuration refusal](OPERATIONS.md#serving-startup-exits-78), not a
+crash to restart. Re-run the installer to refresh older units. OpenRC's
+`supervise-daemon` has no per-status filter, and the unit's `respawn_max=0`
+means unlimited respawns, so it retries a refusal every `respawn_delay`
+seconds until you stop the service (`rc-service orva stop`). Docker restart policy behavior is unchanged.
+
 ### Downtime
 
 Image swap: ~5 seconds (orvad shuts down cleanly within `TimeoutStopSec=30s`,

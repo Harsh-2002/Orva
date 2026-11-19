@@ -13,11 +13,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/Harsh-2002/Orva/backend/internal/backup"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
@@ -43,62 +43,52 @@ type Host struct {
 type Coordinator struct {
 	dir   string
 	root  *os.File
-	lock  *os.File
+	lock  *servingmode.Lock
+	owner string
 	host  Host
 	mu    sync.Mutex
 	fault func(string) error
 	sync  func(string, func() error) error
 }
 
-// Open requires an existing host-owned data directory with no linked ancestors.
-// The exclusive file lock serializes only cooperating recovery coordinators.
+// Open locks the outer data directory and selects its durable layout.
 func Open(dataDir string, host Host) (*Coordinator, error) {
+	return open(dataDir, host, "")
+}
+
+// OpenManaged additionally requires a published mode for the verified Owner.
+func OpenManaged(dataDir string, host Host, owner string) (*Coordinator, error) {
+	if owner == "" {
+		return nil, database.ErrManagedOwnerInvalid
+	}
+	return open(dataDir, host, owner)
+}
+
+func open(dataDir string, host Host, owner string) (*Coordinator, error) {
 	if host.Quiesce == nil || host.AdmissionClosed == nil {
 		return nil, ErrClosed
 	}
-	abs, err := filepath.Abs(dataDir)
+	lock, err := servingmode.Acquire(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	record, root, err := lock.OpenData()
 	if err != nil {
+		lock.Close()
 		return nil, err
 	}
-	for _, part := range strings.Split(strings.TrimPrefix(abs, "/"), "/") {
-		if part == "" {
-			continue
-		}
-		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		unix.Close(fd)
-		if e != nil {
-			return nil, e
-		}
-		fd = next
-	}
-	root := os.NewFile(uintptr(fd), abs)
-	fail := func(e error) (*Coordinator, error) { root.Close(); return nil, e }
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil {
-		return fail(err)
-	}
-	if st.Uid != uint32(os.Geteuid()) || st.Mode&0022 != 0 {
-		return fail(errors.New("recovery directory must be owned and not group/world writable"))
-	}
-	lfd, err := unix.Openat(fd, backup.RecoveryMarkerName+".lock", unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0600)
-	if err != nil {
-		return fail(err)
-	}
-	lock := os.NewFile(uintptr(lfd), "recovery lock")
-	if err := regularOwned(lfd, 0); err != nil {
+	if owner != "" && (record.Mode != servingmode.Managed || record.Owner != owner) {
+		root.Close()
 		lock.Close()
-		return fail(err)
+		return nil, fmt.Errorf("%w: data directory is not in durable managed mode for this Owner", database.ErrManagedOwnerMismatch)
 	}
-	if err := unix.Flock(lfd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		lock.Close()
-		return fail(err)
+	if record.Mode == servingmode.Managed {
+		owner = record.Owner
 	}
-	return &Coordinator{dir: abs, root: root, lock: lock, host: host}, nil
+	return &Coordinator{dir: root.Name(), root: root, lock: lock, host: host, owner: owner}, nil
 }
+
+func (c *Coordinator) DataDir() string { return c.dir }
 
 func regularOwned(fd int, max int64) error {
 	var st unix.Stat_t
@@ -118,12 +108,9 @@ func (c *Coordinator) Close() error {
 	if c.root == nil {
 		return nil
 	}
-	e := c.lock.Close()
-	if err := c.root.Close(); e == nil {
-		e = err
-	}
+	err := errors.Join(c.root.Close(), c.lock.Close())
 	c.root = nil
-	return e
+	return err
 }
 
 func (c *Coordinator) step(s string) error {
@@ -303,6 +290,9 @@ func (c *Coordinator) CompleteManual(ctx context.Context, operation string) erro
 func (c *Coordinator) Restore(ctx context.Context, r io.Reader) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.owner != "" {
+		return "", database.ErrManagedOwnerInvalid
+	}
 	if err := c.quiesce(ctx); err != nil {
 		return "", err
 	}
@@ -348,6 +338,9 @@ func (c *Coordinator) Restore(ctx context.Context, r io.Reader) (string, error) 
 func (c *Coordinator) RestoreBound(ctx context.Context, owner string, r io.Reader) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.owner != "" && c.owner != owner {
+		return "", database.ErrManagedOwnerMismatch
+	}
 	if err := c.quiesce(ctx); err != nil {
 		return "", err
 	}
@@ -418,6 +411,9 @@ func (c *Coordinator) start(ctx context.Context, owner string, reconstruct, star
 	var result database.RecoveryResult
 	if reconstruct == nil || start == nil {
 		return nil, result, ErrClosed
+	}
+	if c.owner != "" && c.owner != owner {
+		return nil, result, database.ErrManagedOwnerMismatch
 	}
 	if err := c.quiesce(ctx); err != nil {
 		return nil, result, err

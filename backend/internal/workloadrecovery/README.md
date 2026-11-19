@@ -10,11 +10,22 @@ operator recovery command in this patch. Do not start normal serving to try it.
 ## Host boundary
 
 `Open(dataDir, Host)` requires an existing owned, non-group/world-writable
-directory, no symlinked ancestors, and exclusive cooperating-coordinator lock.
-Control files are no-follow, owner-only, single-link regular files. Startup
+directory, no symlinked ancestors, and the same outer data-directory lock as
+legacy `serve`. Absent mode selects the legacy fixture layout; durable managed
+mode requires the tombstone and selects `managed/`. `OpenManaged` additionally
+requires the mode to match the verified Owner. Managed startup and restore
+must use the bound methods with that Owner. Control files are no-follow,
+owner-only, single-link regular files. Startup
 rejects linked SQLite DB/WAL/SHM paths before opening SQLite. Filesystem
 administrators remain trusted: the lock is not a sandbox against concurrent
 privileged replacement of the owned directory.
+
+Offline relocation is an explicit `servingmode` helper, not a serving transition
+or enrollment. It refuses SQLite sidecars and existing managed destinations.
+It atomically exchanges an existing legacy DB with an empty directory tombstone
+and syncs both directories before publishing managed mode, after moving any
+database keys. An interruption before exchange leaves the legacy layout intact;
+one after exchange can leave both startup paths closed pending intervention.
 
 Every operation calls trusted `Host.Quiesce` and verifies
 `Host.AdmissionClosed`. The host must close admission, drain/stop workers,

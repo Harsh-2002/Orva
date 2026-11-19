@@ -953,6 +953,7 @@ Restart=on-failure
 # Restart=on-failure. Listed explicitly so the intent survives a future
 # change to the Restart= policy.
 RestartForceExitStatus=70
+RestartPreventExitStatus=78
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
