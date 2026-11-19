@@ -87,6 +87,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- Fresh managed startup seals each installed Node or Python rootfs and records
+  it before moving to the next. Existing selections are preserved and checked
+  in the sealed store. Startup refuses if no runtime is available or a selected
+  generation is missing or invalid. An unsafe tree reports the path and rule;
+  ownership and writable-mode refusals also suggest a permission repair.
 - Managed backups use portable v2. Download with `orva backup download`
   and use the stopped server binary's `orva managed restore --archive FILE
   --confirm` on the independently provisioned destination, not the legacy

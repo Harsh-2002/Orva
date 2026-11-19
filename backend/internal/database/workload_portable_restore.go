@@ -46,9 +46,7 @@ func (db *Database) RebindPortableRestore(ctx context.Context, prior, owner, ope
 			return fmt.Errorf("rebind deployment %s: %w", d.Deployment, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workload_enrollment_runtimes (
-		runtime TEXT PRIMARY KEY CHECK(runtime IN ('node','python')),
-		generation TEXT NOT NULL CHECK(length(generation)=36));
+	if _, err := tx.ExecContext(ctx, managedRuntimeSchema+`
 		DELETE FROM workload_enrollment_runtimes;
 		CREATE TABLE IF NOT EXISTS workload_portable_restore_audit (
 		operation TEXT PRIMARY KEY, prior_owner TEXT NOT NULL, new_owner TEXT NOT NULL,

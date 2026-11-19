@@ -5,7 +5,11 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
@@ -24,6 +28,11 @@ type ManagedOptions struct {
 	Output             builder.OutputConfig
 	RuntimeGenerations map[sandbox.Language]string
 	ChatGuard          firewall.Guard // Optional extra provider restriction.
+	// RootfsDir holds the installed per-language runtime trees. When a
+	// language has no recorded generation yet, startup seals its tree into the
+	// runtime store and records the generation, so a fresh managed install can
+	// run functions without an environment override. Empty disables sealing.
+	RootfsDir string
 }
 
 // ManagedInstance owns the managed listener's recovery lock and database.
@@ -62,19 +71,9 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 	db, _, err := recovery.StartBound(ctx, ownerID, func(ctx context.Context, db *database.Database) error {
 		return db.InitManagedServingSchemas(ctx)
 	}, func(ctx context.Context, db *database.Database) error {
-		defaults, err := db.LegacyEnrollmentRuntimes(ctx)
+		runtimes, err := managedRuntimeSelections(ctx, in, db, initialRuntimeSealer(in.Artifacts))
 		if err != nil {
 			return err
-		}
-		runtimes := in.RuntimeGenerations
-		if len(defaults) != 0 {
-			runtimes = make(map[sandbox.Language]string, len(defaults)+len(in.RuntimeGenerations))
-			for lang, generation := range defaults {
-				runtimes[sandbox.Language(lang)] = generation
-			}
-			for lang, generation := range in.RuntimeGenerations {
-				runtimes[lang] = generation
-			}
 		}
 		service, err = newManagedServer(ctx, db, managedServerInput{
 			artifacts: in.Artifacts, output: in.Output, runtimeGenerations: runtimes,
@@ -114,4 +113,111 @@ func (s *ManagedInstance) Close(ctx context.Context) error {
 	err := s.database.Close()
 	s.database = nil
 	return errors.Join(err, s.coordinator.Close())
+}
+
+type runtimeSealer func(context.Context, sandbox.Language, string) (string, error)
+
+func initialRuntimeSealer(owner *artifactfs.Owner) runtimeSealer {
+	var store *artifactfs.Store
+	return func(ctx context.Context, lang sandbox.Language, tree string) (string, error) {
+		if store == nil {
+			bindings, err := owner.Bindings(ctx)
+			if err != nil {
+				return "", err
+			}
+			store = bindings.Runtime
+		}
+		id, err := artifactfs.SealInitialRuntime(ctx, store, string(lang), tree, func(root string) error {
+			return sandbox.CheckManagedRuntime(root, lang)
+		})
+		return id.Generation, err
+	}
+}
+
+func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *database.Database, seal runtimeSealer) (map[sandbox.Language]string, error) {
+	recorded, err := db.LegacyEnrollmentRuntimes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	added := false
+	for _, lang := range []sandbox.Language{sandbox.Node, sandbox.Python} {
+		if in.RootfsDir == "" || recorded[string(lang)] != "" || in.RuntimeGenerations[lang] != "" {
+			continue
+		}
+		tree, err := filepath.Abs(filepath.Join(in.RootfsDir, string(lang)))
+		if err != nil {
+			return nil, fmt.Errorf("resolve installed %s runtime tree: %w", lang, err)
+		}
+		if _, err := os.Lstat(tree); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("inspect installed %s runtime tree: %w", lang, err)
+		}
+		generation, err := seal(ctx, lang, tree)
+		if err != nil {
+			hint := ""
+			if errors.Is(err, artifactfs.ErrOwnership) {
+				hint = "; correct the reported owner or writable mode with chown or chmod go-w as appropriate"
+			} else if errors.Is(err, artifactfs.ErrCapacity) {
+				hint = "; the bound runtime store cannot fit this seal; inspect its capacity before retrying"
+			}
+			return nil, fmt.Errorf("seal installed %s runtime tree %s: %w%s", lang, tree, err, hint)
+		}
+		if err := db.RecordManagedRuntimeGenerations(ctx, map[string]string{string(lang): generation}); err != nil {
+			return nil, fmt.Errorf("record sealed %s runtime generation %q: %w", lang, generation, err)
+		}
+		added = true
+	}
+	if added {
+		// The recorded selection wins if an insert was a no-op.
+		recorded, err = db.LegacyEnrollmentRuntimes(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	runtimes := make(map[sandbox.Language]string, 2)
+	for lang, generation := range recorded {
+		runtimes[sandbox.Language(lang)] = generation
+	}
+	for lang, generation := range in.RuntimeGenerations {
+		runtimes[lang] = generation
+	}
+	if len(runtimes) == 0 {
+		return nil, errors.New("no sealed Node or Python runtime generation; install trusted rootfs trees with current adapters (without --skip-rootfs), then retry orva serve")
+	}
+	return runtimes, nil
+}
+
+func validateManagedRuntimeSelections(store *artifactfs.Store, runtimes map[sandbox.Language]string) error {
+	for lang := range runtimes {
+		if lang != sandbox.Node && lang != sandbox.Python {
+			return fmt.Errorf("unsupported managed runtime language %q: %w", lang, errManagedServerUnavailable)
+		}
+	}
+	for _, lang := range []sandbox.Language{sandbox.Node, sandbox.Python} {
+		generation, selected := runtimes[lang]
+		if !selected {
+			continue
+		}
+		if err := validateManagedRuntime(store, lang, generation); err != nil {
+			return fmt.Errorf("selected %s runtime generation %q: %w", lang, generation, err)
+		}
+	}
+	return nil
+}
+
+func validateManagedRuntime(store *artifactfs.Store, lang sandbox.Language, generation string) error {
+	lease, err := store.Acquire(generation)
+	if errors.Is(err, artifactfs.ErrInvalid) {
+		return fmt.Errorf("not found in the bound runtime store: %w", err)
+	}
+	if err != nil {
+		return fmt.Errorf("cannot acquire from the bound runtime store: %w", err)
+	}
+	defer lease.Release()
+	id := lease.Identity()
+	if id.Kind != artifactfs.KindRuntime || id.Owner != string(lang) {
+		return fmt.Errorf("belongs to %s %q: %w", id.Kind, id.Owner, errManagedServerUnavailable)
+	}
+	return sandbox.CheckManagedRuntime(lease.Path(), lang)
 }

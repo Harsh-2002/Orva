@@ -3,11 +3,13 @@ package artifactfs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"syscall"
 )
 
@@ -21,23 +23,88 @@ func SealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	return sealInstalledRuntime(ctx, store, owner, source)
 }
 
-func sealInstalledRuntime(ctx context.Context, store *Store, owner, source string) (_ Identity, err error) {
+func sealInstalledRuntime(ctx context.Context, store *Store, owner, source string) (Identity, error) {
+	return importInstalledRuntime(ctx, store, owner, source, nil, nil)
+}
+
+// SealInitialRuntime selects an exact match in the bound store or seals a new
+// copy. The installed tree must be operator-provisioned and offline.
+func SealInitialRuntime(ctx context.Context, store *Store, owner, source string, validate func(string) error) (Identity, error) {
+	if store == nil || store.binding == nil || store.boundKind != KindRuntime || !validOwner(KindRuntime, owner) || validate == nil {
+		return Identity{}, ErrInvalid
+	}
+	parentPath := filepath.Dir(source)
+	parent, err := os.Lstat(parentPath)
+	if err != nil {
+		return Identity{}, err
+	}
+	if !parent.IsDir() {
+		return Identity{}, refuse(parentPath, "not a directory")
+	}
+	if err := checkInitialRuntimeEntry(parentPath, parent); err != nil {
+		return Identity{}, err
+	}
+	return importInstalledRuntime(ctx, store, owner, source, checkInitialRuntimeEntry, validate)
+}
+
+func checkInitialRuntimeEntry(rel string, info os.FileInfo) error {
+	if strings.HasPrefix(rel, "tmp/") || strings.HasPrefix(rel, "var/tmp/") {
+		return refuse(rel, "runtime trees may not contain tmp/ or var/tmp/ entries")
+	}
+	uid, euid := info.Sys().(*syscall.Stat_t).Uid, uint32(os.Geteuid())
+	if uid != 0 && uid != euid {
+		if euid == 0 {
+			return refuseOwnership(rel, fmt.Sprintf("owned by uid %d, want root (the server user)", uid))
+		}
+		return refuseOwnership(rel, fmt.Sprintf("owned by uid %d, want root or the server user (uid %d)", uid, euid))
+	}
+	if info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0022 != 0 &&
+		!(info.IsDir() && info.Mode()&os.ModeSticky != 0 && (rel == "tmp" || rel == "var/tmp")) {
+		return refuseOwnership(rel, fmt.Sprintf("group/other-writable (mode %04o)", info.Mode().Perm()))
+	}
+	return nil
+}
+
+// installedRuntimeMode is the mode the sealed copy carries. Special bits are
+// stripped except a directory's sticky bit, which runtime images use to protect
+// shared scratch trees.
+func installedRuntimeMode(e Entry) uint32 {
+	if e.Type == TypeDirectory {
+		return e.Mode & 01777
+	}
+	return e.Mode & 0777
+}
+
+func importInstalledRuntime(ctx context.Context, store *Store, owner, source string, check func(string, os.FileInfo) error, validate func(string) error) (_ Identity, err error) {
 	resolved, err := filepath.EvalSymlinks(source)
-	if err != nil || !filepath.IsAbs(source) || resolved != source {
+	if err != nil {
 		return Identity{}, errors.Join(ErrUnsupported, err)
+	}
+	if !filepath.IsAbs(source) {
+		return Identity{}, refuse(source, "source path is not absolute")
+	}
+	if resolved != source {
+		return Identity{}, refuse(source, "source path is a symlink")
 	}
 	limits := store.limits
 	const maxRuntime = 512 << 20
-	tree, err := scan(ctx, source, limits, maxRuntime)
+	tree, err := scanTree(ctx, source, limits, maxRuntime, check)
 	if err != nil {
 		return Identity{}, err
 	}
 	omitMissingRuntimeManuals(tree)
-	if err := checkLinks(KindRuntime, tree, limits); err != nil {
+	if err := checkLinkRules(KindRuntime, tree, limits); err != nil {
 		return Identity{}, err
 	}
 	if tree["."].entry.Type != TypeDirectory {
 		return Identity{}, ErrUnsupported
+	}
+	if validate != nil {
+		// A crash after Seal but before SQLite commit must not consume another
+		// slot on retry. Only an exact, active copy of this source may be reused.
+		if id, err := store.matchInstalledRuntime(ctx, owner, tree, validate); err != nil || id.Generation != "" {
+			return id, err
+		}
 	}
 	var reserved int64 = 1
 	for _, item := range tree {
@@ -45,6 +112,9 @@ func sealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	}
 	stage, err := store.Begin(ctx, reserved)
 	if err != nil {
+		if stage != nil {
+			err = errors.Join(err, stage.Abort())
+		}
 		return Identity{}, err
 	}
 	sealed := false
@@ -91,7 +161,12 @@ func sealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 		e := tree[name].entry
 		to := filepath.Join(root, name)
 		if e.Type == TypeDirectory {
-			if err := os.Chmod(to, os.FileMode(e.Mode&0777)); err != nil {
+			mode := installedRuntimeMode(e)
+			permissions := os.FileMode(mode & 0777)
+			if mode&syscall.S_ISVTX != 0 {
+				permissions |= os.ModeSticky
+			}
+			if err := os.Chmod(to, permissions); err != nil {
 				return Identity{}, err
 			}
 		}
@@ -107,6 +182,11 @@ func sealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	if err != nil {
 		return Identity{}, err
 	}
+	if validate != nil {
+		if err := validate(root); err != nil {
+			return Identity{}, err
+		}
+	}
 	gen, err := stage.Seal(ctx, KindRuntime, owner, manifest, digest)
 	if err != nil {
 		return Identity{}, err
@@ -118,6 +198,49 @@ func sealInstalledRuntime(ctx context.Context, store *Store, owner, source strin
 	}
 	defer lease.Release()
 	return lease.Identity(), nil
+}
+
+func (s *Store) matchInstalledRuntime(ctx context.Context, owner string, tree map[string]observed, validate func(string) error) (Identity, error) {
+	var match string
+	s.mu.Lock()
+	for gen, r := range s.records {
+		if r.phase == active && !r.quarantined && r.identity.Kind == KindRuntime && r.identity.Owner == owner &&
+			(match == "" || gen < match) && sameInstalledRuntime(r.durable.Manifest, tree) {
+			match = gen
+		}
+	}
+	s.mu.Unlock()
+	if match == "" {
+		return Identity{}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return Identity{}, err
+	}
+	lease, err := s.Acquire(match)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer lease.Release()
+	if err := validate(lease.Path()); err != nil {
+		return Identity{}, err
+	}
+	return lease.Identity(), nil
+}
+
+func sameInstalledRuntime(m Manifest, tree map[string]observed) bool {
+	if len(m.Entries) != len(tree) {
+		return false
+	}
+	for _, sealed := range m.Entries {
+		item, ok := tree[sealed.Path]
+		e := item.entry
+		// The copy is owned by the store writer, not the source.
+		e.Mode, e.UID, e.GID = installedRuntimeMode(e), sealed.UID, sealed.GID
+		if !ok || e != sealed {
+			return false
+		}
+	}
+	return true
 }
 
 var missingManualAlternative = regexp.MustCompile(`^/usr/share/man/([a-z]{2}(_[A-Z]{2})?/)?man[1-9]/[A-Za-z0-9_.+-]+\.[1-9]\.gz$`)
