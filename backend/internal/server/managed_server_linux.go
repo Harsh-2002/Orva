@@ -235,6 +235,8 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		})
 		registerManagedChat(mux, &AIHandler{Manager: chat, DB: db})
 	}
+	routes := runtime.routeDeps(in.nsjail)
+	routes.Firewall = fw
 	handler, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, configuration, publication, in.dataDir,
 		runtime.invoke, runtime.async, mountChat, func(w http.ResponseWriter, r *http.Request) {
 			handlers.DownloadManagedBackup(w, r, db, in.dataDir, func(ctx context.Context, dst io.Writer, snapshot string) error {
@@ -245,7 +247,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 				defer os.RemoveAll(stage)
 				return backup.ArchiveManagedTo(ctx, dst, in.artifacts, in.dataDir, snapshot, stage)
 			})
-		}, runtime.routeDeps(in.nsjail))
+		}, routes)
 	if err != nil {
 		return nil, err
 	}
