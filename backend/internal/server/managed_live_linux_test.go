@@ -328,6 +328,142 @@ func TestManagedServingLive(t *testing.T) {
 		reg.CacheCommitted(current)
 		replay(200)
 	})
+	t.Run("operator-surfaces", func(t *testing.T) {
+		do := func(method, path, key string, body any, want int) (http.Header, []byte) {
+			t.Helper()
+			var reader io.Reader
+			if body != nil {
+				raw, err := json.Marshal(body)
+				managedMust(t, err)
+				reader = strings.NewReader(string(raw))
+			}
+			req, err := http.NewRequestWithContext(ctx, method, listener.URL+path, reader)
+			managedMust(t, err)
+			if key != "" {
+				req.Header.Set("Authorization", "Bearer "+key)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			res, err := listener.Client().Do(req)
+			managedMust(t, err)
+			defer res.Body.Close()
+			b, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+			managedMust(t, err)
+			if res.StatusCode != want {
+				t.Fatalf("%s %s: got %d want %d: %s", method, path, res.StatusCode, want, b)
+			}
+			return res.Header, b
+		}
+		poll := func(what string, ok func() bool) {
+			t.Helper()
+			deadline := time.Now().Add(10 * time.Second)
+			for !ok() {
+				if time.Now().After(deadline) {
+					t.Fatalf("timed out waiting for %s", what)
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		sse := func(raw []byte) []byte {
+			for _, line := range strings.Split(string(raw), "\n") {
+				if payload, ok := strings.CutPrefix(line, "data: "); ok {
+					return []byte(payload)
+				}
+			}
+			return raw
+		}
+
+		// A real managed invocation, then everything an operator reads about it.
+		head, _ := do(http.MethodGet, "/fn/"+node.ID, "", nil, 200)
+		execID, traceID := head.Get("X-Orva-Execution-ID"), head.Get("X-Trace-Id")
+		if execID == "" || traceID == "" {
+			t.Fatal("managed invocation did not report its execution and trace ids")
+		}
+		poll("execution row", func() bool { _, err := db.GetExecution(execID); return err == nil })
+		var execution struct {
+			FunctionID string `json:"function_id"`
+		}
+		_, raw := do(http.MethodGet, "/api/v1/executions/"+execID, fixtureKey, nil, 200)
+		managedMust(t, json.Unmarshal(raw, &execution))
+		if execution.FunctionID != node.ID {
+			t.Fatal("execution row names a different function")
+		}
+		// The fixture function writes nothing to stderr, and a run with no log has no
+		// log row: the authorized route answers 404 NOT_FOUND, as it does on the legacy router.
+		do(http.MethodGet, "/api/v1/executions/"+execID+"/logs", fixtureKey, nil, 404)
+		poll("captured request", func() bool { _, err := db.GetExecutionRequest(execID); return err == nil })
+		do(http.MethodGet, "/api/v1/executions/"+execID+"/request", fixtureKey, nil, 200)
+		do(http.MethodGet, "/api/v1/traces/"+traceID, fixtureKey, nil, 200)
+		poll("activity row for the invocation", func() bool {
+			rows, _, _, err := db.ListActivity(database.ActivityFilter{Search: "/fn/" + node.ID})
+			return err == nil && len(rows) > 0
+		})
+		poll("activity row for the operator", func() bool {
+			rows, _, _, err := db.ListActivity(database.ActivityFilter{Search: "/api/v1/executions/" + execID})
+			return err == nil && len(rows) > 0 && rows[0].ActorType == "api_key" && rows[0].Source == "api"
+		})
+		do(http.MethodGet, "/api/v1/activity", fixtureKey, nil, 200)
+		do(http.MethodGet, "/api/v1/system/metrics.json", fixtureKey, nil, 200)
+		_, metrics := do(http.MethodGet, "/metrics", "", nil, 200)
+		if !strings.Contains(string(metrics), "orva_") {
+			t.Fatal("managed /metrics exposed no Orva metrics")
+		}
+		do(http.MethodGet, "/api/v1/system/health", "", nil, 200)
+
+		// Replay through the MCP tool, the same managed admission as REST replay.
+		_, raw = do(http.MethodPost, "/mcp", fixtureKey, map[string]any{"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+			"params": map[string]any{"name": "replay_execution", "arguments": map[string]any{"execution_id": execID}}}, 200)
+		var replayed struct {
+			Result struct {
+				IsError    bool `json:"isError"`
+				Structured struct {
+					ExecutionID string `json:"execution_id"`
+					ReplayOf    string `json:"replay_of"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+		}
+		managedMust(t, json.Unmarshal(sse(raw), &replayed))
+		if replayed.Result.IsError || replayed.Result.Structured.ReplayOf != execID || replayed.Result.Structured.ExecutionID == "" {
+			t.Fatalf("replay_execution did not replay through managed admission: %s", raw)
+		}
+
+		// API keys: a minted key works, and a revoked one stops at once.
+		var minted struct{ ID, Key string }
+		_, raw = do(http.MethodPost, "/api/v1/keys", fixtureKey, map[string]any{"name": "live-revoke", "permissions": []string{"read"}}, 201)
+		managedMust(t, json.Unmarshal(raw, &minted))
+		do(http.MethodGet, "/api/v1/executions", minted.Key, nil, 200)
+		do(http.MethodGet, "/api/v1/keys", minted.Key, nil, 403)
+		do(http.MethodDelete, "/api/v1/keys/"+minted.ID, fixtureKey, nil, 200)
+		do(http.MethodGet, "/api/v1/executions", minted.Key, nil, 401)
+
+		// A channel token reaches only its bundled function, through managed admission.
+		var channel struct{ ID, Token string }
+		_, raw = do(http.MethodPost, "/api/v1/channels", fixtureKey, map[string]any{"name": "live-agents", "function_ids": []string{node.ID}}, 201)
+		managedMust(t, json.Unmarshal(raw, &channel))
+		do(http.MethodGet, "/api/v1/channels", channel.Token, nil, 401)
+		_, raw = do(http.MethodPost, "/mcp", channel.Token, map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, 200)
+		if !strings.Contains(string(raw), `"name":"managed_node"`) || strings.Contains(string(raw), "create_iam_policy") {
+			t.Fatalf("channel catalog is not the invoke-only bundle: %s", raw)
+		}
+		_, raw = do(http.MethodPost, "/mcp", channel.Token, map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+			"params": map[string]any{"name": "managed_node", "arguments": map[string]any{"method": "GET"}}}, 200)
+		var invoked struct {
+			Result struct {
+				IsError    bool `json:"isError"`
+				Structured struct {
+					StatusCode  int    `json:"status_code"`
+					ExecutionID string `json:"execution_id"`
+				} `json:"structuredContent"`
+			} `json:"result"`
+		}
+		managedMust(t, json.Unmarshal(sse(raw), &invoked))
+		if invoked.Result.IsError || invoked.Result.Structured.StatusCode != 200 || invoked.Result.Structured.ExecutionID == "" {
+			t.Fatalf("channel invocation did not run through the managed pool: %s", raw)
+		}
+		poll("channel execution row", func() bool { _, err := db.GetExecution(invoked.Result.Structured.ExecutionID); return err == nil })
+		do(http.MethodDelete, "/api/v1/channels/"+channel.ID, fixtureKey, nil, 200)
+		do(http.MethodPost, "/mcp", channel.Token, map[string]any{"jsonrpc": "2.0", "id": 3, "method": "tools/list"}, 401)
+	})
 	t.Run("external-mcp-catalog", func(t *testing.T) {
 		body := call(t, http.MethodPost, "/mcp", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, 200)
 		if !strings.Contains(string(body), `"name":"revoke_iam_policy"`) || strings.Contains(string(body), `"name":"update_function"`) {
