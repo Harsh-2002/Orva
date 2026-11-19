@@ -132,6 +132,7 @@ func (s *Service) ExecuteManaged(ctx context.Context, op, id string, body []byte
 			return nil, database.ErrIAMInvalidPolicy
 		}
 		var offset uint64
+		start := 0
 		if m["offset"] != nil {
 			offset, err = decimal(m["offset"], true)
 			if err != nil {
@@ -140,8 +141,9 @@ func (s *Service) ExecuteManaged(ctx context.Context, op, id string, body []byte
 			if offset > mathMaxOffset {
 				return nil, database.ErrIAMInvalidPolicy
 			}
+			start = int(offset)
 		}
-		items, err := s.db.ListIAMManagedPolicies(ctx, int(offset))
+		items, err := s.db.ListIAMManagedPolicies(ctx, start)
 		if err != nil {
 			return nil, err
 		}

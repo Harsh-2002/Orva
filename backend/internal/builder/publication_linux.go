@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -18,7 +20,6 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadspawn"
-	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 var ErrPublicationUnavailable = errors.New("managed deployment publication unavailable")
@@ -341,10 +342,12 @@ func (s *PublicationQueue) Install(ctx context.Context, deployment string) (stri
 
 // Managed outputs never enter the legacy mutable directory/symlink namespace.
 func (s *PublicationQueue) managedNamespace(owner string) error {
-	if s.queue.bld.DataDir == "" || !ids.IsUUID(owner) || filepath.Base(owner) != owner {
+	id, err := uuid.Parse(owner)
+	if s.queue.bld.DataDir == "" || err != nil || id.String() != owner {
 		return ErrPublicationUnavailable
 	}
-	_, err := os.Lstat(filepath.Join(s.queue.bld.DataDir, "functions", owner))
+	// Join the re-encoded canonical form, never the caller's string.
+	_, err = os.Lstat(filepath.Join(s.queue.bld.DataDir, "functions", id.String()))
 	if !os.IsNotExist(err) {
 		return ErrPublicationUnavailable
 	}
