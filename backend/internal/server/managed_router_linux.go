@@ -190,6 +190,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		if invoke != nil {
 			// Channel tokens invoke only through this managed proxy and pool.
 			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+			tools.ManagedAuthority = authority
 			tools.ReplayExecution = managedReplayHandler(db, reg, manager, invoke, ops).Replay
 		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))

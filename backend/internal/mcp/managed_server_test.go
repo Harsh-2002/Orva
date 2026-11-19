@@ -60,8 +60,7 @@ func TestManagedServerToolsShareRestrictedCatalog(t *testing.T) {
 	}
 }
 
-// The managed catalog carries the shared operator surfaces at the legacy
-// tiers, and none of the tools that dispatch function code except replay.
+// The managed catalog carries the shared operator surfaces at the legacy tiers.
 func TestManagedCatalogOperatorSurfaces(t *testing.T) {
 	f := iamSurfaceSetup(t)
 	base := Deps{ManagedServer: true, DB: f.db, Registry: f.registry, IAM: f.service}

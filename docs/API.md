@@ -729,8 +729,11 @@ function name or UUID for `{id}`. `GET` requires `read`; `POST`, `PUT`, and
 invoking the function. Managed MCP and Chat share `list_fixtures` (`read`),
 `save_fixture` and `delete_fixture` (both `write`). Each tool rechecks the
 operator's live credential and required tier before accessing stored presets,
-including for inactive functions. `test_function_with_fixture` is not available
-in managed MCP or Chat.
+including for inactive functions. `test_function_with_fixture` (`invoke`) is
+available in managed MCP and Chat for installed functions. It uses managed
+admission and applies overrides only to that invocation. The dashboard loads a
+fixture and runs it via the ordinary `/fn/{id}` path; there is no fixture-run
+REST route.
 
 KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
 JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are
