@@ -10,7 +10,7 @@
       >
         Review changes
       </h2>
-      <p class="max-w-prose text-xs text-foreground-muted">
+      <p class="measure text-xs text-foreground-muted">
         This is your draft compared with the stored policy. Nothing changes until you save, and this page shows the new policy only after the server confirms it.
       </p>
     </header>

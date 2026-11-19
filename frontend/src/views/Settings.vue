@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         Settings
       </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+      <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
         Instance, access, storage, backups, and AI.
       </p>
     </div>
@@ -109,7 +109,7 @@
           <Sun class="w-4 h-4 text-foreground-muted" />
           Appearance
         </h2>
-        <p class="text-xs text-foreground-muted leading-snug mt-1.5 max-w-prose">
+        <p class="text-xs text-foreground-muted leading-snug mt-1.5 measure">
           Follows your system by default. The code editor stays dark in both themes.
         </p>
       </div>
@@ -175,7 +175,7 @@
             <HardDrive class="w-4 h-4 text-foreground-muted" />
             Storage
           </h2>
-          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+          <p class="text-xs text-foreground-muted mt-1 measure">
             Data directory usage and database maintenance.
           </p>
         </div>
@@ -427,7 +427,7 @@
             <Plug class="w-4 h-4 text-foreground-muted" />
             Connected applications
           </h2>
-          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+          <p class="text-xs text-foreground-muted mt-1 measure">
             OAuth clients with access to this instance. Add connectors from
             <RouterLink
               to="/docs#mcp"
@@ -554,7 +554,7 @@
             <Monitor class="w-4 h-4 text-foreground-muted" />
             Active sessions
           </h2>
-          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+          <p class="text-xs text-foreground-muted mt-1 measure">
             Browsers signed in to this instance.
           </p>
         </div>
@@ -633,10 +633,10 @@
             <DatabaseBackup class="w-4 h-4 text-foreground-muted" />
             Backup &amp; Restore
           </h2>
-          <p class="text-xs text-foreground-muted mt-1 max-w-prose">
+          <p class="text-xs text-foreground-muted mt-1 measure">
             Download or restore a complete instance snapshot.
           </p>
-          <p class="text-xs text-warning-fg mt-2 max-w-prose">
+          <p class="text-xs text-warning-fg mt-2 measure">
             Backups contain secret keys. Store them securely.
           </p>
         </div>

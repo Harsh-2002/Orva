@@ -14,7 +14,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Functions
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Deployed functions and invoke endpoints.
         </p>
       </div>
@@ -394,7 +394,7 @@
         <div class="text-sm text-foreground-strong">
           No functions deployed yet
         </div>
-        <div class="text-xs text-foreground-muted max-w-prose mx-auto leading-body">
+        <div class="text-xs text-foreground-muted measure-long mx-auto leading-body">
           Choose a runtime and deploy your first handler.
         </div>
       </div>

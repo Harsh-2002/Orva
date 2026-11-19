@@ -15,7 +15,7 @@
           <div class="text-sm font-semibold text-foreground-strong">
             Pick functions
           </div>
-          <div class="text-xs text-foreground-muted mt-0.5 max-w-prose leading-relaxed">
+          <div class="text-xs text-foreground-muted mt-0.5 measure leading-relaxed">
             Each selection becomes an MCP tool. Dashes become underscores.
           </div>
         </div>
