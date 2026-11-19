@@ -4,7 +4,7 @@
     :steps="STEPS"
     :step="step"
     :first-step="initial ? 2 : 1"
-    :final-label="initial ? 'Update permission' : 'Add to policy'"
+    :final-label="initial ? 'Update permission' : 'Add permission'"
     :hint="hint"
     :next-disabled="!!hint"
     :error="errors.step || (step === 4 ? problem : '')"
@@ -280,7 +280,7 @@
       </p>
     </div>
 
-    <!-- 4. Review -->
+    <!-- 4. Confirm -->
     <div
       v-else
       class="space-y-3"
@@ -381,7 +381,7 @@ const props = defineProps({
 const emit = defineEmits(['commit', 'cancel'])
 const availableServices = computed(() => SERVICE_ORDER.filter((id) => !props.managed || id !== 'schedules'))
 
-const STEPS = ['Service', 'Actions', 'Resources', 'Review']
+const STEPS = ['Service', 'Actions', 'Resources', 'Confirm']
 const MANUAL = '__manual__'
 const ROW = 'flex min-h-11 cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 touch-expand-row'
 const INPUT = 'mt-0.5 h-4 w-4 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring'
