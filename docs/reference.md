@@ -1,6 +1,7 @@
 # Orva — Documentation
 
-> The internal managed server composition is not the default Orva server.
+> On Linux, `orva serve` selects the managed server from a durable mode record;
+> legacy instances stay legacy.
 > It exposes authenticated capability discovery at `GET /api/v1/iam/capabilities`,
 > fresh unbound creation at `POST /api/v1/iam/functions`, and exact Factory
 > installation at `POST /api/v1/deployments/{id}/install`. The managed
@@ -21,8 +22,18 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 39 on this
-> composition; read-only keys see 28 and 10 respectively.
+> An all-permissions key sees 73 tools on the normal server and 66 on this
+> composition; read-only keys see 28 and 22 respectively. This composition also
+> mounts executions (with replay through managed admission), traces, activity,
+> events, system, API-key, OAuth-app, session, channel and Chat routes at the same
+> permission tiers as the normal server, and accepts channel tokens at `/mcp`
+> as an invoke-only catalog dispatched through the managed pool. See
+> `docs/API.md` "Managed operator surfaces".
+> Dashboard Chat requires admin and uses only the managed tool catalog,
+> scoped to the caller. A missing compiled egress policy stops provider calls
+> without disabling Chat settings or history. Model discovery checks the
+> actual connection address; a Chat turn checks the provider endpoint before
+> the turn, not at dial time.
 
 > Internal configuration qualification: optional `workloadconfig` HTTP and
 > MCP/shared-AI adapters publish environment, execution settings and encrypted

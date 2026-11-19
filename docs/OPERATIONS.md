@@ -24,6 +24,18 @@ the tombstone, edit the marker, or point a legacy binary at `managed/`.
 Enrollment is an explicit offline server command; it is not available through
 HTTP. There is no downgrade or automated interrupted-enrollment repair.
 
+## Chat provider errors in managed mode
+
+Dashboard Chat uses the instance's compiled egress policy. If Settings can
+save a provider but model discovery or chat reports `egress policy unavailable`,
+check the daemon log for the initial compile or publication error. Check that
+the service account can publish policy under `managed/firewall/` and that the
+managed database is readable. The daemon retries compilation while running;
+Chat settings and history stay available, but no provider requests run until
+there is a compiled policy. On refresh failure an existing compiled policy
+remains in use. The managed dashboard and MCP catalog do not expose firewall
+rule editing.
+
 ## Offline legacy enrollment
 
 1. **Back up first.** Verify an offline recovery copy of the complete legacy

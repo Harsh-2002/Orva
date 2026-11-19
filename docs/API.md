@@ -1,33 +1,37 @@
 # HTTP API reference
 
-## Admission-closed managed server integration (internal)
+## Managed server
 
-This separate Linux composition is not selected by normal `orva serve`. It
-mounts managed handlers without falling back to legacy mutation routes.
+On Linux, `orva serve` selects this composition from the durable managed mode
+record. It mounts managed handlers without falling back to legacy mutation routes.
 Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
 on this composition.
 
 - `POST /api/v1/iam/functions` accepts `name`, `runtime` (`node` or `python`)
-  and optional `entrypoint`. It requires live read and write permissions.
+  and optional `entrypoint`. The route requires `write`; creation also
+  rechecks live admin authority at commit.
   `201` returns `id`, `name`, `runtime` and `status`. The new function has
   an unbound empty policy and a private SDK channel, not SDK grants.
 - `POST /api/v1/deployments/{id}/install` requires an exact deployment ID
-  and live read/admin authority. It returns `200` with `artifact` and
+  and `admin`. It returns `200` with `artifact` and
   `review_required:true`. Installation does not review or grant authority.
 - Function permissions, named policies, configuration, and pause/resume
-  use the managed contracts below. The opt-in MCP catalog excludes legacy
-  tools and channel credentials. Managed Chat uses that same tool registry.
+  use the managed contracts below. The opt-in MCP catalog excludes the legacy
+  mutation and invoke tools; Managed Chat uses that same tool registry. Operator
+  surfaces shared with the normal server are listed under "Managed operator
+  surfaces" below.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  39 and 10 respectively. Normal channel credentials expose only their
-  bundled functions; managed MCP does not accept channel credentials.
+  66 and 22 respectively. Channel credentials are accepted at `/mcp` and expose
+  only their bundled functions as invoke-only tools, dispatched through the
+  managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
   new generation and leaves the function inactive. After a same-boot restart,
   install the exact current deployment ID to recover that pending generation.
   Installation still requires a separate permissions review.
-- `DELETE /api/v1/functions/{fn_id}` requires an exact UUIDv7 and live
-  read/admin authority. It reserves metadata history and invalidates the
+- `DELETE /api/v1/functions/{fn_id}` requires an exact UUIDv7. The route
+  requires `write`; the history reservation rechecks live admin authority. It reserves metadata history and invalidates the
   current Factory before retiring the pool. It does not remove sealed assets.
   The managed listener also mounts the work-history routes below.
 - An invocation whose authorized function version no longer matches the
@@ -35,6 +39,80 @@ on this composition.
 - `GET /api/v1/functions/{fn_id}/source` reads the authored entrypoint and
   dependency manifest from the current sealed deployment; it never reads
   a legacy `current` symlink. Pending and paused deployments remain readable.
+
+## Managed operator surfaces
+
+The managed composition is intended to become the only serving mode, so it
+mounts the operator surfaces of the normal server. Every route requires exactly
+the permission the normal server's `requiredPermission` assigns it: `read` for
+GET, `write` for other methods, `admin` for keys, channels, `/ai/*`, backup,
+storage and vacuum. A key holding a different permission gets `403`; no
+credential gets `401`; keys are reread on every request, so a revoked or
+expired key stops at once. Services that require stricter authority at commit
+(deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
+Browser sessions hold every tier but must prove same-origin for mutations.
+
+| Surface | Routes | Tier |
+| --- | --- | --- |
+| Executions | `GET /api/v1/executions`, `/{id}`, `/{id}/logs`, `/{id}/request` | read |
+| | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
+| Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
+| Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
+| | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
+| | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |
+| API keys | `GET/POST /api/v1/keys`, `DELETE /api/v1/keys/{id}` | admin |
+| OAuth apps | `GET /api/v1/oauth/connected-apps` | read, session cookie |
+| | `DELETE /api/v1/oauth/connected-apps/{id}`, `DELETE /api/v1/oauth/clients/{client_id}` | write, session cookie |
+| Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
+| | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
+| Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
+| Chat | `/api/v1/ai/*` (see [AI assistant](#ai-assistant)) | admin |
+
+The OAuth authorization server endpoints are not mounted: existing grants can
+be listed and revoked, not issued. Connected apps and sessions are cookie-bound,
+as on the normal server, and have no MCP tool. `GET /api/v1/system/storage`
+reports the plain data directory; it does not include sealed artifact stores.
+
+- **Activity.** Eligible requests queue best-effort activity rows, with key
+  (`source: api`) or browser session (`source: web`) attribution when resolved.
+  Static assets, the activity and event feeds, and successful routine polls
+  are excluded. Rows may be dropped under writer pressure. Managed invocations
+  record executions, logs, spans and activity the same way the legacy server does.
+- **Replay.** `POST /api/v1/executions/{id}/replay` re-runs a captured request
+  only through the managed pool: the acquired Factory must be the function's
+  current version (otherwise `409 NOT_ACTIVE`, no dispatch), its timeout comes
+  from the Factory, and a worker without managed resources is refused. A
+  paused, inactive or not-installed function, a truncated capture (`410`) and a missing
+  capture (`404`) are refused with no new execution. Replaying into an installed
+  but unreviewed Factory runs the handler like any invocation, with protected SDK
+  operations denied. The managed server loads
+  the replay-capture setting at start, so managed invocations store request
+  bodies (sensitive headers redacted) for replay; disable it with
+  `replay_capture_enabled=0`.
+- **MCP.** The managed catalog adds the shared execution, trace, system and API
+  key tools at their normal tiers, plus `replay_execution` (write),
+  `list_activity` (read) and read-only `list_channels` / `get_channel` (admin;
+  tokens are never returned). `invoke_function` and `list_runtimes` are not part
+  of it. A failed invocation that wrote no response is now reported as an error
+  rather than an empty `200`, in every catalog.
+
+### Managed channels
+
+Channel tokens (`orva_chn_...`) are accepted at `POST /mcp` on the managed
+composition when it has a managed proxy. The catalog is invoke-only, one tool
+per bundled function, with no management tools; every call goes through the
+managed proxy and pool, so a paused, inactive, not-installed or version-changed
+function is refused exactly as `/fn/` would refuse it, and a function that is
+not `active` is never served from a prior code directory. Admission is not
+approval: an installed Factory that has not been reviewed still executes handler
+code, and only its protected SDK operations (KV, calls, jobs, cron, spans) are
+denied until the policy is reviewed. A channel token therefore reaches handler
+code of any installed bundled function; bundle only functions you intend agents
+to run. Channel tokens remain
+`401` on `/api/v1/*`. Deleting or rotating a channel takes effect on the next
+request. Channels are created, rotated and deleted only through the admin REST
+routes above and the dashboard.
 
 ## Internal opt-in configuration publication (not normal routes)
 
@@ -1030,6 +1108,13 @@ function allowed to do" tooltip.
 The in-product agentic chat (the dashboard's **AI** section). Requires
 a configured provider (BYO key). Streaming endpoints emit
 `text/event-stream`; everything else is JSON. All paths require `admin`.
+
+In managed mode, Chat only receives the managed tool catalog, scoped to the
+caller's permissions. If no egress policy has compiled, model discovery
+returns `200` with `models: []` and an `error`, and turns report an SSE
+`error` without contacting a provider. A blocked provider produces the same
+response shapes. Model discovery checks the address at dial time; chat turns
+check the provider endpoint before the turn, not at dial time.
 
 ### `POST /api/v1/ai/chat`
 Send a user message and stream the assistant turn. Body carries

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -87,5 +88,56 @@ func TestHopByHopResponseHeadersAreNotRelayed(t *testing.T) {
 		if !hopByHopResponseHeader(strings.ToLower(k)) {
 			t.Errorf("%q must be matched case-insensitively", k)
 		}
+	}
+}
+
+// Replay and invocation share one helper: a handler cannot opt out of the
+// guards by sending its own policy, and transfer headers are not relayed.
+func TestCopyFunctionResponseHeadersGuardsEveryEntrypoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	CopyFunctionResponseHeaders(rec, map[string]string{
+		"Content-Type":            "text/html",
+		"Content-Security-Policy": "default-src *",
+		"X-Content-Type-Options":  "sniff",
+		"Content-Length":          "999",
+		"Content-Encoding":        "gzip",
+		"X-Custom":                "kept",
+	})
+	h := rec.Header()
+	if h.Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(h.Get("Content-Security-Policy"), "sandbox ") ||
+		strings.Contains(h.Get("Content-Security-Policy"), "allow-same-origin") {
+		t.Fatalf("handler overrode the isolation guards: %v", h)
+	}
+	if h.Get("Content-Length") != "" || h.Get("Content-Encoding") != "" {
+		t.Fatalf("transfer headers were relayed: %v", h)
+	}
+	if h.Get("Content-Type") != "text/html" || h.Get("X-Custom") != "kept" {
+		t.Fatalf("ordinary headers were dropped: %v", h)
+	}
+}
+
+// Every credential the invoke path verifies is kept out of a captured request,
+// including the signed-invocation proof.
+func TestCapturedRequestsRedactEveryCredentialHeader(t *testing.T) {
+	hdr := http.Header{}
+	for _, name := range []string{"Authorization", "Cookie", "X-Orva-API-Key", "X-Orva-Internal-Token",
+		"Proxy-Authorization", "X-Orva-Signature", "X-Orva-Timestamp"} {
+		hdr.Set(name, "secret-value")
+	}
+	hdr.Set("Content-Type", "application/json")
+	got := redactCapturedHeaders(hdr)
+	for name, value := range got {
+		if name == "content-type" {
+			if value != "application/json" {
+				t.Fatalf("ordinary header altered: %q", value)
+			}
+			continue
+		}
+		if value != "[REDACTED]" {
+			t.Fatalf("%s was persisted in clear: %q", name, value)
+		}
+	}
+	if len(got) != 8 {
+		t.Fatalf("unexpected captured headers: %v", got)
 	}
 }

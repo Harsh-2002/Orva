@@ -91,7 +91,8 @@ type Manager struct {
 	resolveInterval time.Duration
 
 	stopCh chan struct{}
-	wg     sync.WaitGroup
+	done   chan struct{}
+	stop   sync.Once
 }
 
 // NewManager builds the policy manager.
@@ -125,6 +126,7 @@ func (m *Manager) SetOnPolicyChange(fn func(gen string)) {
 // sandboxes — the boot-time write below made it look like they were applied.
 func (m *Manager) Start(ctx context.Context) {
 	m.stopCh = make(chan struct{})
+	m.done = make(chan struct{})
 	// This is the only safe point to prune old generations: once spawns begin,
 	// a worker may still be opening a previously published config path.
 	if m.dataDir != "" {
@@ -139,7 +141,6 @@ func (m *Manager) Start(ctx context.Context) {
 		m.setCompileError(err.Error())
 	}
 
-	m.wg.Add(1)
 	go m.pollLoop(ctx)
 }
 
@@ -147,11 +148,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if m.stopCh == nil {
 		return nil
 	}
-	close(m.stopCh)
-	done := make(chan struct{})
-	go func() { m.wg.Wait(); close(done) }()
+	m.stop.Do(func() { close(m.stopCh) })
 	select {
-	case <-done:
+	case <-m.done:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -165,7 +164,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 // distinct now: the fast tick picks up operator edits, the slow one refreshes
 // hostname answers.
 func (m *Manager) pollLoop(ctx context.Context) {
-	defer m.wg.Done()
+	defer close(m.done)
 	pollT := time.NewTicker(m.pollInterval)
 	defer pollT.Stop()
 	resolveT := time.NewTicker(m.resolveInterval)

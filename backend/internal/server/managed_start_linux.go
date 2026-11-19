@@ -23,7 +23,7 @@ type ManagedOptions struct {
 	LayoutLock         *servingmode.Lock // Optional; caller retains it through Close.
 	Output             builder.OutputConfig
 	RuntimeGenerations map[sandbox.Language]string
-	ChatGuard          firewall.Guard
+	ChatGuard          firewall.Guard // Optional extra provider restriction.
 }
 
 // ManagedInstance owns the managed listener's recovery lock and database.
@@ -86,6 +86,18 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 		return nil, errors.Join(err, recovery.Close())
 	}
 	return &ManagedInstance{Handler: service, service: service, database: db, coordinator: recovery}, nil
+}
+
+// StopEventStreams ends every open /api/v1/events stream so that draining the
+// HTTP listener cannot wait on a client that never goes idle. It is idempotent
+// and is called before the listener drains.
+func (s *ManagedInstance) StopEventStreams() {
+	s.mu.Lock()
+	service := s.service
+	s.mu.Unlock()
+	if service != nil && service.runtime != nil && service.runtime.hub != nil {
+		service.runtime.hub.Close()
+	}
 }
 
 // Close requires the caller to drain the HTTP listener first. A timeout after
