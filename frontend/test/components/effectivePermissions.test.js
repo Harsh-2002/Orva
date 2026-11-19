@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useConfirmStore } from '@/stores/confirm.js'
 import FunctionPermissionSources from '@/views/FunctionPermissionSources.vue'
 import FunctionPermissions from '@/views/FunctionPermissions.vue'
 import EffectiveAccess from '@/components/permissions/EffectiveAccess.vue'
@@ -168,5 +170,52 @@ describe('source-aware current access', () => {
     for (const label of ['Create new version', 'Review attachment', 'Review global revoke', 'Review deletion']) {
       expect(button(w, label)).toBeUndefined()
     }
+  })
+
+  it('offers Review and approve where an inactive function is noticed, and approves with current expectations', async () => {
+    setActivePinia(createPinia())
+    const s = raw()
+    s.host.review_required = true
+    s.host.approved_artifact = null
+    const { w, api } = await page(s)
+    const panel = w.find('[data-testid="permissions-approval"]')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('Not active yet')
+    const confirm = useConfirmStore()
+    confirm.ask = vi.fn(async () => true)
+    await w.find('[data-testid="permissions-approve"]').trigger('click')
+    await flushPromises()
+    expect(confirm.ask).toHaveBeenCalledTimes(1)
+    expect(api.review).toHaveBeenCalledTimes(1)
+    expect(api.review.mock.calls[0][0]).toBe(FN_ID)
+    expect(api.review.mock.calls[0][1]).toEqual({
+      expected: { revision: '2', current_artifact: DIGEST_A, approved_artifact: null },
+    })
+  })
+
+  it('does not approve when the operator cancels the confirmation', async () => {
+    setActivePinia(createPinia())
+    const s = raw()
+    s.host.quarantined = true
+    const { w, api } = await page(s)
+    const confirm = useConfirmStore()
+    confirm.ask = vi.fn(async () => false)
+    await w.find('[data-testid="permissions-approve"]').trigger('click')
+    await flushPromises()
+    expect(api.review).not.toHaveBeenCalled()
+  })
+
+  it('tells a read-only operator that an administrator must approve, without an approve control', async () => {
+    const s = raw()
+    s.host.review_required = true
+    s.host.can_manage = false
+    const { w } = await page(s)
+    expect(w.find('[data-testid="permissions-approval"]').text()).toContain('An administrator must review and approve')
+    expect(w.find('[data-testid="permissions-approve"]').exists()).toBe(false)
+  })
+
+  it('shows no approval prompt once the current deployment is approved', async () => {
+    const { w } = await page(raw())
+    expect(w.find('[data-testid="permissions-approval"]').exists()).toBe(false)
   })
 })
