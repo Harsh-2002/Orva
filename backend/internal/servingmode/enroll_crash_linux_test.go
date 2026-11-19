@@ -143,11 +143,11 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 			// after relocation, before the record is staged.
 			published := stage == ""
 			intent := stage != "" && stage != "intent_removed" && stage != "mode_staged"
-			if _, err := os.Lstat(filepath.Join(root, MarkerName)); (err == nil) != published {
-				t.Fatalf("serving mode published=%t at %q, want %t", err == nil, stage, published)
-			}
-			if _, err := os.Lstat(filepath.Join(root, enrollIntent)); (err == nil) != intent {
-				t.Fatalf("enrollment intent present=%t at %q, want %t", err == nil, stage, intent)
+			for name, present := range map[string]bool{MarkerName: published, enrollIntent: intent} {
+				_, err := os.Lstat(filepath.Join(root, name))
+				if (present && err != nil) || (!present && !errors.Is(err, os.ErrNotExist)) {
+					t.Fatalf("stat %s at %q: %v; want present=%t", name, stage, err, present)
+				}
 			}
 			if stage == "mode_staged" {
 				if draft, err := filepath.Glob(filepath.Join(root, MarkerName+".tmp-*")); err != nil || len(draft) != 1 {
@@ -161,6 +161,7 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 			// Legacy serve: the intent, or the tombstone that replaces it, closes
 			// this path. A legacy layout that looked complete here would be the
 			// defect: its orva.db has already become the managed tombstone.
+			const tombstoneRefusal = "legacy SQLite path orva.db is a directory; leaving the tombstone intact"
 			legacy, legacyErr := AcquireLegacy(root)
 			if published {
 				// The published marker is what closes legacy serve for good.
@@ -175,13 +176,15 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 				t.Fatal("legacy serve opened an interrupted enrollment")
 			} else if intent && !errors.Is(legacyErr, errEnrollmentIncomplete) {
 				t.Fatalf("legacy refusal at %q = %v, want the enrollment intent", stage, legacyErr)
-			} else if !intent && !strings.Contains(legacyErr.Error(), "is a directory") {
+			} else if !intent && legacyErr.Error() != tombstoneRefusal {
 				t.Fatalf("legacy refusal at %q = %v, want the orva.db tombstone", stage, legacyErr)
 			}
 
 			// Managed serve: the same Acquire/OpenData gate runServeManaged uses.
 			if published {
 				t.Setenv(Env, Managed)
+			} else {
+				t.Setenv(Env, Legacy)
 			}
 			lock, err := Acquire(root)
 			if err != nil {
@@ -197,6 +200,8 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 			} else if err == nil {
 				dir.Close()
 				t.Fatal("managed serve opened an interrupted enrollment")
+			} else if (intent && !errors.Is(err, errEnrollmentIncomplete)) || (!intent && err.Error() != tombstoneRefusal) {
+				t.Fatalf("OpenData refused for the wrong reason at %q: %v", stage, err)
 			}
 
 			if err := enrollmentCrashPreserved(t, root); err != nil {

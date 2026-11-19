@@ -400,10 +400,16 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 				t.Fatalf("apply did not stop at %q: %v", tc.stage, err)
 			}
 
-			if _, err := os.Lstat(filepath.Join(dir, servingmode.MarkerName)); (err == nil) != (tc.stage == "") {
-				t.Fatalf("serving mode published=%t at %q", err == nil, tc.stage)
+			const intentName = ".orva-enrollment-intent"
+			const intentRefusal = "offline enrollment incomplete; serving refused"
+			published := tc.stage == ""
+			for name, present := range map[string]bool{servingmode.MarkerName: published, intentName: !published} {
+				_, err := os.Lstat(filepath.Join(dir, name))
+				if (present && err != nil) || (!present && !errors.Is(err, os.ErrNotExist)) {
+					t.Fatalf("stat %s at %q: %v; want present=%t", name, tc.stage, err, present)
+				}
 			}
-			if tc.stage == "" {
+			if published {
 				// Completion control: the apply must end in a layout the managed
 				// path serves, otherwise the boundary cases prove nothing.
 				t.Setenv(servingmode.Env, servingmode.Managed)
@@ -420,12 +426,6 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 
 			if enrollmentPayload(t, dir) != payload {
 				t.Fatal("interrupted apply changed the legacy source tree or keys")
-			}
-			// The literal mirrors servingmode's unexported enrollIntent: every case
-			// here stops before publication, so the intent is the guard that must
-			// still be on disk.
-			if _, err := os.Lstat(filepath.Join(dir, ".orva-enrollment-intent")); err != nil {
-				t.Fatalf("enrollment intent missing at %q: %v", tc.stage, err)
 			}
 			afterFunctions, afterDigest := enrollmentLegacyRows(t, dir)
 			if strings.Join(afterFunctions, "\n") != strings.Join(functions, "\n") {
@@ -447,8 +447,9 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 				enrollmentChildOutput(t, serveOut)
 				t.Fatalf("serve exited %v, want %d", serveErr, exitConfig)
 			}
-			if !strings.Contains(string(serveOut), "refusing legacy startup") {
-				t.Fatalf("serve did not report a layout refusal:\n%s", serveOut)
+			if !strings.Contains(string(serveOut), "refusing legacy startup") || !strings.Contains(string(serveOut), intentRefusal) {
+				enrollmentChildOutput(t, serveOut)
+				t.Fatal("serve did not report the enrollment intent refusal")
 			}
 			lock, err := servingmode.Acquire(dir)
 			enrollmentMust(t, err)
@@ -456,6 +457,8 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 			if record, root, err := lock.OpenData(); err == nil {
 				root.Close()
 				t.Fatalf("managed serving opened an interrupted apply: %+v", record)
+			} else if err.Error() != intentRefusal {
+				t.Fatalf("OpenData refused for the wrong reason at %q: %v", tc.stage, err)
 			}
 		})
 	}

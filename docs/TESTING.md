@@ -1289,10 +1289,11 @@ what the death left behind:
 | `cmd/orva.TestManagedEnrollProcessKill` | `intent` everywhere; the rest only in a disposable VM | artifact production: `owner_provisioned`, `runtime_sealed`, `database_committed`, `code_sealed`, and the completion control |
 
 Both re-exec the test binary as a child that calls `os.Exit` at a named step, so
-no deferred cleanup runs and the flock is released only by the kernel. Each case
-then asserts what an operator depends on: both serving paths refuse the layout,
-the legacy source tree, database identities and keys survive, and no serving mode
-is published early.
+no deferred cleanup runs and the flock is released only by the kernel. The
+publication suite checks refusal through the `AcquireLegacy` and `OpenData`
+library gates and checks that the payloads survive. The apply suite additionally
+checks that a real `orva serve` child exits 78 on interrupted apply. In both
+suites the serving mode must not be published early.
 
 **The gates skip, they never pass.** `ORVA_OWNER_KERNEL_TEST=disposable-vm`
 plus `ORVA_MANAGED_BOOT_BUDGET=<cgroup dir>` gate every boundary after `intent`,
