@@ -1058,10 +1058,13 @@ value once, as before.
 
 Credentials stored by earlier builds are scrubbed once, on the first boot after
 upgrading (`chat_credential_scrub_done`): for the three tools above the stored
-result, the tool message holding it and any copy of the value in the assistant's
-replies of that conversation become the placeholder. The rewrite is batched and
-resumes across boots; it cannot reach copies outside the database (logs, exports,
-backups, a prompt or later tool arguments that repeated the value), so rotate any
+result, the tool message holding it and every exact copy of the value (16+
+characters, plain or JSON-escaped) in the same conversation (user and assistant
+messages including thinking, other tool messages, later tool-call arguments and
+results, the title) become the placeholder. Other conversations and rows without
+the value are not touched. The rewrite is batched and resumes across boots. It
+cannot reach copies outside the database (logs, exports, backups, provider-side
+prompt logs) or altered forms of the value (truncated, re-encoded), so rotate any
 credential that was ever shown in Chat.
 
 Conversations are a **shared operator space**: because the feature is

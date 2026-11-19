@@ -349,7 +349,8 @@ orphan reclaim) is the third explicit rewrite carve-out: one-shot behind
 `chat_credential_scrub_done`, per-batch transactions with a persisted rowid
 cursor, replacing stored one-time credentials of the tools in `onetime.Fields`
 (`ai_tool_calls.result`, the matching role=tool `ai_messages.content`, and exact
-copies in same-conversation assistant `content`/`parts`). `onetime` is the leaf
+copies of the value anywhere else in the same conversation: `ai_messages`
+`content`/`parts` of any role, `ai_tool_calls.args`/`result`, the title). `onetime` is the leaf
 package shared by that migration, `ai/agent` redaction and the MCP registrations.
 
 `KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -174,29 +175,29 @@ func TestScrubChatCredentialsLeavesOtherRowsAlone(t *testing.T) {
 	secret := secretOf(7)
 	seedChatCall(t, db, scrubSeed{"mine", "x1", "create_api_key", `{"key":"` + secret + `"}`}, secret)
 	// Other tools with fields named like a credential, in the same conversation,
-	// reusing the same provider call id; and a second conversation and a user
-	// message that happen to contain the value.
+	// reusing the same provider call id; and a second conversation that happens
+	// to contain the same string.
 	other := `{"key":"not-a-credential-` + strings.Repeat("z", 20) + `","secret":"s"}`
 	seedChatCall(t, db, scrubSeed{"mine", "x1", "list_secrets", other}, "")
 	seedChatCall(t, db, scrubSeed{"elsewhere", "x1", "invoke_function", `{"echo":"` + secret + `"}`}, secret)
-	if _, err := db.write.Exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('u1','mine','user',?, '[]', 99)`, "my key is "+secret); err != nil {
+	if _, err := db.write.Exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('u1','elsewhere','user',?, '[]', 99)`, "my key is "+secret); err != nil {
 		t.Fatal(err)
 	}
 	before := map[string]string{
-		"other tool row":         column(t, db, `SELECT result FROM ai_tool_calls WHERE tool_name = 'list_secrets'`),
-		"other tool message":     column(t, db, `SELECT content FROM ai_messages WHERE id = 'm-tool-minex1list_secrets'`),
-		"other conversation":     column(t, db, `SELECT result FROM ai_tool_calls WHERE conversation_id = 'elsewhere'`),
-		"other conversation msg": column(t, db, `SELECT content FROM ai_messages WHERE conversation_id = 'elsewhere' AND role = 'assistant'`),
-		"user message":           column(t, db, `SELECT content FROM ai_messages WHERE id = 'u1'`),
+		"other tool row":          column(t, db, `SELECT result FROM ai_tool_calls WHERE tool_name = 'list_secrets'`),
+		"other tool message":      column(t, db, `SELECT content FROM ai_messages WHERE id = 'm-tool-minex1list_secrets'`),
+		"other conversation":      column(t, db, `SELECT result FROM ai_tool_calls WHERE conversation_id = 'elsewhere'`),
+		"other conversation msg":  column(t, db, `SELECT content FROM ai_messages WHERE conversation_id = 'elsewhere' AND role = 'assistant'`),
+		"other conv user message": column(t, db, `SELECT content FROM ai_messages WHERE id = 'u1'`),
 	}
 	resetScrub(t, db)
 	db.scrubChatCredentials()
 	after := map[string]string{
-		"other tool row":         column(t, db, `SELECT result FROM ai_tool_calls WHERE tool_name = 'list_secrets'`),
-		"other tool message":     column(t, db, `SELECT content FROM ai_messages WHERE id = 'm-tool-minex1list_secrets'`),
-		"other conversation":     column(t, db, `SELECT result FROM ai_tool_calls WHERE conversation_id = 'elsewhere'`),
-		"other conversation msg": column(t, db, `SELECT content FROM ai_messages WHERE conversation_id = 'elsewhere' AND role = 'assistant'`),
-		"user message":           column(t, db, `SELECT content FROM ai_messages WHERE id = 'u1'`),
+		"other tool row":          column(t, db, `SELECT result FROM ai_tool_calls WHERE tool_name = 'list_secrets'`),
+		"other tool message":      column(t, db, `SELECT content FROM ai_messages WHERE id = 'm-tool-minex1list_secrets'`),
+		"other conversation":      column(t, db, `SELECT result FROM ai_tool_calls WHERE conversation_id = 'elsewhere'`),
+		"other conversation msg":  column(t, db, `SELECT content FROM ai_messages WHERE conversation_id = 'elsewhere' AND role = 'assistant'`),
+		"other conv user message": column(t, db, `SELECT content FROM ai_messages WHERE id = 'u1'`),
 	}
 	for k, v := range before {
 		if after[k] != v {
@@ -297,5 +298,70 @@ func TestScrubUsesTheSharedCredentialToolList(t *testing.T) {
 		if got := onetime.Fields[name]; len(got) != 1 || got[0] != path {
 			t.Fatalf("%s paths = %v, want [%s]", name, got, path)
 		}
+	}
+}
+
+// The credential is replaced wherever it was copied within the conversation:
+// user text, assistant text and thinking, other tool messages, later tool-call
+// arguments and results, and the title. A row without the value is not written.
+func TestScrubChatCredentialsEveryCopyInTheConversation(t *testing.T) {
+	db := newTestDB(t)
+	secret := secretOf(9)
+	escaped := `quote"inside-` + strings.Repeat("q", 20)
+	seedChatCall(t, db, scrubSeed{"k", "m1", "create_api_key", `{"key":"` + secret + `"}`}, secret)
+	seedChatCall(t, db, scrubSeed{"k", "m2", "create_webhook", `{"secret":` + jsonString(escaped) + `}`}, "")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE ai_conversations SET title = ? WHERE id = 'k'`, "rotate "+secret)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('user1','k','user',?,'[]',50)`, "please store "+secret)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('think1','k','assistant','done',?,51)`,
+		`[{"type":"thinking","text":"the key is `+secret+` and the other is `+jsonString(escaped)[1:len(jsonString(escaped))-1]+`"},{"type":"text","text":"done"}]`)
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('later1','k','m3','set_secret',?,?, 'succeeded')`,
+		`{"key":"API_KEY","value":"`+secret+`"}`, `{"stored":"`+secret+`"}`)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('toolmsg2','k','tool',?,'[{"type":"tool_result","call_id":"m3"}]',52)`, `{"stored":"`+secret+`"}`)
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('clean1','k','m4','list_functions','{}','{"items":[]}','succeeded')`)
+	seedChatCall(t, db, scrubSeed{"other", "m1", "create_api_key", `{"key":"` + secretOf(10) + `"}`}, "")
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('user2','other','user',?,'[]',50)`, "same string "+secret)
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('later2','other','m3','set_secret',?,'{}', 'succeeded')`, `{"value":"`+secret+`"}`)
+	cleanBefore := column(t, db, `SELECT id||args||result FROM ai_tool_calls WHERE id = 'clean1'`)
+	otherBefore := column(t, db, `SELECT content FROM ai_messages WHERE id = 'user2'`) + column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'later2'`)
+
+	resetScrub(t, db)
+	db.scrubChatCredentials()
+
+	for _, probe := range []struct{ name, q string }{
+		{"user message", `SELECT content FROM ai_messages WHERE id = 'user1'`},
+		{"thinking part", `SELECT parts FROM ai_messages WHERE id = 'think1'`},
+		{"later tool args", `SELECT args FROM ai_tool_calls WHERE id = 'later1'`},
+		{"later tool result", `SELECT result FROM ai_tool_calls WHERE id = 'later1'`},
+		{"other tool message", `SELECT content FROM ai_messages WHERE id = 'toolmsg2'`},
+		{"title", `SELECT title FROM ai_conversations WHERE id = 'k'`},
+	} {
+		got := column(t, db, probe.q)
+		if strings.Contains(got, secret) || !strings.Contains(got, scrubPlaceholder) {
+			t.Errorf("%s not scrubbed: %s", probe.name, got)
+		}
+	}
+	// The JSON-escaped credential of the second call is gone too, structure intact.
+	if parts := column(t, db, `SELECT parts FROM ai_messages WHERE id = 'think1'`); strings.Contains(parts, "quote") ||
+		!strings.Contains(parts, `"type":"text","text":"done"`) {
+		t.Errorf("JSON-escaped copy or surrounding structure mishandled: %s", parts)
+	}
+	for _, q := range []string{`SELECT parts FROM ai_messages WHERE id = 'think1'`, `SELECT args FROM ai_tool_calls WHERE id = 'later1'`, `SELECT result FROM ai_tool_calls WHERE id = 'later1'`} {
+		var v any
+		if err := json.Unmarshal([]byte(column(t, db, q)), &v); err != nil {
+			t.Errorf("%s is no longer valid JSON: %v", q, err)
+		}
+	}
+	if got := column(t, db, `SELECT id||args||result FROM ai_tool_calls WHERE id = 'clean1'`); got != cleanBefore {
+		t.Errorf("row without the value was rewritten: %s", got)
+	}
+	// Another conversation holding the same string is a different conversation.
+	if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 'user2'`) + column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'later2'`); got != otherBefore {
+		t.Errorf("other conversation was modified: %s", got)
 	}
 }

@@ -242,8 +242,12 @@ never been executed.
   identical result held in the matching `ai_messages` role=`tool` row, and any
   copy of that credential value in `content`/`parts` of `assistant` messages of
   the same conversation, with `[redacted: shown once to the operator]` (an
-  unparseable result is replaced wholesale). Rows of every other tool, user
-  messages and other conversations are untouched. It exists because those
+  unparseable result is replaced wholesale). It also replaces that exact value
+  (≥16 characters, plain and JSON-escaped) wherever else the same conversation
+  stored it: `ai_messages.content`/`parts` of any role (user text, assistant text
+  and thinking, other tool messages), `ai_tool_calls.args`/`result` of later calls
+  and `ai_conversations.title`. Rows that do not contain the value, and other
+  conversations, are never written. It exists because those
   credentials were stored and re-sent to the model in clear. One-shot behind
   `chat_credential_scrub_done`, one transaction per batch that also advances the
   `chat_credential_scrub_cursor` rowid cursor, capped per boot and resumed on the

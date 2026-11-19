@@ -34,10 +34,13 @@ const (
 //
 //   - ai_tool_calls.result  (the audit row)
 //   - ai_messages.content of the role=tool message holding that same result
-//   - ai_messages.content and .parts of assistant messages in the same
-//     conversation that repeated the credential value
+//   - every other copy of the credential value in the same conversation:
+//     ai_messages.content and .parts of any role (user text, assistant text and
+//     thinking, other tool messages), ai_tool_calls.args and .result of later
+//     calls, and the conversation title
 //
-// with the placeholder. Rows of every other tool are never touched. Each batch
+// with the placeholder. Rows that do not contain the credential are never
+// written, and other conversations are never touched. Each batch
 // is one transaction that also advances a persisted rowid cursor, so an
 // interrupted boot resumes; the marker is written only after the walk completes.
 // Nothing is dropped and the schema is unchanged.
@@ -161,20 +164,11 @@ func scrubChatToolCall(tx *sql.Tx, r chatScrubRow) (bool, error) {
 	if !changed {
 		return false, nil
 	}
-	if values, ok := onetime.Values(r.res, onetime.Fields[r.tool]); ok {
-		for _, v := range values {
-			if len(v) < chatScrubMinValueLen {
-				continue
-			}
-			if err := scrubAssistantCopies(tx, r.conversationID, v); err != nil {
-				return false, err
-			}
-		}
-	}
 	// The tool-role message stores the identical result string, correlated by
 	// call id; matching content as well keeps a reused provider call id from
-	// reaching another tool's message.
-	// A call id the provider never assigned is omitted from parts entirely.
+	// reaching another tool's message. Done before the by-value pass, which would
+	// otherwise change the content this match depends on. A call id the provider
+	// never assigned is omitted from parts entirely.
 	if _, err := tx.Exec(`UPDATE ai_messages SET content = ?1
 		WHERE conversation_id = ?2 AND role = 'tool' AND content = ?3
 		AND (?4 = '' OR instr(parts, ?4) > 0)`, redacted, r.conversationID, r.res,
@@ -184,22 +178,41 @@ func scrubChatToolCall(tx *sql.Tx, r chatScrubRow) (bool, error) {
 	if _, err := tx.Exec(`UPDATE ai_tool_calls SET result = ? WHERE id = ?`, redacted, r.id); err != nil {
 		return false, err
 	}
+	// Every other copy of the credential in the same conversation: the user's
+	// own messages, the model's replies and thinking, later tool arguments and
+	// results. Rows that do not contain the value are never written.
+	if values, ok := onetime.Values(r.res, onetime.Fields[r.tool]); ok {
+		for _, v := range values {
+			if len(v) < chatScrubMinValueLen {
+				continue
+			}
+			if err := scrubConversationCopies(tx, r.conversationID, v); err != nil {
+				return false, err
+			}
+		}
+	}
 	return true, nil
 }
 
-// scrubAssistantCopies replaces a credential the model repeated in its reply.
-func scrubAssistantCopies(tx *sql.Tx, conversationID, value string) error {
+// scrubConversationCopies replaces one credential value, in its plain and
+// JSON-escaped forms, in all stored content of one conversation.
+func scrubConversationCopies(tx *sql.Tx, conversationID, value string) error {
 	forms := []string{value}
 	if esc := jsonString(value); esc[1:len(esc)-1] != value {
 		forms = append(forms, esc[1:len(esc)-1])
 	}
 	for _, f := range forms {
-		if _, err := tx.Exec(`UPDATE ai_messages
-			SET content = replace(content, ?1, ?2), parts = replace(parts, ?1, ?2)
-			WHERE conversation_id = ?3 AND role = 'assistant'
-			AND (instr(content, ?1) > 0 OR instr(parts, ?1) > 0)`,
-			f, onetime.Placeholder, conversationID); err != nil {
-			return err
+		for _, stmt := range []string{
+			`UPDATE ai_messages SET content = replace(content, ?1, ?2), parts = replace(parts, ?1, ?2)
+			 WHERE conversation_id = ?3 AND (instr(content, ?1) > 0 OR instr(parts, ?1) > 0)`,
+			`UPDATE ai_tool_calls SET args = replace(args, ?1, ?2), result = replace(result, ?1, ?2)
+			 WHERE conversation_id = ?3 AND (instr(args, ?1) > 0 OR instr(COALESCE(result,''), ?1) > 0)`,
+			`UPDATE ai_conversations SET title = replace(title, ?1, ?2)
+			 WHERE id = ?3 AND instr(title, ?1) > 0`,
+		} {
+			if _, err := tx.Exec(stmt, f, onetime.Placeholder, conversationID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
