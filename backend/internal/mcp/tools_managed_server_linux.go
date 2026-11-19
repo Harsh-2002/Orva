@@ -14,6 +14,7 @@ import (
 func registerManagedServerTools(rc *regCtx) {
 	registerManagedOperationTools(rc)
 	registerFixtureTools(rc)
+	registerFirewallTools(rc)
 	registerIAMTools(rc)
 	registerConfigurationTools(rc)
 	registerWorkloadLifecycleTools(rc)

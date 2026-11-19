@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net"
-	"strings"
 
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -39,11 +39,6 @@ type AddFirewallRuleInput struct {
 	Enabled  *bool  `json:"enabled,omitempty" jsonschema:"defaults to true"`
 }
 
-// wildcardUnenforceable matches the REST handler's refusal text and the
-// compiler's own `unenforced_rules` reason, so an agent that tries a wildcard
-// is told the same thing an operator reading the dashboard is.
-const wildcardUnenforceable = "wildcard hostnames cannot be enforced: the egress policy matches IP/CIDR, not DNS names. Use a CIDR or an exact hostname."
-
 type DeleteFirewallRuleInput struct {
 	RuleID  int64 `json:"rule_id"`
 	Confirm bool  `json:"confirm"`
@@ -69,8 +64,11 @@ type SetDNSConfigInput struct {
 
 func registerFirewallTools(rc *regCtx) {
 	deps := rc.deps
+	if deps.ManagedServer && deps.Firewall == nil {
+		return
+	}
 	rc.group = "firewall"
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:        "list_firewall_rules",
 			Title:       "List Firewall Rules",
@@ -90,7 +88,7 @@ func registerFirewallTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:  "get_egress_policy_status",
 			Title: "Get Egress Policy Status",
@@ -111,7 +109,7 @@ func registerFirewallTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:        "add_firewall_rule",
 			Title:       "Add Firewall Rule",
@@ -119,28 +117,9 @@ func registerFirewallTools(rc *regCtx) {
 			Annotations: &mcpsdk.ToolAnnotations{OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in AddFirewallRuleInput) (*mcpsdk.CallToolResult, FirewallRuleView, error) {
-			value := strings.TrimSpace(in.Value)
-			if value == "" {
-				return nil, FirewallRuleView{}, errors.New("value is required")
-			}
-			ruleType := in.RuleType
-			if ruleType == "" {
-				switch {
-				case strings.Contains(value, "/"):
-					ruleType = database.BlocklistTypeCIDR
-				case strings.HasPrefix(value, "*."):
-					ruleType = database.BlocklistTypeWildcard
-				default:
-					ruleType = database.BlocklistTypeHostname
-				}
-			}
-			if !database.ValidBlocklistRuleType(ruleType) {
-				return nil, FirewallRuleView{}, errors.New("invalid rule_type (allowed: cidr, hostname)")
-			}
-			// Same refusal as POST /api/v1/firewall/rules: a stored wildcard
-			// would show up as a rule and block nothing.
-			if ruleType == database.BlocklistTypeWildcard {
-				return nil, FirewallRuleView{}, errors.New(wildcardUnenforceable)
+			ruleType, value, err := handlers.NormalizeFirewallRule(in.RuleType, in.Value)
+			if err != nil {
+				return nil, FirewallRuleView{}, err
 			}
 			enabled := true
 			if in.Enabled != nil {
@@ -157,7 +136,7 @@ func registerFirewallTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:        "delete_firewall_rule",
 			Title:       "Delete Firewall Rule",
@@ -178,7 +157,7 @@ func registerFirewallTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:        "get_dns_config",
 			Title:       "Get DNS Config",
@@ -186,74 +165,59 @@ func registerFirewallTools(rc *regCtx) {
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ struct{}) (*mcpsdk.CallToolResult, GetDNSConfigOutput, error) {
-			cfg := firewall.LoadDNSConfig(deps.DB)
-			out := GetDNSConfigOutput{
-				Servers: cfg.Servers, Search: cfg.Search, Defaults: cfg.Defaults,
-				Records: make([]DNSRecordView, 0, len(cfg.Records)),
-			}
-			for _, r := range cfg.Records {
-				out.Records = append(out.Records, DNSRecordView{Host: r.Host, IP: r.IP})
-			}
-			return nil, out, nil
+			return nil, dnsConfigView(deps.DB), nil
 		},
 	)
 
-	regAddTool(rc, permAdmin,
+	regAddFirewallTool(rc,
 		&mcpsdk.Tool{
 			Name:        "set_dns_config",
 			Title:       "Set DNS Config",
 			Description: "Update DNS settings. Servers must be literal IPs (not hostnames). Records (max 64) override DNS for specific hostnames. Idempotent — pass the desired full state. Changing the resolvers also moves the egress policy (resolvers get an explicit allow rule), which recycles the warm egress workers; a search-domain or records-only edit reaches new spawns and lets existing warm workers age out.",
 			Annotations: &mcpsdk.ToolAnnotations{IdempotentHint: true, OpenWorldHint: ptrFalse()},
 		},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, in SetDNSConfigInput) (*mcpsdk.CallToolResult, GetDNSConfigOutput, error) {
-			// Validate servers — must be IPs.
-			cleanServers := []string{}
-			for _, sIP := range in.Servers {
-				sIP = strings.TrimSpace(sIP)
-				if sIP == "" {
-					continue
-				}
-				if net.ParseIP(sIP) == nil {
-					return nil, GetDNSConfigOutput{}, errors.New("dns server must be a literal IP: " + sIP)
-				}
-				cleanServers = append(cleanServers, sIP)
-			}
-			if err := deps.DB.SetSystemConfig("dns_servers", strings.Join(cleanServers, ",")); err != nil {
-				return nil, GetDNSConfigOutput{}, err
-			}
-			if err := deps.DB.SetSystemConfig("dns_search", strings.TrimSpace(in.Search)); err != nil {
-				return nil, GetDNSConfigOutput{}, err
-			}
-			// Validate records.
-			if len(in.Records) > 64 {
-				return nil, GetDNSConfigOutput{}, errors.New("too many DNS records (max 64)")
-			}
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in SetDNSConfigInput) (*mcpsdk.CallToolResult, GetDNSConfigOutput, error) {
 			records := make([]firewall.DNSRecord, 0, len(in.Records))
 			for _, r := range in.Records {
-				r.Host = strings.TrimSpace(r.Host)
-				r.IP = strings.TrimSpace(r.IP)
-				if r.Host == "" || net.ParseIP(r.IP) == nil {
-					return nil, GetDNSConfigOutput{}, errors.New("invalid DNS record (host=" + r.Host + ", ip=" + r.IP + ")")
-				}
 				records = append(records, firewall.DNSRecord{Host: r.Host, IP: r.IP})
 			}
-			if err := deps.DB.SetSystemConfig("dns_records", firewall.SerializeDNSRecords(records)); err != nil {
+			if err := handlers.SaveSandboxDNSConfig(ctx, deps.DB, in.Servers, in.Search, records); err != nil {
 				return nil, GetDNSConfigOutput{}, err
 			}
 			if deps.Firewall != nil {
 				refreshEgressPolicy(deps)
 			}
-			cfg := firewall.LoadDNSConfig(deps.DB)
-			out := GetDNSConfigOutput{
-				Servers: cfg.Servers, Search: cfg.Search, Defaults: cfg.Defaults,
-				Records: make([]DNSRecordView, 0, len(cfg.Records)),
-			}
-			for _, r := range cfg.Records {
-				out.Records = append(out.Records, DNSRecordView{Host: r.Host, IP: r.IP})
-			}
-			return nil, out, nil
+			return nil, dnsConfigView(deps.DB), nil
 		},
 	)
+}
+
+func regAddFirewallTool[In, Out any](rc *regCtx, def *mcpsdk.Tool, handler mcpsdk.ToolHandlerFor[In, Out]) {
+	if !rc.deps.ManagedServer {
+		regAddTool(rc, permAdmin, def, handler)
+		return
+	}
+	db := rc.deps.DB
+	regAddTool(rc, permAdmin, def, func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+		ref, ok := auth.OperatorFromContext(ctx)
+		if !ok || db == nil || db.CheckOperatorPermission(ctx, ref, permAdmin) != nil {
+			var out Out
+			return nil, out, database.ErrOperatorDenied
+		}
+		return handler(ctx, req, in)
+	})
+}
+
+func dnsConfigView(db *database.Database) GetDNSConfigOutput {
+	cfg := firewall.LoadDNSConfig(db)
+	out := GetDNSConfigOutput{
+		Servers: cfg.Servers, Search: cfg.Search, Defaults: cfg.Defaults,
+		Records: make([]DNSRecordView, 0, len(cfg.Records)),
+	}
+	for _, r := range cfg.Records {
+		out.Records = append(out.Records, DNSRecordView{Host: r.Host, IP: r.IP})
+	}
+	return out
 }
 
 // refreshEgressPolicy recompiles the egress policy after an MCP-driven change.

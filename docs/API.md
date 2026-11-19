@@ -51,6 +51,9 @@ credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
 Browser sessions hold every tier but must prove same-origin for mutations.
+Managed MCP and Chat use the same sandbox egress manager as these routes.
+Firewall and DNS tools require live admin authority. A DNS update validates
+and replaces the complete settings together.
 
 | Surface | Routes | Tier |
 | --- | --- | --- |

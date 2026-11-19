@@ -1025,6 +1025,13 @@ call directly. API key permissions scope the available tool set.
 > Only the normal catalog also offers `test_function_with_fixture` to run a
 > preset; its shallow-merge `override` does not change the stored fixture.
 
+> **Managed Egress tools.** `list_firewall_rules`, `get_egress_policy_status`,
+> `add_firewall_rule`, `delete_firewall_rule`, `get_dns_config`, and
+> `set_dns_config` require live `admin` authority in managed MCP and Chat.
+> They use the same serving policy manager as REST. DNS settings are validated
+> together before any value is written. Use policy status to distinguish stored
+> rules from the compiled generation.
+
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 
 > **Channel-mode tool input.** When a downstream agent calls a channel-bundled tool, the input shape is the same `ChannelInvokeInput` envelope (`method`, `path`, `headers`, `body` with the discriminator above, `timeout_ms`). The output mirrors `invoke_function` (`status_code`, `headers`, `body` string, `execution_id`, optional `stderr`, optional `orva_hint`).

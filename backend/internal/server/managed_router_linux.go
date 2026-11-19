@@ -62,7 +62,7 @@ type managedRouteDeps struct {
 	// Managed authentication rereads sessions live; nil is a no-op.
 	InvalidateSession func(token string)
 	// Firewall is the process's egress policy manager — the same instance the
-	// managed builder and Chat guard use. nil leaves the firewall routes
+	// managed builder and Chat guard use. nil leaves the firewall routes and tools
 	// unmounted rather than reporting an empty, unenforced policy.
 	Firewall *firewall.Manager
 
@@ -182,7 +182,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
-			InvalidateKey: ops.invalidateKey()}
+			Firewall: ops.Firewall, InvalidateKey: ops.invalidateKey()}
 		tools.PoolMgr, tools.NsjailBin, tools.Version = manager, ops.NsjailBin, version.Version
 		if invoke != nil {
 			// Channel tokens invoke only through this managed proxy and pool.

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"strconv"
 )
@@ -46,5 +47,18 @@ func (db *Database) SetSystemConfig(key, value string) error {
 		    value = excluded.value,
 		    updated_at = CURRENT_TIMESTAMP`,
 		key, value)
+	return err
+}
+
+func (db *Database) SetSandboxDNSConfig(ctx context.Context, servers, search, records string) error {
+	_, err := db.write.ExecContext(ctx, `
+		INSERT INTO system_config (key, value, updated_at)
+		VALUES ('dns_servers', ?, CURRENT_TIMESTAMP),
+		       ('dns_search', ?, CURRENT_TIMESTAMP),
+		       ('dns_records', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET
+		    value = excluded.value,
+		    updated_at = CURRENT_TIMESTAMP`,
+		servers, search, records)
 	return err
 }
