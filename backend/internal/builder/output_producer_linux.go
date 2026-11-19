@@ -73,7 +73,7 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 			}
 		}
 		name := filepath.Clean(h.Name)
-		if !outputPath(name, cfg.Limits.PathBytes) || len(h.PAXRecords) != 0 || len(h.Xattrs) != 0 {
+		if !filepath.IsLocal(name) || !outputPath(name, cfg.Limits.PathBytes) || len(h.PAXRecords) != 0 || len(h.Xattrs) != 0 {
 			return "", artifactfs.ErrUnsupported
 		}
 		if headersSeen[name] {
@@ -330,7 +330,7 @@ func (j *outputJob) produce(ctx context.Context) (artifactfs.Manifest, string, e
 		if err != nil {
 			return artifactfs.Manifest{}, "", err
 		}
-		if info.Sys().(*syscall.Stat_t).Nlink != uint64(len(indices)) {
+		if uint64(info.Sys().(*syscall.Stat_t).Nlink) != uint64(len(indices)) {
 			return artifactfs.Manifest{}, "", artifactfs.ErrUnsupported
 		}
 		if len(indices) > 1 {

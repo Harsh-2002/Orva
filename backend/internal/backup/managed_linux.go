@@ -248,7 +248,7 @@ func StageManaged(ctx context.Context, r io.Reader, stage string) (*ManagedStage
 			return nil, managedBad("tar read")
 		}
 		want, ok := m.Files[h.Name]
-		if !ok || seen[h.Name] || !managedRegular(h) || want.Size != h.Size {
+		if !ok || !filepath.IsLocal(h.Name) || seen[h.Name] || !managedRegular(h) || want.Size != h.Size {
 			return nil, managedBad("unexpected archive entry")
 		}
 		seen[h.Name] = true

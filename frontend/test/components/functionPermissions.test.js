@@ -32,7 +32,7 @@ const buttons = (w) => w.findAll('button')
 const btn = (w, text) => buttons(w).find((b) => b.text().includes(text))
 const has = (w, text) => !!btn(w, text)
 const field = (w, label) => {
-  const l = w.findAll('label').find((x) => x.text().replace('*', '').trim() === label)
+  const l = w.findAll('label').find((x) => x.text().replaceAll('*', '').trim() === label)
   return l && w.find(`#${l.attributes('for')}`)
 }
 const snap = (host, rest = {}) => makeSnapshot({ host, ...rest })

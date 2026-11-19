@@ -18,6 +18,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadspawn"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 var ErrPublicationUnavailable = errors.New("managed deployment publication unavailable")
@@ -340,7 +341,7 @@ func (s *PublicationQueue) Install(ctx context.Context, deployment string) (stri
 
 // Managed outputs never enter the legacy mutable directory/symlink namespace.
 func (s *PublicationQueue) managedNamespace(owner string) error {
-	if s.queue.bld.DataDir == "" || owner == "" || filepath.Base(owner) != owner {
+	if s.queue.bld.DataDir == "" || !ids.IsUUID(owner) || filepath.Base(owner) != owner {
 		return ErrPublicationUnavailable
 	}
 	_, err := os.Lstat(filepath.Join(s.queue.bld.DataDir, "functions", owner))

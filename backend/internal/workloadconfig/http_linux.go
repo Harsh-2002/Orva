@@ -238,7 +238,10 @@ func decodeRequest(raw []byte, install bool) (database.WorkloadConfigurationExpe
 		return n, nil
 	}
 	v, err := number("function_version")
-	if err != nil || v > uint64(math.MaxInt) {
+	if err != nil {
+		return invalid()
+	}
+	if v > math.MaxInt32 {
 		return invalid()
 	}
 	expected.FunctionVersion = int(v)

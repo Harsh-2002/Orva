@@ -134,7 +134,10 @@ func (s *Service) ExecuteManaged(ctx context.Context, op, id string, body []byte
 		var offset uint64
 		if m["offset"] != nil {
 			offset, err = decimal(m["offset"], true)
-			if err != nil || offset > mathMaxOffset {
+			if err != nil {
+				return nil, database.ErrIAMInvalidPolicy
+			}
+			if offset > mathMaxOffset {
 				return nil, database.ErrIAMInvalidPolicy
 			}
 		}
