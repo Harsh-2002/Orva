@@ -1223,8 +1223,20 @@ returns `route_published` / `inbound_published` separately from the stored
 mapping (which may be `null`). They describe publication only, not the target's
 runtime readiness. `GET /api/v1/routes` lists up to 256 mappings, each with its
 `version` (decimal string) and `published`, and a `truncated` flag; it needs
-live READ. Normal serving is unchanged. Managed MCP/Chat route and webhook
-tools are not part of this slice.
+live READ. Normal serving is unchanged.
+
+The managed catalog (`orva serve` managed mode, external MCP and Chat share it)
+adds eight tools over the same service and the same exact-CAS contract:
+READ `list_routes` (bounded, each row with decimal-string `version` and
+`published`, plus `truncated`), `list_inbound_webhooks` (exact owner
+`function_id` UUID, rows with `version`/`published`, the owner's string
+`policy_revision`/`authority_epoch` in `expected`, never the secret) and
+`inspect_exposure` (get); WRITE-advertised `set_route`, `delete_route`,
+`create_inbound_webhook`, `update_inbound_webhook` and `delete_inbound_webhook`
+(the service still requires live ADMIN where grants, review or quarantine are
+involved). Deletes require `confirm:true`. Only create returns the signing
+secret, once. Chat pauses for approval on every mutating tool under `all_writes`
+and on the deletes under `destructive_only`. The legacy catalog is unchanged.
 
 Inbound webhooks use `/api/v1/functions/{fn_id}/inbound-webhooks` with exact
 canonical lowercase owner and trigger UUIDs (names and any other UUID spelling,

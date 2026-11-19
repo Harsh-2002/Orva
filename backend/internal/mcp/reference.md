@@ -2164,5 +2164,17 @@ longest published literal `/prefix/*`; method rejection does not try a broader
 route. The same per-function auth and managed pool as `/fn/` apply. Platform
 roots and their descendants remain reserved for all methods. Inspect
 `route_published` separately from the stored mapping; after restore the mapping
-is inactive until a fresh, authorized CAS upsert. Managed MCP/Chat route and
-webhook tools are not installed by this slice.
+is inactive until a fresh, authorized CAS upsert.
+
+The managed catalog (`orva serve` managed mode, external MCP and Chat share it)
+adds eight tools over the same service and the same exact-CAS contract:
+READ `list_routes` (bounded, each row with decimal-string `version` and
+`published`, plus `truncated`), `list_inbound_webhooks` (exact owner
+`function_id` UUID, rows with `version`/`published`, the owner's string
+`policy_revision`/`authority_epoch` in `expected`, never the secret) and
+`inspect_exposure` (get); WRITE-advertised `set_route`, `delete_route`,
+`create_inbound_webhook`, `update_inbound_webhook` and `delete_inbound_webhook`
+(the service still requires live ADMIN where grants, review or quarantine are
+involved). Deletes require `confirm:true`. Only create returns the signing
+secret, once. Chat pauses for approval on every mutating tool under `all_writes`
+and on the deletes under `destructive_only`. The legacy catalog is unchanged.

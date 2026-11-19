@@ -20,6 +20,9 @@ over `workload_inbound_publications` (triggers unpublish any non-managed write;
 restore clears them), the existing signature verifiers, and only the managed
 Factory path; `InboundTriggerHandler.Managed` has no legacy fallback.
 Managed custom routes use one published-mapping lookup in `InvokeHandler`.
+Managed MCP/Chat route and inbound-webhook tools (`tools_managed_exposures_linux.go`)
+register only with `Deps.Triggers`, delegate to `workloadtrigger.Service` and share
+the exposure schema with `registerExposureTools`; the normal catalog is unchanged.
 Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
 Restore clears publications before admission; managed MCP/Chat and webhooks
 are not part of this route slice.

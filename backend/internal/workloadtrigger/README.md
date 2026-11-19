@@ -84,7 +84,16 @@ Factory (`AcceptsManagedVersion`). The handler re-reads that exact publication (
 active, secret) after acquiring the worker and immediately before dispatch, and
 releases the worker with 404 if it changed. Owner and trigger selectors use the
 one canonical lowercase-UUID validator (`database.ValidExposureUUID`).
-Republish after restore with `PUT` carrying no field changes. Managed MCP/Chat route/webhook tools are not added here.
+Republish after restore with `PUT` carrying no field changes.
+
+Managed MCP and shared Chat expose the same service: READ `list_routes`,
+`list_inbound_webhooks` (exact owner UUID; via `Service.ListRoutes` /
+`ListInbound`, which REST also uses) and `inspect_exposure`; WRITE-advertised
+`set_route`, `delete_route` and the three inbound mutations, reusing the legacy
+names and projections. Deletes need `confirm:true`; only create returns the
+secret. The catalog registers them only when `Deps.Triggers` is set, which
+`StartManaged` does alongside the route REST. Chat approval follows the registry
+facts (`all_writes` pauses every mutation, `destructive_only` the deletes).
 
 Inbound ownership is immutable. Create generates a fresh UUID and signature
 secret outside the IAM gate and returns the secret once, preserving the existing
