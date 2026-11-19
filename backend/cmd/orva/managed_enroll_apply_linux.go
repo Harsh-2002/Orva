@@ -50,6 +50,9 @@ func applyManagedEnrollment(ctx context.Context, root string, lock *servingmode.
 		if err != nil || resolved != path {
 			return errors.Join(fmt.Errorf("installed %s runtime must be a local rootfs", lang), err)
 		}
+		if err := sandbox.CheckManagedRuntime(path, sandbox.Language(lang)); err != nil {
+			return fmt.Errorf("validate installed %s runtime: %w", lang, err)
+		}
 		runtimes = append(runtimes, lang)
 	}
 	nsjail := config.Defaults().Sandbox.NsjailBin
@@ -103,6 +106,15 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 		runtime, err := artifactfs.SealInstalledRuntime(ctx, assets.Runtime, lang, filepath.Join(root, "rootfs", lang))
 		if err != nil {
 			return fmt.Errorf("seal installed %s runtime: %w", lang, err)
+		}
+		lease, err := assets.Runtime.Acquire(runtime.Generation)
+		if err != nil {
+			return err
+		}
+		err = sandbox.CheckManagedRuntime(lease.Path(), sandbox.Language(lang))
+		lease.Release()
+		if err != nil {
+			return fmt.Errorf("validate sealed %s runtime: %w", lang, err)
 		}
 		dbPlan.Runtimes[lang] = runtime.Generation
 		if err := step("runtime_sealed"); err != nil {

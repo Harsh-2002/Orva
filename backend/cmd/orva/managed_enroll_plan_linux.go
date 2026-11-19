@@ -266,7 +266,6 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 	found := false
 	var entries int
 	var total, tarBytes int64
-	treeCapacity := errors.New("legacy source tree exceeds the enrollment scan capacity")
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -290,9 +289,6 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		entries++
 		if entries >= 16384 {
 			f.reject("source tree exceeds managed builder entry bounds")
-		}
-		if entries > 100000 {
-			return treeCapacity
 		}
 		if rel == f.Entrypoint && info.Mode().IsRegular() {
 			found = true
@@ -339,8 +335,10 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		if total > builder.DefaultMaxCodeSize {
 			f.reject("source tree exceeds the managed builder's 50 MiB uncompressed code limit")
 		}
+		// Oversized trees cannot be imported; still include every path's
+		// identity and ctime in the exclusion plan without unbounded reads.
 		if total > 512<<20 {
-			return treeCapacity
+			return nil
 		}
 		file, err := openEnrollmentFile(path)
 		if err != nil {
@@ -366,10 +364,6 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		_, err = io.CopyN(dst, file, info.Size())
 		return err
 	})
-	if errors.Is(err, treeCapacity) {
-		fmt.Fprintln(h, "scan capacity reached")
-		err = nil
-	}
 	if !found {
 		f.reject("current source entrypoint is missing or not a regular file")
 	}

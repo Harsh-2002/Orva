@@ -51,8 +51,9 @@ HTTP. There is no downgrade or automated interrupted-enrollment repair.
    `--exclude UUID` for every unsupported function you elect to leave inactive.
    The profile supports only plain Node and Python with current successful
    deployments and no dependency manifests, installed `node_modules`,
-   TypeScript, or legacy network egress. Installed rootfs trees must pass the
-   sealed runtime verifier. The sealed copy omits inert dangling manual-page
+   TypeScript, or legacy network egress. Installed rootfs trees must include
+   the current SDK-channel adapters and pass the sealed runtime verifier.
+   The sealed copy omits inert dangling manual-page
    links in `/etc/alternatives` from slim Debian runtimes; the installed tree
    stays unchanged. Drift requires a new dry run, not an edited plan.
 5. After successful publication, start `orva serve` from the same delegated
