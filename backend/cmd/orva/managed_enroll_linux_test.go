@@ -54,6 +54,7 @@ func enrollmentFixture(t *testing.T, wal bool) (string, string, string, string) 
 		enrollmentMust(t, err)
 		source := filepath.Join(dir, "functions", id, "versions", code)
 		enrollmentMust(t, os.MkdirAll(source, 0755))
+		enrollmentMust(t, os.Symlink(filepath.Join("versions", code), filepath.Join(dir, "functions", id, "current")))
 		enrollmentMust(t, os.WriteFile(filepath.Join(source, entry), []byte("exports.handler = () => ({body:'ok'})\n"), 0644))
 		if i == 1 {
 			for _, marker := range []string{"package.json", "tsconfig.json"} {
@@ -83,7 +84,13 @@ func enrollmentTreeHash(t *testing.T, dir string) string {
 			return err
 		}
 		fmt.Fprintf(h, "%q:%v:%d:%v\n", path, info.Mode(), info.Size(), info.ModTime())
-		if !d.IsDir() {
+		if info.Mode()&os.ModeSymlink != 0 {
+			raw, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(h, raw)
+		} else if !d.IsDir() {
 			raw, err := os.ReadFile(path)
 			if err != nil {
 				return err
@@ -272,5 +279,36 @@ func TestManagedEnrollDatabaseAtomic(t *testing.T) {
 	enrollmentMust(t, err)
 	if len(runtimes) != 1 || runtimes["node"] != gen {
 		t.Fatal("missing enrolled runtime")
+	}
+}
+
+func TestManagedEnrollFaultAfterIntent(t *testing.T) {
+	dir, first, second, hash := enrollmentFixture(t, false)
+	err := withEnrollmentPlan(t.Context(), dir, func(root string, lock *servingmode.Lock, scratch string, p *enrollmentPlan) error {
+		return applyManagedEnrollment(t.Context(), root, lock, scratch, p, map[string]bool{first: true, second: true}, func(stage string) error {
+			if stage != "intent" {
+				t.Fatalf("unexpected stage %s", stage)
+			}
+			return fmt.Errorf("injected after committed intent")
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected after committed intent") {
+		t.Fatalf("apply error = %v", err)
+	}
+	if fd, err := servingmode.AcquireLegacy(dir); err == nil {
+		fd.Close()
+		t.Fatal("legacy reopened an interrupted apply")
+	}
+	managed, err := servingmode.Acquire(dir)
+	enrollmentMust(t, err)
+	defer managed.Close()
+	if _, fd, err := managed.OpenData(); err == nil {
+		fd.Close()
+		t.Fatal("managed opened an interrupted apply")
+	}
+	for _, path := range []string{"orva.db", filepath.Join("functions", first, "versions", hash, "handler.js")} {
+		if st, err := os.Stat(filepath.Join(dir, path)); err != nil || !st.Mode().IsRegular() {
+			t.Fatalf("preserved %s: %v", path, err)
+		}
 	}
 }

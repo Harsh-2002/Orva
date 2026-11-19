@@ -220,6 +220,15 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 			f.reject("current version path contains a link or non-directory")
 			return nil
 		}
+		if component == f.ID {
+			// Legacy workers execute through this alias; do not choose a
+			// different revision just because the DB still points at it.
+			link, err := os.Readlink(filepath.Join(dir, "current"))
+			if err != nil || link != filepath.Join("versions", f.CodeHash) {
+				f.reject("legacy current symlink does not match the database code hash")
+			}
+			fmt.Fprintf(h, "legacy-current:%q\n", link)
+		}
 	}
 	for _, marker := range []string{"package.json", "requirements.txt", "node_modules", "tsconfig.json"} {
 		if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
