@@ -1252,6 +1252,7 @@ surface (used by the dashboard, also callable from the CLI):
 | `/api/v1/oauth/connected-apps/{id}` | DELETE | Revoke a grant (idempotent — re-revoke returns 404) |
 | `/api/v1/oauth/clients/{client_id}` | DELETE | Retire the application itself: revokes its grants, drops its pending authorization codes, and blocks re-authorization without fresh consent. Instance-wide |
 | `/api/v1/auth/sessions` | GET | List the calling user's active browser sessions (token returned as 16-char prefix only) |
+| `/api/v1/auth/change-password` | POST | Same-origin browser session only in managed mode. Change the password, keep the current session, and revoke other sessions. A revocation failure returns a warning. |
 | `/api/v1/auth/sessions/{prefix}` | DELETE | Revoke another session by prefix; calling session refuses unless `?allow_self=1` |
 
 ### MCP — Agent channels (function bundles as tools)

@@ -238,6 +238,11 @@ unwired. Audience-less legacy OAuth authentication remains unchanged, but suppli
 no IAM publication reference. Persistence-only APIs retain their existing behavior.
 See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
 
+Managed password changes require a live same-origin browser session and the
+current password. They preserve the calling session and evict other sessions
+from durable storage and any attached authentication cache. If session
+revocation fails after the password commits, the response warns the operator.
+
 The inactive `workloadspawn.Factory` retains exact code/runtime anchors and
 owned config/secrets; prepared-plan quotas do not bound live workers or global
 provider memory. Retirement prevents new preparations, not already-issued

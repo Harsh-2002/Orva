@@ -80,8 +80,10 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST now supports outbound webhook subscription and delivery
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
+- The managed dashboard can change the current account password with a
+  same-origin session. The calling session stays signed in.
 - Not yet on the managed composition: pool configuration, secrets,
-  fixture execution, outbound webhook delivery, account password change, and
+  fixture execution, outbound webhook delivery, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 
