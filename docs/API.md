@@ -58,6 +58,8 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
 | Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
 | Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| Operator KV | `GET /api/v1/functions/{fn_id}/kv`, `GET .../kv/{key}` | read |
+| | `PUT/DELETE .../kv/{key}`, `POST .../kv/{key}/incr`, `POST .../kv/{key}/cas` | write |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
 | | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |

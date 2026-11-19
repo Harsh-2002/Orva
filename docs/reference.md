@@ -29,6 +29,8 @@
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
 > as an invoke-only catalog dispatched through the managed pool. See
 > `docs/API.md` "Managed operator surfaces".
+> The managed REST operator KV routes use legacy read/write tiers. They do
+> not grant the function any SDK permissions.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
