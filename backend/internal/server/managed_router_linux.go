@@ -60,6 +60,10 @@ type managedRouteDeps struct {
 	// InvalidateSession evicts a revoked browser-session token from any cache.
 	// Managed authentication rereads sessions live; nil is a no-op.
 	InvalidateSession func(token string)
+
+	// recordRoute, when set (tests), is told every tier-gated route as it is
+	// registered, so a table test can compare the whole surface to the legacy tiers.
+	recordRoute func(pattern string, tier managedTier)
 }
 
 func (d *managedRouteDeps) invalidateKey() func(string) {
@@ -98,7 +102,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	}
 	mux := http.NewServeMux()
 	if downloadBackup != nil {
-		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, managedAdmin, downloadBackup))
+		gateRoute(mux, db, ops, "GET /api/v1/backup", managedAdmin, downloadBackup)
 	}
 	authenticate := managedActivityOperator(db)
 	(&workloadpolicy.ManagedHTTPAdapter{Service: policy, Authenticate: authenticate}).Register(mux)
@@ -134,38 +138,38 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
 		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
 		mux.Handle("GET /web/", uiHandler())
-		mux.HandleFunc("GET /api/v1/iam/capabilities", requireManagedOperator(db, managedRead, func(w http.ResponseWriter, _ *http.Request) {
+		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})
-		}))
+		})
 		(&workloadconfig.HTTPAdapter{Service: configuration, Authenticate: authenticate}).Register(mux)
 		(&handlers.WorkloadLifecycleHandler{Publication: publication, Authenticate: authenticate}).Register(mux)
 		deploy := &handlers.FunctionHandler{Registry: reg, DB: db, DataDir: dataDir, DeployIAM: publication, RequireDeployIAM: true}
 		deployments := &handlers.DeploymentHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/functions", requireManagedOperator(db, managedRead, deploy.List))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}", requireManagedOperator(db, managedRead, deploy.Get))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", requireManagedOperator(db, managedRead, readManagedSource(db, publication)))
-		mux.HandleFunc("POST /api/v1/functions", requireManagedOperator(db, managedRead, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/iam/functions", requireManagedOperator(db, managedRead, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy", requireManagedOperator(db, managedRead, deploy.Deploy))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy-inline", requireManagedOperator(db, managedRead, deploy.DeployInline))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", requireManagedOperator(db, managedRead, deploy.Rollback))
+		gateRoute(mux, db, ops, "GET /api/v1/functions", managedRead, deploy.List)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}", managedRead, deploy.Get)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/source", managedRead, readManagedSource(db, publication))
+		gateRoute(mux, db, ops, "POST /api/v1/functions", managedWrite, createManagedFunction(publication))
+		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy-inline", managedWrite, deploy.DeployInline)
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/rollback", managedWrite, deploy.Rollback)
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}
 		reg.DeletionHook = history
 		(&workloadhistory.HTTPAdapter{Service: history, Authenticate: authenticate}).Register(mux)
-		mux.HandleFunc("DELETE /api/v1/functions/{fn_id}", requireManagedOperator(db, managedWrite, deleteManagedFunction(reg, manager)))
-		mux.HandleFunc("GET /api/v1/deployments/{id}", requireManagedOperator(db, managedRead, deployments.Get))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/logs", requireManagedOperator(db, managedRead, deployments.GetLogs))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/stream", requireManagedOperator(db, managedRead, deployments.Stream))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/deployments", requireManagedOperator(db, managedRead, deployments.ListForFunction))
-		mux.HandleFunc("POST /api/v1/deployments/{id}/install", requireManagedOperator(db, managedAdmin, func(w http.ResponseWriter, r *http.Request) {
+		gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}", managedWrite, deleteManagedFunction(reg, manager))
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}", managedRead, deployments.Get)
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}/logs", managedRead, deployments.GetLogs)
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}/stream", managedRead, deployments.Stream)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/deployments", managedRead, deployments.ListForFunction)
+		gateRoute(mux, db, ops, "POST /api/v1/deployments/{id}/install", managedAdmin, func(w http.ResponseWriter, r *http.Request) {
 			artifact, err := publication.Install(r.Context(), r.PathValue("id"))
 			if err != nil {
 				respond.Error(w, http.StatusConflict, "CONFLICT", "Managed deployment cannot be installed; inspect current state", "")
 				return
 			}
 			respond.JSON(w, http.StatusOK, map[string]any{"artifact": artifact, "review_required": true})
-		}))
+		})
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
@@ -182,19 +186,19 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		}
 		if async != nil {
 			jobs := &handlers.JobsHandler{DB: db, Registry: reg, AsyncEnabled: true, AsyncIAM: async}
-			mux.HandleFunc("POST /api/v1/jobs", requireManagedOperator(db, managedWrite, jobs.Enqueue))
-			mux.HandleFunc("GET /api/v1/jobs", requireManagedOperator(db, managedRead, jobs.List))
-			mux.HandleFunc("GET /api/v1/jobs/{id}", requireManagedOperator(db, managedRead, jobs.Get))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/retry", requireManagedOperator(db, managedWrite, jobs.Retry))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/resume", requireManagedOperator(db, managedWrite, jobs.Resume))
-			mux.HandleFunc("DELETE /api/v1/jobs/{id}", requireManagedOperator(db, managedWrite, jobs.Delete))
+			gateRoute(mux, db, ops, "POST /api/v1/jobs", managedWrite, jobs.Enqueue)
+			gateRoute(mux, db, ops, "GET /api/v1/jobs", managedRead, jobs.List)
+			gateRoute(mux, db, ops, "GET /api/v1/jobs/{id}", managedRead, jobs.Get)
+			gateRoute(mux, db, ops, "POST /api/v1/jobs/{id}/retry", managedWrite, jobs.Retry)
+			gateRoute(mux, db, ops, "POST /api/v1/jobs/{id}/resume", managedWrite, jobs.Resume)
+			gateRoute(mux, db, ops, "DELETE /api/v1/jobs/{id}", managedWrite, jobs.Delete)
 			cron := &handlers.CronHandler{DB: db, Registry: reg, CronEnabled: true, CronIAM: async}
-			mux.HandleFunc("GET /api/v1/cron", requireManagedOperator(db, managedRead, cron.ListAll))
-			mux.HandleFunc("GET /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, managedRead, cron.List))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, managedWrite, cron.Create))
-			mux.HandleFunc("PUT /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, managedWrite, cron.Update))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron/{id}/resume", requireManagedOperator(db, managedWrite, cron.Resume))
-			mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, managedWrite, cron.Delete))
+			gateRoute(mux, db, ops, "GET /api/v1/cron", managedRead, cron.ListAll)
+			gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/cron", managedRead, cron.List)
+			gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/cron", managedWrite, cron.Create)
+			gateRoute(mux, db, ops, "PUT /api/v1/functions/{fn_id}/cron/{id}", managedWrite, cron.Update)
+			gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/cron/{id}/resume", managedWrite, cron.Resume)
+			gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}/cron/{id}", managedWrite, cron.Delete)
 		}
 	}
 	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, managedActivityMiddleware(db, ops.Hub, dispatch))), nil
@@ -207,17 +211,17 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
 ) {
 	exec := &handlers.ExecutionHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/executions", requireManagedOperator(db, managedRead, exec.List))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}", requireManagedOperator(db, managedRead, exec.Get))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", requireManagedOperator(db, managedRead, exec.GetLogs))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}/request", requireManagedOperator(db, managedRead, exec.GetRequest))
-	mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", requireManagedOperator(db, managedWrite, exec.Delete))
-	mux.HandleFunc("POST /api/v1/executions/bulk-delete", requireManagedOperator(db, managedWrite, exec.BulkDelete))
+	gateRoute(mux, db, ops, "GET /api/v1/executions", managedRead, exec.List)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}", managedRead, exec.Get)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}/logs", managedRead, exec.GetLogs)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}/request", managedRead, exec.GetRequest)
+	gateRoute(mux, db, ops, "DELETE /api/v1/executions/{exec_id}", managedWrite, exec.Delete)
+	gateRoute(mux, db, ops, "POST /api/v1/executions/bulk-delete", managedWrite, exec.BulkDelete)
 	if invoke == nil {
 		return
 	}
 	replay := managedReplayHandler(db, reg, manager, invoke, ops)
-	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, managedWrite, replay.Replay))
+	gateRoute(mux, db, ops, "POST /api/v1/executions/{exec_id}/replay", managedWrite, replay.Replay)
 }
 
 // mountManagedObservability mounts traces, the activity feed, the SSE event
@@ -232,13 +236,13 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		met = metrics.New()
 	}
 	traces := &handlers.TracesHandler{DB: db, Registry: reg, Metrics: met}
-	mux.HandleFunc("GET /api/v1/traces", requireManagedOperator(db, managedRead, traces.ListTraces))
-	mux.HandleFunc("GET /api/v1/traces/{trace_id}", requireManagedOperator(db, managedRead, traces.GetTrace))
-	mux.HandleFunc("GET /api/v1/functions/{id}/baseline", requireManagedOperator(db, managedRead, traces.GetFunctionBaseline))
+	gateRoute(mux, db, ops, "GET /api/v1/traces", managedRead, traces.ListTraces)
+	gateRoute(mux, db, ops, "GET /api/v1/traces/{trace_id}", managedRead, traces.GetTrace)
+	gateRoute(mux, db, ops, "GET /api/v1/functions/{id}/baseline", managedRead, traces.GetFunctionBaseline)
 	activity := &handlers.ActivityHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/activity", requireManagedOperator(db, managedRead, activity.List))
+	gateRoute(mux, db, ops, "GET /api/v1/activity", managedRead, activity.List)
 	if ops.Hub != nil {
-		mux.HandleFunc("GET /api/v1/events", requireManagedOperator(db, managedRead, ops.Hub.Handler()))
+		gateRoute(mux, db, ops, "GET /api/v1/events", managedRead, ops.Hub.Handler())
 	}
 	started := ops.StartTime
 	if started.IsZero() {
@@ -248,12 +252,12 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		StartTime: started, NsjailBin: ops.NsjailBin}
 	mux.HandleFunc("GET /api/v1/system/health", system.Health)
 	mux.HandleFunc("GET /metrics", system.GetMetrics)
-	mux.HandleFunc("GET /api/v1/system/metrics", requireManagedOperator(db, managedRead, system.GetMetrics))
-	mux.HandleFunc("GET /api/v1/system/metrics.json", requireManagedOperator(db, managedRead, system.GetMetricsJSON))
+	gateRoute(mux, db, ops, "GET /api/v1/system/metrics", managedRead, system.GetMetrics)
+	gateRoute(mux, db, ops, "GET /api/v1/system/metrics.json", managedRead, system.GetMetricsJSON)
 	if dataDir != "" {
 		storage := &handlers.SystemStorageHandler{DB: db, Cfg: &config.Config{Data: config.DataConfig{Dir: dataDir}}}
-		mux.HandleFunc("GET /api/v1/system/storage", requireManagedOperator(db, managedAdmin, storage.GetStorage))
-		mux.HandleFunc("POST /api/v1/system/vacuum", requireManagedOperator(db, managedAdmin, storage.Vacuum))
+		gateRoute(mux, db, ops, "GET /api/v1/system/storage", managedAdmin, storage.GetStorage)
+		gateRoute(mux, db, ops, "POST /api/v1/system/vacuum", managedAdmin, storage.Vacuum)
 	}
 }
 
@@ -263,30 +267,30 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 // server itself is not mounted: only existing grants can be listed and revoked.
 func mountManagedAccess(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps) {
 	keys := &handlers.KeyHandler{DB: db, InvalidateKey: ops.invalidateKey()}
-	mux.HandleFunc("POST /api/v1/keys", requireManagedOperator(db, managedAdmin, keys.Create))
-	mux.HandleFunc("GET /api/v1/keys", requireManagedOperator(db, managedAdmin, keys.List))
-	mux.HandleFunc("DELETE /api/v1/keys/{key_id}", requireManagedOperator(db, managedAdmin, keys.Delete))
+	gateRoute(mux, db, ops, "POST /api/v1/keys", managedAdmin, keys.Create)
+	gateRoute(mux, db, ops, "GET /api/v1/keys", managedAdmin, keys.List)
+	gateRoute(mux, db, ops, "DELETE /api/v1/keys/{key_id}", managedAdmin, keys.Delete)
 
 	apps := &handlers.OAuthAppsHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/oauth/connected-apps", requireManagedOperator(db, managedRead, apps.List))
-	mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", requireManagedOperator(db, managedWrite, apps.Revoke))
-	mux.HandleFunc("DELETE /api/v1/oauth/clients/{client_id}", requireManagedOperator(db, managedWrite, apps.RemoveApplication))
+	gateRoute(mux, db, ops, "GET /api/v1/oauth/connected-apps", managedRead, apps.List)
+	gateRoute(mux, db, ops, "DELETE /api/v1/oauth/connected-apps/{id}", managedWrite, apps.Revoke)
+	gateRoute(mux, db, ops, "DELETE /api/v1/oauth/clients/{client_id}", managedWrite, apps.RemoveApplication)
 
 	sessions := &handlers.AuthHandler{DB: db}
 	if ops.InvalidateSession != nil {
 		sessions.InvalidateSession = ops.InvalidateSession
 	}
-	mux.HandleFunc("GET /api/v1/auth/sessions", requireManagedOperator(db, managedRead, sessions.Sessions))
-	mux.HandleFunc("DELETE /api/v1/auth/sessions/{prefix}", requireManagedOperator(db, managedWrite, sessions.RevokeSession))
+	gateRoute(mux, db, ops, "GET /api/v1/auth/sessions", managedRead, sessions.Sessions)
+	gateRoute(mux, db, ops, "DELETE /api/v1/auth/sessions/{prefix}", managedWrite, sessions.RevokeSession)
 
 	channels := &handlers.ChannelHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/channels", requireManagedOperator(db, managedAdmin, channels.List))
-	mux.HandleFunc("POST /api/v1/channels", requireManagedOperator(db, managedAdmin, channels.Create))
-	mux.HandleFunc("GET /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Get))
-	mux.HandleFunc("PATCH /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Update))
-	mux.HandleFunc("PUT /api/v1/channels/{id}/functions", requireManagedOperator(db, managedAdmin, channels.SetFunctions))
-	mux.HandleFunc("POST /api/v1/channels/{id}/rotate", requireManagedOperator(db, managedAdmin, channels.Rotate))
-	mux.HandleFunc("DELETE /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Delete))
+	gateRoute(mux, db, ops, "GET /api/v1/channels", managedAdmin, channels.List)
+	gateRoute(mux, db, ops, "POST /api/v1/channels", managedAdmin, channels.Create)
+	gateRoute(mux, db, ops, "GET /api/v1/channels/{id}", managedAdmin, channels.Get)
+	gateRoute(mux, db, ops, "PATCH /api/v1/channels/{id}", managedAdmin, channels.Update)
+	gateRoute(mux, db, ops, "PUT /api/v1/channels/{id}/functions", managedAdmin, channels.SetFunctions)
+	gateRoute(mux, db, ops, "POST /api/v1/channels/{id}/rotate", managedAdmin, channels.Rotate)
+	gateRoute(mux, db, ops, "DELETE /api/v1/channels/{id}", managedAdmin, channels.Delete)
 }
 
 func managedReplayHandler(db *database.Database, reg *registry.Registry, manager *pool.Manager,
@@ -509,9 +513,23 @@ const (
 	managedAdmin managedTier = "admin"
 )
 
+// gateRoute registers a route behind requireManagedOperator.
+func gateRoute(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps, pattern string, tier managedTier, next http.HandlerFunc) {
+	if ops != nil && ops.recordRoute != nil {
+		ops.recordRoute(pattern, tier)
+	}
+	mux.HandleFunc(pattern, requireManagedOperator(db, tier, next))
+}
+
 func requireManagedOperator(db *database.Database, tier managedTier, next http.HandlerFunc) http.HandlerFunc {
 	authenticate := managedOperator(db)
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A GET pattern also serves HEAD. The legacy router assigns every
+		// non-GET method on an ordinary route `write`, so HEAD there needs write.
+		effective := tier
+		if r.Method == http.MethodHead && tier == managedRead {
+			effective = managedWrite
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		principal, err := authenticate(r)
 		if err != nil {
@@ -520,7 +538,7 @@ func requireManagedOperator(db *database.Database, tier managedTier, next http.H
 		}
 		ctx := auth.WithOperator(WithActor(r.Context(), managedActor(principal)), principal)
 		ref, ok := auth.OperatorFromContext(ctx)
-		if !ok || db.CheckOperatorPermission(ctx, ref, string(tier)) != nil {
+		if !ok || db.CheckOperatorPermission(ctx, ref, string(effective)) != nil {
 			respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Current operator authority required", "")
 			return
 		}

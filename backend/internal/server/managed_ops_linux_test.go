@@ -13,16 +13,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -31,12 +34,13 @@ import (
 // pool without installed Factories: every function dispatch is denied, so the
 // operator surfaces can be exercised without a sandbox.
 type managedOpsFixture struct {
-	t       *testing.T
-	db      *database.Database
-	reg     *registry.Registry
-	runtime *managedRuntime
-	router  http.Handler
-	owner   string
+	t         *testing.T
+	db        *database.Database
+	reg       *registry.Registry
+	runtime   *managedRuntime
+	router    http.Handler
+	owner     string
+	authority *workloadiam.Authority
 }
 
 func newManagedOpsFixture(t *testing.T, tune ...func(*managedRouteDeps)) *managedOpsFixture {
@@ -67,7 +71,7 @@ func newManagedOpsFixture(t *testing.T, tune ...func(*managedRouteDeps)) *manage
 	}
 	router, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, nil, nil, filepath.Dir(db.Path()), runtime.invoke, nil, nil, nil, ops)
 	managedMust(t, err)
-	return &managedOpsFixture{t: t, db: db, reg: reg, runtime: runtime, router: router, owner: owner}
+	return &managedOpsFixture{t: t, db: db, reg: reg, runtime: runtime, router: router, owner: owner, authority: authority}
 }
 
 // key mints an API key with the given JSON permission list and returns its bearer.
@@ -558,5 +562,67 @@ func TestManagedShutdownIsNotHeldOpenByAnEventStream(t *testing.T) {
 	}
 	if _, err := io.Copy(io.Discard, res.Body); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("stream did not end cleanly: %v", err)
+	}
+}
+
+// Every tier-gated managed route is compared with the legacy requiredPermission
+// for the same method and path. A route may be stricter than legacy only when
+// it has no legacy counterpart and says so here.
+func TestEveryManagedRouteMatchesTheLegacyTier(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	recorded := map[string]managedTier{}
+	ops := f.runtime.routeDeps("/usr/local/bin/nsjail")
+	ops.recordRoute = func(pattern string, tier managedTier) { recorded[pattern] = tier }
+	chat := func(mux *http.ServeMux, _ mcp.Deps) { registerManagedChat(mux, &AIHandler{DB: f.db}) }
+	_, err := managedRoutesWithAsync(f.db, f.reg, f.authority, f.runtime.pool, new(workloadconfig.Service), new(builder.PublicationQueue),
+		t.TempDir(), f.runtime.invoke, f.runtime.async, chat, func(http.ResponseWriter, *http.Request) {}, ops)
+	managedMust(t, err)
+	if len(recorded) < 50 {
+		t.Fatalf("only %d gated routes were recorded; the publication routes are not covered", len(recorded))
+	}
+	// Routes with no legacy counterpart may demand more than a method's default.
+	stricter := map[string]string{
+		"POST /api/v1/deployments/{id}/install": "installing a Factory is a managed-only admin act",
+	}
+	rank := map[managedTier]int{managedRead: 1, managedWrite: 2, managedAdmin: 3}
+	for pattern, tier := range recorded {
+		method, route, _ := strings.Cut(pattern, " ")
+		path := regexp.MustCompile(`\{[^}]+\}`).ReplaceAllString(route, "x1")
+		legacy := managedTier(requiredPermission(method, path))
+		switch {
+		case tier == legacy:
+		case stricter[pattern] != "" && rank[tier] > rank[legacy]:
+		default:
+			t.Errorf("%s is gated at %q but the legacy router requires %q", pattern, tier, legacy)
+		}
+	}
+	for _, want := range []string{"POST /api/v1/functions/{fn_id}/deploy", "POST /api/v1/functions/{fn_id}/deploy-inline",
+		"POST /api/v1/functions/{fn_id}/rollback", "POST /api/v1/functions", "DELETE /api/v1/functions/{fn_id}"} {
+		if recorded[want] != managedWrite {
+			t.Errorf("%s is gated at %q, want write", want, recorded[want])
+		}
+	}
+}
+
+// A GET pattern also serves HEAD; the legacy router requires write for it.
+func TestManagedHeadRequiresTheLegacyWriteTier(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	reader, _ := f.key("reader", `["read"]`)
+	writer, _ := f.key("writer", `["write"]`)
+	admin, _ := f.key("admin", `["admin"]`)
+	for _, path := range []string{"/api/v1/executions", "/api/v1/traces", "/api/v1/activity", "/api/v1/system/metrics.json"} {
+		if got := requiredPermission(http.MethodHead, path); got != "write" {
+			t.Fatalf("legacy tier for HEAD %s is %q", path, got)
+		}
+		f.expect(http.MethodHead, path, reader, "", http.StatusForbidden)
+		f.expect(http.MethodHead, path, admin, "", http.StatusForbidden)
+		if rec := f.call(http.MethodHead, path, writer, ""); rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+			t.Fatalf("HEAD %s refused a write key: %d", path, rec.Code)
+		}
+	}
+	// Admin routes stay admin for every method.
+	f.expect(http.MethodHead, "/api/v1/system/storage", writer, "", http.StatusForbidden)
+	if rec := f.call(http.MethodHead, "/api/v1/system/storage", admin, ""); rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+		t.Fatalf("HEAD storage refused an admin key: %d", rec.Code)
 	}
 }
