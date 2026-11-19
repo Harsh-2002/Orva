@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -102,6 +103,7 @@ type managedServer struct {
 	done        chan error
 	spawnReady  *atomic.Bool
 	chat        *ai.Manager
+	firewall    *firewall.Manager
 }
 
 // newManagedServer composes the admission-closed, opted-in serving instance.
@@ -192,14 +194,29 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	if err != nil {
 		return nil, err
 	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	fw := firewall.NewManager(db, in.dataDir)
+	fw.Start(runCtx)
 	var chat *ai.Manager
-	var mountChat func(*http.ServeMux, mcp.Deps)
-	if in.chatGuard != nil {
-		mountChat = func(mux *http.ServeMux, tools mcp.Deps) {
-			chat = ai.New(db, sm, tools)
-			chat.SetEgressGuard(in.chatGuard)
-			registerManagedChat(mux, &AIHandler{Manager: chat, DB: db})
+	defer func() {
+		if err != nil {
+			cancel()
+			if chat != nil {
+				chat.Close()
+			}
+			err = errors.Join(err, fw.Stop(context.Background()))
 		}
+	}()
+	mountChat := func(mux *http.ServeMux, tools mcp.Deps) {
+		chat = ai.New(db, sm, tools)
+		chat.SetRequiredEgressGuard(firewall.GuardFunc(func(addr netip.Addr, port uint16) bool {
+			p, err := fw.CurrentPolicy()
+			return err != nil || p.Blocks(addr, port) || (in.chatGuard != nil && in.chatGuard.Blocks(addr, port))
+		}), func() error {
+			_, err := fw.CurrentPolicy()
+			return err
+		})
+		registerManagedChat(mux, &AIHandler{Manager: chat, DB: db})
 	}
 	handler, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, configuration, publication, in.dataDir,
 		runtime.invoke, runtime.async, mountChat, func(w http.ResponseWriter, r *http.Request) {
@@ -216,23 +233,15 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		if chat != nil {
-			chat.Close()
-		}
 		return nil, err
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	ready := make(chan struct{})
 	spawnReady.Store(true)
 	go func() { done <- runtime.scheduler.RunManagedReady(runCtx, ready); close(done) }()
 	select {
 	case err := <-done:
-		cancel()
 		spawnReady.Store(false)
-		if chat != nil {
-			chat.Close()
-		}
 		if err == nil {
 			err = errManagedServerUnavailable
 		}
@@ -241,7 +250,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		publication.Start()
 	}
 	return &managedServer{handler: handler, runtime: runtime, publication: publication, output: output,
-		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat}, nil
+		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat, firewall: fw}, nil
 }
 
 func (s *managedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +283,9 @@ func (s *managedServer) Shutdown(ctx context.Context) error {
 	s.runtime.hub.Close()
 	if s.chat != nil {
 		s.chat.Close()
+	}
+	if err := s.firewall.Stop(ctx); err != nil {
+		return err
 	}
 	if err := s.runtime.pool.Shutdown(ctx); err != nil {
 		return err

@@ -23,7 +23,7 @@ type ManagedOptions struct {
 	LayoutLock         *servingmode.Lock // Optional; caller retains it through Close.
 	Output             builder.OutputConfig
 	RuntimeGenerations map[sandbox.Language]string
-	ChatGuard          firewall.Guard
+	ChatGuard          firewall.Guard // Optional extra provider restriction.
 }
 
 // ManagedInstance owns the managed listener's recovery lock and database.
