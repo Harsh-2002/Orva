@@ -49,6 +49,17 @@ promotion. This binding is not a process fence or protection against a host
 administrator replacing raw database or sealed-store data.
 [Recovery details and test limits](../backend/internal/workloadrecovery/README.md).
 
+Explicit offline enrollment imports **no workload grants**. Current eligible
+deployments are rebuilt inside the Owner's managed build domain and bound to
+verified runtime/code generations. The managed SDK channel is transport only:
+legacy `sdk=true` becomes empty policy with review required and a system audit
+record; legacy `sdk=false` starts with empty policy tied to the verified pair.
+Function-origin jobs are suspended; unknown-provenance jobs and cron schedules
+are quarantined. Historical/excluded sources never supply managed serving
+authority. Stop even pre-lock binaries before enrollment; the durable intent
+blocks lock-aware binaries, and the final SQLite tombstone also blocks old
+binaries from opening their original DB path.
+
 ## Opt-in configuration and secret publication
 
 `workloadconfig` is not serving-wired. Its owner lock → IAM gate → transaction

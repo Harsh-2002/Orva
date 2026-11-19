@@ -20,10 +20,52 @@ Legacy `orva serve` requires no `.orva-serving-mode` entry and
 refusal, not legacy fallback. Managed mode stores SQLite under `managed/orva.db` and
 keeps an empty mode-0500 directory
 at `orva.db` so older binaries cannot open the original path. Do not remove
-the tombstone, edit the marker, or point a legacy binary at `managed/`. There
-is no public enrollment, downgrade, or interrupted-relocation command in this
-slice. The offline helper requires all daemons (including older releases) to
-be stopped and SQLite checkpointed with no WAL, SHM, or rollback journal.
+the tombstone, edit the marker, or point a legacy binary at `managed/`.
+Enrollment is an explicit offline server command; it is not available through
+HTTP. There is no downgrade or automated interrupted-enrollment repair.
+
+## Offline legacy enrollment
+
+1. **Back up first.** Verify an offline recovery copy of the complete legacy
+   instance, including the database, keys, runtime roots and all function
+   versions. Stop every daemon and other writer, including pre-lock releases.
+   Use the same instance path and service user for all steps. A stopped
+   modern legacy daemon leaves the lock file the command needs; if it is
+   absent, first finish a normal legacy startup and clean shutdown using the
+   current, lock-aware binary. Recover any rollback journal in legacy mode.
+2. Prepare the same [host cgroup delegation and witness](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only)
+   as for managed serving. Provision the witness once with
+   `orva setup --managed-witness PATH` if absent. Do **not** run
+   `setup --managed-layout provision` on the legacy instance. Keep
+   `ORVA_SERVING_MODE` unset, or set it to `legacy` for the enrollment commands.
+3. Run `orva managed enroll --dry-run --plan /safe/path/orva-enrollment.json`.
+   Keep the plan outside the data directory. The dry run copies SQLite and
+   its WAL, if present, and vacuums only in private scratch space. Review
+   flags, revision digests, and job/cron counts. An enrollable result means
+   the source fits the offline build profile, not that a jailed syntax
+   check or installed-runtime verification already ran.
+4. From the delegated service cgroup, run `orva managed enroll --apply
+   --plan /safe/path/orva-enrollment.json --confirm`. Supply a separate
+   `--exclude UUID` for every unsupported function you elect to leave inactive.
+   The profile supports only plain Node and Python with current successful
+   deployments and no dependency manifests, installed `node_modules`,
+   TypeScript, or legacy network egress. Installed rootfs trees must pass the
+   sealed runtime verifier. Drift requires a new dry run, not an edited plan.
+5. After successful publication, start `orva serve` from the same delegated
+   service layout. If `ORVA_SERVING_MODE` is set, change it to `managed`.
+   Current enrolled deployments are reconstructed from sealed artifacts;
+   policy and standing work start without imported grants. Explicitly excluded
+   functions are inactive. Reconfigure legacy exposures and review standing
+   work before depending on them.
+
+The whole original `functions/` tree remains under
+`legacy-functions.enrolled-<operation>` for offline inspection. Managed
+serving and rollback never use that tree; older deployments require an
+explicit rebuild. If apply fails after durable intent, leave the data, marker,
+tombstone, and Owner evidence intact. Both serving paths refuse incomplete
+layouts. Retain the failed tree for supervised inspection and recover from the
+verified pre-enrollment backup in a separate instance directory; do not retry
+by deleting or editing marker files.
 
 ## Fresh managed provisioning
 

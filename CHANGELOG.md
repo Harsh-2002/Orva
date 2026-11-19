@@ -16,6 +16,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- Legacy instances remain legacy on upgrade. To opt in to managed serving,
+  back up and stop the instance, run `orva managed enroll --dry-run`, then
+  apply the reviewed plan explicitly. No SDK grants or standing authority
+  carry over. Only current supported deployments are rebuilt; older sources
+  remain offline and unsupported functions require explicit exclusion.
 - The AI assistant no longer stores one-time credentials it mints. API keys,
   outbound webhook secrets and inbound webhook secrets created through Chat
   appear only in that turn's live result; stored history and later model

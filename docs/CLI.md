@@ -24,6 +24,21 @@ PATH` (create a witness only, refusing replacement) and `orva setup
 Neither flag enrolls legacy workloads. See the [supervised provisioning
 procedure](OPERATIONS.md#fresh-managed-provisioning).
 
+### Offline legacy enrollment (Linux server binary only)
+
+```sh
+orva managed enroll --dry-run --plan /safe/path/orva-enrollment.json
+orva managed enroll --apply --plan /safe/path/orva-enrollment.json --confirm
+```
+
+`--dry-run` is the default. The command locks the stopped instance selected
+by `--data-dir` (default `ORVA_DATA_DIR`), prints a canonical JSON plan, and
+optionally creates a new `--plan` file outside that instance. Applying
+requires an unchanged plan and explicit confirmation. Repeat `--exclude
+FUNCTION_UUID` for each unsupported function you elect to leave inactive.
+See the [offline procedure](OPERATIONS.md#offline-legacy-enrollment) before
+making changes. This command is not part of the shared slim CLI command tree.
+
 ### Linux + macOS
 
 ```bash

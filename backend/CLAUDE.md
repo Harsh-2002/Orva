@@ -6,14 +6,19 @@ recovery, managed SQLite and shutdown. It starts the managed scheduler before
 the listener and drains HTTP, stops the instance, then fences/closes the Owner.
 Legacy serve still follows directory aliases and requires an absent mode file
 and no root SQLite tombstone. The default installer doesn't enable managed mode.
-Offline relocation publishes the mode last; it does not enroll workloads.
+The server-only `managed enroll` command plans from an offline SQLite scratch
+copy, checks exact DB/source identity, and writes a fail-closed outer intent.
+It rebuilds only current compatible deployments under the bound Owner, commits
+empty policy, denies standing work, and records excluded owners as inactive.
+Owner binding and enrollment associations commit in the same transaction.
+Relocation preserves the original source tree and publishes the mode last.
 Startup restores durable pause and reconstructs
 only valid exact associations; restore gets a deny evaluator before dispatch.
 `scheduler.RunManaged` starts only shared-authority job/cron loops and drains
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. The authenticated final boot run selects same-boot exact fencing
-or typed epoch-and-parent removal, or a true kernel-cold opener. Legacy
-enrollment and portable restore remain gates.
+or typed epoch-and-parent removal, or a true kernel-cold opener. Portable
+restore remains a separate gate.
 
 Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
 over `workload_inbound_publications` (triggers unpublish any non-managed write;

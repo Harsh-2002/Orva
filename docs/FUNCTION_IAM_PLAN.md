@@ -22,14 +22,21 @@ review, exercised an attached named policy, and rechecked deny after revoke.
 Same-boot reopen retained durable pause and resumed into a separate inactive
 generation. Restore qualification reopened sealed assets and ran both
 interpreters without reviving quarantined authority. These are scoped
-integration checks, not the coordinated cut-over below. Ordinary reboot with a
-new kernel epoch, legacy source re-enrollment, and complete operator-surface
-acceptance remain gates; normal `orva serve` does not select this composition.
+integration checks, not the coordinated cut-over below. Complete
+operator-surface acceptance remains a gate; legacy `orva serve` does not
+select this composition on its own.
 
 Managed startup verifies the sealed Owner identity against SQLite before
 migration; in-place managed restore checks the same binding before archive
 promotion. This prevents enrolling legacy data or serving a foreign archive
 by accident. It does not make a managed backup portable.
+
+Cut-over slice 2 adds explicit Linux server-only offline enrollment. Its scope
+is current plain Node/Python deployment rebuild under the Owner, empty grants,
+SDK-enabled policy review, standing-work suspension/quarantine, and preservation
+of the legacy tree. It is not automatic activation, historical rollback, or
+cross-host restore. Fault injection covers the durable layout refusal boundary;
+this does not substitute for a real legacy-to-managed nsjail rehearsal.
 
 The real managed listener also qualifies explicit version rollout, stale
 rollout refusal and detach across REST and external MCP on jailed Node and

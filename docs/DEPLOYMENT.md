@@ -4,8 +4,10 @@
 
 The daemon selects managed serving only from `.orva-serving-mode`, under the
 same outer lock as legacy serving. It requires an exclusive, verified sealed
-Owner and matching database. This does not enroll legacy functions or support
-portable restore. Keep the first listener private during operator onboarding.
+Owner and matching database. Startup does not enroll legacy functions. Use the
+separate [offline enrollment procedure](OPERATIONS.md#offline-legacy-enrollment)
+to convert an existing instance. Portable restore is not supported. Keep the
+first listener private during operator onboarding.
 
 Prepare an owned cgroup-v2 service/container budget with CPU, memory and PID
 delegation. The workload parent is its `orva.workers` child. Systemd can use
