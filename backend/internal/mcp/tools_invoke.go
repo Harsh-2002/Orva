@@ -339,11 +339,15 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	if err != nil {
 		return nil, InvokeFunctionOutput{}, err
 	}
+	if deps.ManagedServer && deps.Proxy == nil {
+		return nil, InvokeFunctionOutput{}, errors.New("managed invocation is unavailable")
+	}
 	if fn.Status != "active" {
 		// match the REST handler's "building + prior code" carve-out: if
 		// the function is in the middle of a redeploy and a prior built
-		// code dir exists, allow the call to use the old code.
-		if !(fn.Status == "building" && hasPriorCode(deps.DataDir, fn.ID)) {
+		// code dir exists, allow the call to use the old code. Managed
+		// functions have no such legacy code directory and must be active.
+		if deps.ManagedServer || !(fn.Status == "building" && hasPriorCode(deps.DataDir, fn.ID)) {
 			return nil, InvokeFunctionOutput{}, fmt.Errorf("function status is %q, must be active", fn.Status)
 		}
 	}
@@ -531,8 +535,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		out.OrvaHint = hint
 	}
 
-	if ferr != nil && rec.Code == 0 {
-		// Forward never wrote a response — surface the error explicitly.
+	if ferr != nil && (result == nil || !result.Wrote) {
+		// Forward never wrote a response — surface the error explicitly. The
+		// recorder defaults to 200, so checking its code alone reported an
+		// admission or dispatch failure to the caller as an empty success.
 		return nil, out, fmt.Errorf("invoke failed: %s", errMsg)
 	}
 	return nil, out, nil

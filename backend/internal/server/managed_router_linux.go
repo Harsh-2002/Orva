@@ -56,6 +56,9 @@ type managedRouteDeps struct {
 	// managed authenticator reads keys live, so the default is a no-op, but
 	// the REST and MCP key surfaces must share this one closure.
 	InvalidateKey func(keyHash string)
+	// InvalidateSession evicts a revoked browser-session token from any cache.
+	// Managed authentication rereads sessions live; nil is a no-op.
+	InvalidateSession func(token string)
 }
 
 func (d *managedRouteDeps) invalidateKey() func(string) {
@@ -107,6 +110,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	}
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
+	mountManagedAccess(mux, db, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service
 	if publication != nil {
@@ -161,10 +165,14 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			}
 			respond.JSON(w, http.StatusOK, map[string]any{"artifact": artifact, "review_required": true})
 		}))
-		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, Configuration: configuration,
+		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
 			InvalidateKey: ops.invalidateKey()}
+		if invoke != nil {
+			// Channel tokens invoke only through this managed proxy and pool.
+			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
 		if chat != nil {
 			chat(mux, tools)
@@ -248,6 +256,38 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		mux.HandleFunc("GET /api/v1/system/storage", requireManagedOperator(db, managedAdmin, storage.GetStorage))
 		mux.HandleFunc("POST /api/v1/system/vacuum", requireManagedOperator(db, managedAdmin, storage.Vacuum))
 	}
+}
+
+// mountManagedAccess mounts API keys, OAuth connected applications, browser
+// sessions and agent channels. Keys and channels need admin, as on the legacy
+// router; revoking a grant or a session needs write. The OAuth authorization
+// server itself is not mounted: only existing grants can be listed and revoked.
+func mountManagedAccess(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps) {
+	keys := &handlers.KeyHandler{DB: db, InvalidateKey: ops.invalidateKey()}
+	mux.HandleFunc("POST /api/v1/keys", requireManagedOperator(db, managedAdmin, keys.Create))
+	mux.HandleFunc("GET /api/v1/keys", requireManagedOperator(db, managedAdmin, keys.List))
+	mux.HandleFunc("DELETE /api/v1/keys/{key_id}", requireManagedOperator(db, managedAdmin, keys.Delete))
+
+	apps := &handlers.OAuthAppsHandler{DB: db}
+	mux.HandleFunc("GET /api/v1/oauth/connected-apps", requireManagedOperator(db, managedRead, apps.List))
+	mux.HandleFunc("DELETE /api/v1/oauth/connected-apps/{id}", requireManagedOperator(db, managedWrite, apps.Revoke))
+	mux.HandleFunc("DELETE /api/v1/oauth/clients/{client_id}", requireManagedOperator(db, managedWrite, apps.RemoveApplication))
+
+	sessions := &handlers.AuthHandler{DB: db}
+	if ops.InvalidateSession != nil {
+		sessions.InvalidateSession = ops.InvalidateSession
+	}
+	mux.HandleFunc("GET /api/v1/auth/sessions", requireManagedOperator(db, managedRead, sessions.Sessions))
+	mux.HandleFunc("DELETE /api/v1/auth/sessions/{prefix}", requireManagedOperator(db, managedWrite, sessions.RevokeSession))
+
+	channels := &handlers.ChannelHandler{DB: db}
+	mux.HandleFunc("GET /api/v1/channels", requireManagedOperator(db, managedAdmin, channels.List))
+	mux.HandleFunc("POST /api/v1/channels", requireManagedOperator(db, managedAdmin, channels.Create))
+	mux.HandleFunc("GET /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Get))
+	mux.HandleFunc("PATCH /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Update))
+	mux.HandleFunc("PUT /api/v1/channels/{id}/functions", requireManagedOperator(db, managedAdmin, channels.SetFunctions))
+	mux.HandleFunc("POST /api/v1/channels/{id}/rotate", requireManagedOperator(db, managedAdmin, channels.Rotate))
+	mux.HandleFunc("DELETE /api/v1/channels/{id}", requireManagedOperator(db, managedAdmin, channels.Delete))
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,

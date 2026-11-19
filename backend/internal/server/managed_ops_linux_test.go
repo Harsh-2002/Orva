@@ -6,14 +6,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
@@ -33,7 +36,7 @@ type managedOpsFixture struct {
 	owner   string
 }
 
-func newManagedOpsFixture(t *testing.T) *managedOpsFixture {
+func newManagedOpsFixture(t *testing.T, tune ...func(*managedRouteDeps)) *managedOpsFixture {
 	t.Helper()
 	db, err := database.New(filepath.Join(t.TempDir(), "managed.db"))
 	managedMust(t, err)
@@ -55,7 +58,11 @@ func newManagedOpsFixture(t *testing.T) *managedOpsFixture {
 		managedMust(t, runtime.pool.Shutdown(context.Background()))
 		runtime.hub.Close()
 	})
-	router, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, nil, nil, filepath.Dir(db.Path()), runtime.invoke, nil, nil, nil, runtime.routeDeps("/usr/local/bin/nsjail"))
+	ops := runtime.routeDeps("/usr/local/bin/nsjail")
+	for _, fn := range tune {
+		fn(ops)
+	}
+	router, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, nil, nil, filepath.Dir(db.Path()), runtime.invoke, nil, nil, nil, ops)
 	managedMust(t, err)
 	return &managedOpsFixture{t: t, db: db, reg: reg, runtime: runtime, router: router, owner: owner}
 }
@@ -333,6 +340,10 @@ func TestManagedRoutesRequireTheLegacyTier(t *testing.T) {
 		{http.MethodDelete, "/api/v1/executions/" + ids.New(), managedWrite},
 		{http.MethodPost, "/api/v1/executions/bulk-delete", managedWrite},
 		{http.MethodPost, "/api/v1/executions/" + ids.New() + "/replay", managedWrite},
+		{http.MethodGet, "/api/v1/keys", managedAdmin},
+		{http.MethodPost, "/api/v1/keys", managedAdmin},
+		{http.MethodGet, "/api/v1/channels", managedAdmin},
+		{http.MethodDelete, "/api/v1/channels/" + ids.New(), managedAdmin},
 		{http.MethodGet, "/api/v1/system/storage", managedAdmin},
 		{http.MethodPost, "/api/v1/system/vacuum", managedAdmin},
 	}
@@ -350,5 +361,151 @@ func TestManagedRoutesRequireTheLegacyTier(t *testing.T) {
 				t.Fatalf("%s %s admitted a %q-only key: %d", route.method, route.path, tier, rec.Code)
 			}
 		}
+	}
+}
+
+func TestManagedKeysEvictThroughTheSharedClosure(t *testing.T) {
+	var mu sync.Mutex
+	var evicted []string
+	f := newManagedOpsFixture(t, func(ops *managedRouteDeps) {
+		ops.InvalidateKey = func(hash string) { mu.Lock(); evicted = append(evicted, hash); mu.Unlock() }
+	})
+	admin, _ := f.key("admin", `["admin"]`)
+	reader, _ := f.key("reader", `["read"]`)
+	f.expect(http.MethodGet, "/api/v1/keys", reader, "", http.StatusForbidden)
+	f.expect(http.MethodGet, "/api/v1/keys", "", "", http.StatusUnauthorized)
+
+	rec := f.expect(http.MethodPost, "/api/v1/keys", admin, `{"name":"minted","permissions":["read"]}`, http.StatusCreated)
+	var minted struct {
+		ID  string `json:"id"`
+		Key string `json:"key"`
+	}
+	managedMust(t, json.Unmarshal(rec.Body.Bytes(), &minted))
+	if minted.ID == "" || !strings.HasPrefix(minted.Key, "orva_") {
+		t.Fatalf("unexpected mint response: %s", rec.Body.String())
+	}
+	f.expect(http.MethodGet, "/api/v1/executions", minted.Key, "", http.StatusOK)
+	if body := f.expect(http.MethodGet, "/api/v1/keys", admin, "", http.StatusOK).Body.String(); strings.Contains(body, minted.Key) {
+		t.Fatal("key listing exposed a plaintext key")
+	}
+
+	f.expect(http.MethodDelete, "/api/v1/keys/"+minted.ID, admin, "", http.StatusOK)
+	f.expect(http.MethodGet, "/api/v1/executions", minted.Key, "", http.StatusUnauthorized)
+	sum := sha256.Sum256([]byte(minted.Key))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(evicted) != 1 || evicted[0] != hex.EncodeToString(sum[:]) {
+		t.Fatalf("deleting a key did not call the shared invalidation closure with its hash: %v", evicted)
+	}
+}
+
+func TestManagedSessionsListAndRevoke(t *testing.T) {
+	var mu sync.Mutex
+	var forgotten []string
+	f := newManagedOpsFixture(t, func(ops *managedRouteDeps) {
+		ops.InvalidateSession = func(token string) { mu.Lock(); forgotten = append(forgotten, token); mu.Unlock() }
+	})
+	// The reviewed session-identity shape that managed authentication requires.
+	_, err := f.db.WriteDB().Exec(`ALTER TABLE sessions ADD COLUMN id TEXT; CREATE UNIQUE INDEX idx_sessions_identity ON sessions(id)`)
+	managedMust(t, err)
+	user, err := f.db.CreateUser("session-user", "test-only-password")
+	managedMust(t, err)
+	current, err := f.db.CreateSession(user.ID, time.Hour)
+	managedMust(t, err)
+	other, err := f.db.CreateSession(user.ID, time.Hour)
+	managedMust(t, err)
+	do := func(method, path, token string, origin bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.AddCookie(&http.Cookie{Name: "session_token", Value: token})
+		if origin {
+			req.Header.Set("Origin", "http://"+req.Host)
+		}
+		rec := httptest.NewRecorder()
+		f.router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodGet, "/api/v1/auth/sessions", current.Token, false); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), other.Token[:8]) || !strings.Contains(rec.Body.String(), `"current":true`) {
+		t.Fatalf("session list: %d %s", rec.Code, rec.Body.String())
+	}
+	f.expect(http.MethodGet, "/api/v1/auth/sessions", "", "", http.StatusUnauthorized)
+	prefix := other.Token[:16]
+	// A cross-site mutation is refused before the handler runs.
+	if rec := do(http.MethodDelete, "/api/v1/auth/sessions/"+prefix, current.Token, false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("session revoke without same-origin proof: %d", rec.Code)
+	}
+	if rec := do(http.MethodDelete, "/api/v1/auth/sessions/"+current.Token[:16], current.Token, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a session revoked itself: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(http.MethodDelete, "/api/v1/auth/sessions/"+prefix, current.Token, true); rec.Code != http.StatusOK {
+		t.Fatalf("session revoke: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(http.MethodGet, "/api/v1/auth/sessions", other.Token, false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked session still authenticates: %d", rec.Code)
+	}
+	// Connected applications are session-only management, like the legacy router.
+	f.expect(http.MethodGet, "/api/v1/oauth/connected-apps", "", "", http.StatusUnauthorized)
+	if rec := do(http.MethodGet, "/api/v1/oauth/connected-apps", current.Token, false); rec.Code != http.StatusOK {
+		t.Fatalf("connected apps: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(http.MethodDelete, "/api/v1/oauth/clients/"+ids.New(), current.Token, true); rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Fatalf("application removal refused a session: %d %s", rec.Code, rec.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(forgotten) != 1 || forgotten[0] != other.Token {
+		t.Fatalf("revocation did not call the session invalidation hook: %v", forgotten)
+	}
+}
+
+func TestManagedChannelsAndTheirManagedCatalog(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	admin, _ := f.key("admin", `["admin"]`)
+	rec := f.expect(http.MethodPost, "/api/v1/channels", admin, `{"name":"agents","function_ids":["`+f.owner+`"]}`, http.StatusCreated)
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	managedMust(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	if !strings.HasPrefix(created.Token, "orva_chn_") {
+		t.Fatalf("channel creation returned no token: %s", rec.Body.String())
+	}
+	f.expect(http.MethodGet, "/api/v1/channels", admin, "", http.StatusOK)
+	// A channel token carries no management authority on the REST surface.
+	f.expect(http.MethodGet, "/api/v1/channels", created.Token, "", http.StatusUnauthorized)
+
+	mcpCall := func(deps mcp.Deps, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		rec := httptest.NewRecorder()
+		mcp.NewHandler(deps).ServeHTTP(rec, req)
+		return rec
+	}
+	deps := mcp.Deps{ManagedServer: true, DB: f.db, Registry: f.reg, DataDir: t.TempDir(),
+		Proxy: f.runtime.invoke.Proxy, Metrics: f.runtime.metrics}
+	list := mcpCall(deps, created.Token, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"name":"managed"`) ||
+		strings.Contains(list.Body.String(), "create_iam_policy") {
+		t.Fatalf("channel catalog is not the invoke-only bundle: %d %s", list.Code, list.Body.String())
+	}
+	// The call reaches the managed pool, which has no Factory here: denied, no legacy fallback.
+	call := mcpCall(deps, created.Token, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"managed","arguments":{"method":"GET"}}}`)
+	if call.Code != http.StatusOK || !strings.Contains(call.Body.String(), `"isError":true`) ||
+		!strings.Contains(call.Body.String(), pool.ErrNoFunction.Error()) {
+		t.Fatalf("channel invocation was not refused by managed admission: %d %s", call.Code, call.Body.String())
+	}
+	// Without a managed proxy the channel catalog stays off.
+	bare := deps
+	bare.Proxy = nil
+	if rec := mcpCall(bare, created.Token, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("channel token accepted without a managed proxy: %d", rec.Code)
+	}
+
+	// Rotation and deletion take effect immediately on /mcp.
+	f.expect(http.MethodDelete, "/api/v1/channels/"+created.ID, admin, "", http.StatusOK)
+	if rec := mcpCall(deps, created.Token, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted channel token still authenticates: %d", rec.Code)
 	}
 }

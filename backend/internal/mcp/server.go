@@ -321,7 +321,9 @@ func NewHandler(deps Deps) http.Handler {
 				"missing or invalid bearer token")
 			return
 		}
-		if deps.ManagedServer && principal.Kind == authpkg.KindChannel {
+		// Channel tokens are served in managed mode only as the invoke-only
+		// catalog, which dispatches through the managed proxy and pool.
+		if deps.ManagedServer && principal.Kind == authpkg.KindChannel && deps.Proxy == nil {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "channel credentials unavailable on the managed tool surface")
 			return
 		}
