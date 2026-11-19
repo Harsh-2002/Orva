@@ -1,9 +1,9 @@
 # HTTP API reference
 
-## Admission-closed managed server integration (internal)
+## Managed server
 
-This separate Linux composition is not selected by normal `orva serve`. It
-mounts managed handlers without falling back to legacy mutation routes.
+On Linux, `orva serve` selects this composition from the durable managed mode
+record. It mounts managed handlers without falling back to legacy mutation routes.
 Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
 on this composition.
 
@@ -67,16 +67,18 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
+| Chat | `/api/v1/ai/*` (see [AI assistant](#ai-assistant)) | admin |
 
 The OAuth authorization server endpoints are not mounted: existing grants can
 be listed and revoked, not issued. Connected apps and sessions are cookie-bound,
 as on the normal server, and have no MCP tool. `GET /api/v1/system/storage`
 reports the plain data directory; it does not include sealed artifact stores.
 
-- **Activity.** Every request, including unauthenticated attempts, writes an
-  activity row; authenticated routes attribute it to the key (`source: api`) or
-  session (`source: web`). Managed invocations record executions, logs, spans
-  and activity the same way the normal server does.
+- **Activity.** Eligible requests queue best-effort activity rows, with key
+  (`source: api`) or browser session (`source: web`) attribution when resolved.
+  Static assets, the activity and event feeds, and successful routine polls
+  are excluded. Rows may be dropped under writer pressure. Managed invocations
+  record executions, logs, spans and activity the same way the legacy server does.
 - **Replay.** `POST /api/v1/executions/{id}/replay` re-runs a captured request
   only through the managed pool: the acquired Factory must be the function's
   current version (otherwise `409 NOT_ACTIVE`, no dispatch), its timeout comes
@@ -1106,6 +1108,13 @@ function allowed to do" tooltip.
 The in-product agentic chat (the dashboard's **AI** section). Requires
 a configured provider (BYO key). Streaming endpoints emit
 `text/event-stream`; everything else is JSON. All paths require `admin`.
+
+In managed mode, Chat only receives the managed tool catalog, scoped to the
+caller's permissions. If no egress policy has compiled, model discovery
+returns `200` with `models: []` and an `error`, and turns report an SSE
+`error` without contacting a provider. A blocked provider produces the same
+response shapes. Model discovery checks the address at dial time; chat turns
+check the provider endpoint before the turn, not at dial time.
 
 ### `POST /api/v1/ai/chat`
 Send a user message and stream the assistant turn. Body carries

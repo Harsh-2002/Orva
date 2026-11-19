@@ -18,6 +18,9 @@ only valid exact associations; restore gets a deny evaluator before dispatch.
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. The authenticated final boot run selects same-boot exact fencing
 or typed epoch-and-parent removal, or a true kernel-cold opener.
+Managed Chat shares the managed MCP tool dependencies. Its instance-owned egress
+manager compiles before the listener opens and drains before SQLite closes.
+Missing policy denies provider traffic without disabling the Chat routes.
 Managed v2 downloads project source from exact current code leases. The
 offline restore command reseals under a fresh local Owner, commits rebinding
 and quarantine in staged SQLite, and publishes managed mode last. Same-Owner

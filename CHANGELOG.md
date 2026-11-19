@@ -20,7 +20,8 @@ unreleased range, and the sections below as the record for everything before it.
   has: executions (list, get, logs, captured request, delete, bulk delete),
   replay, traces, activity, the `/api/v1/events` stream, system health, metrics,
   storage and vacuum, API keys, OAuth connected apps, browser sessions and
-  channels. Health and `/metrics` stay unauthenticated, as before.
+  channels, and dashboard Chat. Health and `/metrics` stay unauthenticated,
+  as before.
 - Managed routes require exactly the permission the normal server requires:
   `read` for GET, `write` for other methods, `admin` for keys, channels, the AI
   assistant, backup, storage and vacuum. Deployment publication, creation,
@@ -41,8 +42,12 @@ unreleased range, and the sections below as the record for everything before it.
   (all-permissions / read-only key); it adds `replay_execution`,
   `list_activity` and read-only `list_channels` and `get_channel`, and now
   includes the API-key tools. The normal catalog is unchanged (73/28).
-- Every managed request is written to the activity log, attributed to the key or
-  session.
+- Managed Chat uses only the managed tool catalog. Model discovery and Chat
+  turns do not contact providers until the instance has a compiled egress
+  policy. Settings and conversation history remain available.
+- Eligible managed requests queue best-effort activity rows, attributed to the
+  key or session when resolved. Routine successful polling and feed requests
+  are excluded, and writer pressure can drop rows.
 - `invoke_function` and channel tools now return an error when the invocation
   failed before any response was written, instead of an empty `200` result.
   This applies to the normal server too.
