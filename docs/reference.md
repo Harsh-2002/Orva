@@ -1028,8 +1028,10 @@ call directly. API key permissions scope the available tool set.
 > (both `write`) manage saved request presets by function name or UUID without
 > invoking code. In managed MCP and Chat, each tool rechecks the operator's live
 > credential and required tier at call time, and works for inactive functions.
-> Only the normal catalog also offers `test_function_with_fixture` to run a
-> preset; its shallow-merge `override` does not change the stored fixture.
+> `test_function_with_fixture` requires `invoke` and runs a saved preset. In
+> managed mode it rechecks that live tier and uses only the installed managed
+> function, without approving its permissions. Overrides do not change the
+> stored preset; header names are case-insensitive.
 
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 

@@ -262,9 +262,9 @@
         Managed MCP and Chat also offer <code class="doc-chip">list_fixtures</code>
         (<code class="doc-chip">read</code>), <code class="doc-chip">save_fixture</code>
         and <code class="doc-chip">delete_fixture</code> (both <code class="doc-chip">write</code>).
-        Each tool rechecks the live credential and required permission. These tools
-        only manage stored presets; <code class="doc-chip">test_function_with_fixture</code>
-        is not available on the managed catalog.
+        Each tool rechecks its required permission. Use
+        <code class="doc-chip">test_function_with_fixture</code> (<code class="doc-chip">invoke</code>)
+        to run a preset against an installed managed function without changing the preset.
       </p>
     </section>
 
