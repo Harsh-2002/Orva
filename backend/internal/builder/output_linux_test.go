@@ -453,11 +453,15 @@ func TestManagedOutputKernel(t *testing.T) {
 					t.Fatal("canceled build did not fence")
 				}
 			} else if mode == "profiles" {
-				for _, name := range []string{"package.json", "requirements.txt", "tsconfig.json"} {
+				for _, name := range []string{"requirements.txt", "tsconfig.json"} {
 					a := createTestArchive(t, map[string]string{"handler.js": "exports.handler = () => 42", name: "{}"})
 					if _, e := b.Build(t.Context(), fn, a); !errors.Is(e, ErrOutputProfile) {
 						t.Fatal("unsupported build profile admitted:", name, e)
 					}
+				}
+				a := createTestArchive(t, map[string]string{"handler.js": "exports.handler = () => 42", "package.json": "{}"})
+				if _, e := b.Build(t.Context(), fn, a); !errors.Is(e, sandbox.ErrEgressPolicyMissing) {
+					t.Fatal("installer did not fail closed:", e)
 				}
 				b.BuildFunc = func(context.Context, string, string, string) (int64, error) {
 					t.Fatal("host hook invoked")

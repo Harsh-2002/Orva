@@ -17,6 +17,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
+	"github.com/google/uuid"
 )
 
 var (
@@ -367,7 +368,9 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 			j.releaseSlot()
 		}
 	}()
-	if len(fn.ID) != 36 || len(fn.Entrypoint) > j.owner.cfg.Limits.PathBytes ||
+	id, idErr := uuid.Parse(fn.ID)
+	if idErr != nil || id.String() != fn.ID || id.Variant() != uuid.RFC4122 || id.Version() < 1 || id.Version() > 8 ||
+		len(fn.Entrypoint) > j.owner.cfg.Limits.PathBytes ||
 		(fn.Runtime != "node" && fn.Runtime != "python") {
 		return nil, artifactfs.ErrInvalid
 	}
@@ -419,12 +422,15 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err != nil {
 		return nil, err
 	}
-	if err = validateOutputProfile(fn, j.path); err != nil {
+	profile, err := managedProfile(fn, j.path)
+	if err != nil {
 		return nil, err
 	}
 	j.done = make(chan error, 1)
 	j.finished = false
-	go func() { j.done <- b.checkSyntax(ctx, j.path, fn.Runtime, fn.Entrypoint) }()
+	go func() {
+		j.done <- b.runManagedSteps(ctx, fn, j.path, profile)
+	}()
 	select {
 	case err = <-j.done:
 		j.finished = true
@@ -447,6 +453,18 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err != nil {
 		return nil, err
 	}
+	for _, name := range []string{fn.Entrypoint, profile.entrypoint} {
+		found := false
+		for _, e := range manifest.Entries {
+			if e.Path == name && e.Type == artifactfs.TypeFile {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("managed build entrypoint %s is not a regular file", name)
+		}
+	}
 	j.generation, err = j.stage.Seal(ctx, artifactfs.KindCode, fn.ID, manifest, digest)
 	if err != nil {
 		return nil, err
@@ -462,22 +480,77 @@ func (b *Builder) buildManaged(ctx context.Context, fn *database.Function, archi
 	if err = j.releaseDomain(release); err != nil {
 		return nil, err
 	}
-	return &BuildResult{Duration: time.Since(start), CodeHash: versionHash(sourceHash, resultABI), Entrypoint: fn.Entrypoint,
+	if profile.compile {
+		logTSCCompiled(b, profile.entrypoint)
+	}
+	return &BuildResult{Duration: time.Since(start), CodeHash: versionHash(sourceHash, resultABI), Entrypoint: profile.entrypoint,
 		RuntimeArtifact: runtimeID, RuntimeABI: resultABI, CodeArtifact: codeID, SourceArchiveSHA256: sourceHash, AuthoredEntrypoint: fn.Entrypoint}, nil
 }
 
-func validateOutputProfile(fn *database.Function, path string) error {
+type managedBuildProfile struct {
+	entrypoint       string
+	install, compile bool
+}
+
+func managedProfile(fn *database.Function, path string) (p managedBuildProfile, err error) {
 	if !outputPath(fn.Entrypoint, 4096) || fn.Entrypoint == "." {
-		return ErrOutputProfile
+		return p, ErrOutputProfile
 	}
 	ext := filepath.Ext(fn.Entrypoint)
-	if (fn.Runtime == "node" && ext != ".js" && ext != ".cjs" && ext != ".mjs") || (fn.Runtime == "python" && ext != ".py") {
-		return ErrOutputProfile
+	if (fn.Runtime == "node" && ext != ".js" && ext != ".cjs" && ext != ".mjs" && ext != ".ts") ||
+		(fn.Runtime == "python" && ext != ".py") {
+		return p, ErrOutputProfile
 	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return p, err
+	}
+	defer root.Close()
+	info, err := root.Lstat(fn.Entrypoint)
+	if err != nil || !info.Mode().IsRegular() {
+		return p, fmt.Errorf("%w: authored entrypoint must be a regular file", ErrOutputProfile)
+	}
+	p.entrypoint = fn.Entrypoint
 	for _, name := range []string{"package.json", "requirements.txt", "tsconfig.json"} {
-		if _, err := os.Lstat(filepath.Join(path, name)); !errors.Is(err, os.ErrNotExist) {
-			return ErrOutputProfile
+		info, err := root.Lstat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() || (name == "requirements.txt") != (fn.Runtime == "python") {
+			return p, fmt.Errorf("%w: %s must be a regular manifest for the selected runtime", ErrOutputProfile, name)
+		}
+		if name == "tsconfig.json" {
+			p.compile = true
+		} else {
+			p.install = true
 		}
 	}
-	return ValidateArchive(path, fn.Runtime, fn.Entrypoint)
+	if p.compile {
+		if err := verifyTypeScriptDeclared(filepath.Join(path, "package.json")); err != nil {
+			return p, fmt.Errorf("%w: %w", ErrOutputProfile, err)
+		}
+		p.entrypoint = compiledEntrypoint(fn.Entrypoint, readTSConfigOutDir(root))
+	} else if ext == ".ts" {
+		return p, fmt.Errorf("%w: TypeScript requires tsconfig.json", ErrOutputProfile)
+	}
+	return p, ValidateArchive(path, fn.Runtime, fn.Entrypoint)
+}
+
+func (b *Builder) runManagedSteps(ctx context.Context, fn *database.Function, path string, profile managedBuildProfile) error {
+	if err := b.checkSyntax(ctx, path, fn.Runtime, fn.Entrypoint); err != nil {
+		return err
+	}
+	if profile.install {
+		install := b.installNPM
+		if fn.Runtime == "python" {
+			install = b.installPip
+		}
+		if err := install(ctx, fn.ID, path); err != nil {
+			return err
+		}
+	}
+	if profile.compile {
+		return b.compileTypeScript(ctx, fn.ID, path)
+	}
+	return nil
 }

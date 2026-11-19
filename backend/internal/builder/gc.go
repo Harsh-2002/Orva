@@ -49,6 +49,7 @@ type GC struct {
 	// listLimit is the page size used to enumerate functions. Overridden in
 	// tests to exercise the truncated-listing guard.
 	listLimit int
+	cacheOnly bool
 }
 
 type cacheSizeMemo struct {
@@ -59,6 +60,13 @@ type cacheSizeMemo struct {
 // NewGC returns a GC bound to the data dir + DB.
 func NewGC(dataDir string, db *database.Database) *GC {
 	return &GC{dataDir: dataDir, db: db, cacheSizes: map[string]cacheSizeMemo{}, listLimit: 10000}
+}
+
+// NewBuildCacheGC leaves legacy function paths and sealed stores alone.
+func NewBuildCacheGC(dataDir string, db *database.Database) *GC {
+	g := NewGC(dataDir, db)
+	g.cacheOnly = true
+	return g
 }
 
 // Run is the long-running goroutine. Stops cleanly on ctx cancel.
@@ -104,7 +112,9 @@ func (g *GC) tick(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		pruned += g.pruneFunction(fn.ID, keep)
+		if !g.cacheOnly {
+			pruned += g.pruneFunction(fn.ID, keep)
+		}
 	}
 	if pruned > 0 {
 		slog.Info("version gc tick", "pruned", pruned, "kept_per_fn", keep)
