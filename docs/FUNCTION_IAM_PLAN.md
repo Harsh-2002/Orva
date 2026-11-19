@@ -34,6 +34,18 @@ host-bound Owner and publishes managed mode last. Policy text remains
 inspectable, but approval is cleared; route/webhook publication and standing
 work do not resume. The same-Owner restore path is not relaxed.
 
+Slice 3 scratch acceptance: `test/managed-enrollment.py` with
+`ORVA_PORTABLE_VM_TEST=disposable-vm` passed in an offline `msb --no-net`
+Ubuntu 26.04 guest. Two service cgroups, data directories and independently
+created witnesses simulated hosts A and B. A ran both interpreters, allowed
+the granted KV write, and dispatched a custom route and signed webhook.
+B refused a truncated archive, rebuilt the current deployments, returned the
+same Node/Python results, denied the KV write, retained policy text with
+quarantine/review state, and returned 404 for both exposures. A's same-Owner
+replay kept its sealed stores and applied existing restore quarantine.
+The guest was removed. This is not a different-kernel, power-loss, or
+full-release E2E qualification.
+
 Cut-over slice 2 adds explicit Linux server-only offline enrollment. Its scope
 is current plain Node/Python deployment rebuild under the Owner, empty grants,
 SDK-enabled policy review, standing-work suspension/quarantine, and preservation

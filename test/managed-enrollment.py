@@ -2,14 +2,19 @@
 """Real legacy -> managed enrollment acceptance; disposable offline VM only."""
 
 import hashlib
+import hmac
+import io
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import sqlite3
 import subprocess
+import tarfile
 import time
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 NODE = """
@@ -73,15 +78,16 @@ def main():
            "ORVA_MANAGED_WORKLOAD_PARENT": str(budget / "orva.workers")}
     key = None
 
-    def run(*args, mode="legacy", group=None, expect=0, log=None):
+    def run(*args, mode="legacy", group=None, expect=0, log=None, host=None):
         argv = [binary, *args]
         if group:
             argv = ["/bin/sh", "-ec", 'echo "$$" > "$1/cgroup.procs"; shift; exec "$@"',
                     "sh", str(group), *argv]
+        run_env = {**env, "ORVA_SERVING_MODE": mode, **(host or {})}
         if log:
-            return subprocess.Popen(argv, env={**env, "ORVA_SERVING_MODE": mode},
+            return subprocess.Popen(argv, env=run_env,
                                     stdout=log, stderr=log)
-        result = subprocess.run(argv, env={**env, "ORVA_SERVING_MODE": mode},
+        result = subprocess.run(argv, env=run_env,
                                 capture_output=True, timeout=180)
         assert result.returncode == expect, (
             f"{args[:2]} exited {result.returncode}, expected {expect}: " +
@@ -89,8 +95,8 @@ def main():
         )
         return result
 
-    def request(method, path, value=None):
-        headers = {"Content-Type": "application/json"}
+    def request(method, path, value=None, extra_headers=None):
+        headers = {"Content-Type": "application/json", **(extra_headers or {})}
         if key:
             headers["X-Orva-API-Key"] = key
         body = json.dumps(value).encode() if value is not None else None
@@ -123,8 +129,8 @@ def main():
             proc.send_signal(signal.SIGTERM)
         assert proc.wait(timeout=40) == 0, "daemon did not shut down cleanly"
 
-    def boot(mode, group, log):
-        proc = run("serve", mode=mode, group=group, log=log)
+    def boot(mode, group, log, host=None):
+        proc = run("serve", mode=mode, group=group, log=log, host=host)
         try:
             until(lambda: request("GET", "/api/v1/auth/status")[0] == 200,
                   f"{mode} daemon listening")
@@ -200,6 +206,111 @@ def main():
         assert db.execute("SELECT excluded FROM workload_enrollment_functions WHERE function_id=?",
                           (excluded,)).fetchone() == (1,)
     print("managed Node and Python returned the same results; protected SDK write denied; only legacy SDK opt-in requires review")
+
+    if os.environ.get("ORVA_PORTABLE_VM_TEST") == "disposable-vm":
+        portable(run, boot, stop, request, api, data, witness, budget, owners)
+
+
+def portable(run, boot, stop, request, api, data, witness, budget, owners):
+    scratch = data.parent
+    b = scratch / "host-b"
+    w = scratch / "witness-b" / "witness"
+    g = budget.with_name(budget.name + "-host-b")
+    g.mkdir()
+    shutil.copytree(data / "rootfs", b / "rootfs", symlinks=True)
+    host_b = {"ORVA_DATA_DIR": str(b), "ORVA_MANAGED_WITNESS_PATH": str(w),
+              "ORVA_MANAGED_WORKLOAD_PARENT": str(g / "orva.workers")}
+    run("setup", "--managed-witness", str(w), host=host_b)
+    assert witness.read_bytes() != w.read_bytes()
+    archive = scratch / "portable.tar.gz"
+    node = owners["node"]
+    base = f"/api/v1/functions/{node}"
+    route = "/portable-managed/*"
+    route_invoke = "/portable-managed/check"
+    body = {"event": "portable"}
+
+    def exposure(kind, key=None):
+        params = {"kind": kind, "function_id": node}
+        if key is not None:
+            params["key"] = key
+        return api("GET", "/api/v1/exposures?" + urlencode(params))
+
+    def approval():
+        s = api("GET", base + "/permissions")["host"]
+        return {k: s[k] for k in ("revision", "current_artifact", "approved_artifact")}
+
+    with (scratch / "portable-a.private.log").open("wb") as log:
+        daemon = boot("managed", budget / "orva.daemon", log)
+        try:
+            api("PUT", base + "/permissions", {"expected": approval(), "policy": {
+                "schema_version": 1, "allow": [{"actions": ["kv.put"],
+                    "resource": {"own_kv": {"key": "enrollment-check"}}, "context": "execution"}], "inbound": []}})
+            api("POST", base + "/permissions/review", {"expected": approval()})
+            assert request("GET", f"/fn/{node}/probe") == (200, b"kv-allowed")
+            r = exposure("route", route)
+            api("POST", "/api/v1/routes", {"path": route, "function_id": node, "methods": "GET",
+                "version": r["version"], "expected": r["expected"]})
+            assert request("GET", route_invoke) == (200, b"node-current")
+            r = exposure("inbound")
+            hook = api("POST", base + "/inbound-webhooks", {"name": "portable-hook", "version": r["version"],
+                "expected": r["expected"]})
+            hook_id = hook["inbound_webhook"]["id"]
+            sig = hmac.new(hook["secret"].encode(), json.dumps(body).encode(), "sha256").hexdigest()
+            webhook = f"/webhook/{hook_id}"
+            sig_header = {hook["inbound_webhook"]["signature_header"]: sig}
+            assert request("POST", webhook, body, sig_header) == (200, b"node-current")
+            status, payload = request("GET", "/api/v1/backup")
+            assert status == 200
+            archive.write_bytes(payload)
+        finally:
+            stop(daemon)
+    with tarfile.open(fileobj=io.BytesIO(archive.read_bytes()), mode="r:gz") as tar:
+        manifest = json.load(tar.extractfile("manifest.json"))
+        assert manifest["format_version"] == 2 and len(manifest["deployment_sources"]) == 2
+        assert set(tar.getnames()) == {"manifest.json", *manifest["files"]}
+        assert all(name == "orva.db" or name in {"keys/master.key", "keys/admin.key"} or
+                   (name.startswith("sources/") and name.endswith(".tar.gz")) for name in manifest["files"])
+    print("A: authorized SDK write, live route and signed webhook; v2 archive lists only the allowlisted files", flush=True)
+
+    before = tree_hash(b)
+    run("managed", "restore", "--archive", str(archive), host=host_b)
+    assert before == tree_hash(b)
+    broken = scratch / "broken.tar.gz"
+    broken.write_bytes(archive.read_bytes()[:-1])
+    run("managed", "restore", "--archive", str(broken), "--confirm", host=host_b, expect=1)
+    assert not (b / ".orva-portable-restore-intent").exists()
+    run("managed", "restore", "--archive", str(archive), "--confirm", host=host_b, group=g)
+    run("serve", mode="legacy", host=host_b, group=g / "orva.daemon", expect=78)
+
+    def verify(group, logname, host=None):
+        with (scratch / logname).open("wb") as log:
+            daemon = boot("managed", group, log, host)
+            try:
+                for lang, fn in owners.items():
+                    assert request("GET", f"/fn/{fn}") == (200, f"{lang}-current".encode())
+                assert request("GET", f"/fn/{node}/probe") == (200, b"IAM_DENIED")
+                assert request("GET", route_invoke)[0] == 404
+                assert request("POST", webhook, body, sig_header)[0] == 404
+            finally:
+                stop(daemon)
+
+    verify(g / "orva.daemon", "portable-b.private.log", host_b)
+    with sqlite3.connect(f"file:{b}/managed/orva.db?mode=ro", uri=True) as db:
+        rows = db.execute("SELECT quarantined,review_required,approved_artifact FROM workload_iam_policies").fetchall()
+        assert len(rows) == 3 and all(row == (1, 1, "0" * 64) for row in rows)
+        prior, next_owner, epoch = db.execute(
+            "SELECT prior_owner,new_owner,restore_epoch FROM workload_portable_restore_audit").fetchone()
+        assert prior == manifest["prior_owner"] and prior != next_owner and epoch == 1
+        assert db.execute("SELECT owner FROM workload_owner_binding").fetchone() == (next_owner,)
+    print("B: separate witness/Owner, unchanged Node/Python responses, deny-only SDK, review required, exposures unpublished", flush=True)
+
+    run("managed", "restore", "--same-owner", "--archive", str(archive), "--confirm",
+        mode="managed", group=budget / "orva.daemon")
+    verify(budget / "orva.daemon", "portable-a-replay.private.log")
+    with sqlite3.connect(f"file:{data}/managed/orva.db?mode=ro", uri=True) as db:
+        assert db.execute("SELECT owner FROM workload_owner_binding").fetchone() == (manifest["prior_owner"],)
+        assert db.execute("SELECT epoch FROM workload_recovery").fetchone() == (1,)
+    print("A replay: same Owner and seals, same Node/Python responses, existing restore quarantine applied", flush=True)
 
 
 if __name__ == "__main__":

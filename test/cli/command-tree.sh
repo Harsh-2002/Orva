@@ -7,8 +7,8 @@
 #   bash test/cli/command-tree.sh
 #
 # Builds both binaries fresh, walks every subcommand via `--help`, captures
-# leaf command paths, and diffs them. Server binary additionally has
-# serve, setup and managed offline commands are filtered out before the diff.
+# leaf command paths, and diffs them. Server-only serve, setup and managed
+# offline commands are filtered out before the diff.
 
 set -uo pipefail
 
@@ -90,7 +90,7 @@ slim_count=$(wc -l < "$OUT/slim.txt")
 server_count=$(wc -l < "$OUT/server.txt")
 [[ "$slim_count" -ge 50 ]] || die "enumerated only $slim_count slim CLI commands; help parser is incomplete"
 # Check the exact host-only paths as well as the shared client commands.
-[[ "$server_count" -eq $((slim_count + 4)) ]] || \
+[[ "$server_count" -eq $((slim_count + 5)) ]] || \
     die "enumerated only $server_count server commands for $slim_count client commands"
 for required in activity deploy functions invoke login system upgrade; do
     grep -qx "$required" "$OUT/slim.txt" || die "required top-level command missing from snapshot: $required"
