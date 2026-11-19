@@ -58,6 +58,13 @@ const maxSDKPendingReplies = 2 * MaxSDKInflight
 // the worker is not reused.
 var errSDKProtocol = errors.New("sdk protocol violation")
 
+// errSDKFrameTooLarge marks a reply the host refused to encode. It is a
+// host-side bug, not a peer protocol violation: the peer never sees a frame.
+var errSDKFrameTooLarge = errors.New("sdk frame payload exceeds the protocol limit")
+
+// sdkFrameHeaderLen is the big-endian length prefix every frame starts with.
+const sdkFrameHeaderLen = 4
+
 // newSDKPair returns the host end of a per-worker AF_UNIX socketpair and the
 // file the child inherits. Both are CLOEXEC on the host so a concurrent spawn
 // cannot leak another worker's end into its own sandbox; os/exec clears CLOEXEC
@@ -78,16 +85,27 @@ func newSDKPair() (host net.Conn, child *os.File, err error) {
 	return host, child, nil
 }
 
-// readSDKFrame reads one length-prefixed frame. The length is validated before
-// any allocation, so a hostile header cannot make the host allocate.
+// sdkFrameLen validates one declared wire length and is the only place a frame
+// length becomes an allocation size. Zero is invalid and anything above
+// MaxSDKFrame is refused here, before the value is converted or added to, so a
+// hostile header can neither make the host allocate nor wrap a 32-bit int.
+func sdkFrameLen(n uint32) (int, error) {
+	if n == 0 || n > MaxSDKFrame {
+		return 0, fmt.Errorf("%w: frame length %d out of range", errSDKProtocol, n)
+	}
+	return int(n), nil
+}
+
+// readSDKFrame reads one length-prefixed frame. The declared length goes through
+// sdkFrameLen before any allocation.
 func readSDKFrame(r io.Reader) ([]byte, error) {
-	var hdr [4]byte
+	var hdr [sdkFrameHeaderLen]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return nil, err
 	}
-	n := binary.BigEndian.Uint32(hdr[:])
-	if n == 0 || n > MaxSDKFrame {
-		return nil, fmt.Errorf("%w: frame length %d out of range", errSDKProtocol, n)
+	n, err := sdkFrameLen(binary.BigEndian.Uint32(hdr[:]))
+	if err != nil {
+		return nil, err
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
@@ -96,11 +114,19 @@ func readSDKFrame(r io.Reader) ([]byte, error) {
 	return buf, nil
 }
 
-func encodeSDKFrame(payload []byte) []byte {
-	out := make([]byte, 4+len(payload))
+// encodeSDKFrame prefixes payload with its length. The payload is checked against
+// MaxSDKFrame first, which both matches what the peer accepts and bounds the
+// header arithmetic below; without it, 4+len(payload) could wrap on a 32-bit int
+// and allocate a buffer shorter than the copy. An over-limit payload is never
+// encoded: the peer would reject the frame, so it is reported instead.
+func encodeSDKFrame(payload []byte) ([]byte, error) {
+	if len(payload) > MaxSDKFrame {
+		return nil, fmt.Errorf("%w: %d bytes", errSDKFrameTooLarge, len(payload))
+	}
+	out := make([]byte, sdkFrameHeaderLen+len(payload))
 	binary.BigEndian.PutUint32(out, uint32(len(payload)))
-	copy(out[4:], payload)
-	return out
+	copy(out[sdkFrameHeaderLen:], payload)
+	return out, nil
 }
 
 // sdkRequest is one decoded client frame.
@@ -339,14 +365,17 @@ func (s *sdkServer) reply(id uint64, res any, serr *SDKError) {
 }
 
 func (s *sdkServer) write(payload []byte) {
-	buf := encodeSDKFrame(payload)
+	buf, err := encodeSDKFrame(payload)
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	_ = s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
-	if _, err := s.conn.Write(buf); err != nil {
-		// The sandbox stopped reading (or the conn is gone). A partially
-		// written frame would desync the stream, so the only safe move is to
-		// drop the connection and the worker.
+	if err == nil {
+		_ = s.conn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
+		_, err = s.conn.Write(buf)
+	}
+	if err != nil {
+		// The sandbox stopped reading (or the conn is gone, or the payload could
+		// not be encoded at all). A partially written frame would desync the
+		// stream, so the only safe move is to drop the connection and the worker.
 		select {
 		case <-s.connCtx.Done():
 		default:
