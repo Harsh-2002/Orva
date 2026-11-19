@@ -215,7 +215,8 @@ jobs:
           check-latest: true
           cache: false
 
-      - run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends dash shellcheck
+      - run: sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 update -qq &&
+          sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y --no-install-recommends dash shellcheck
 
       - name: GitHub Actions workflow syntax + embedded shell
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -484,10 +485,28 @@ jobs:
 
       - name: Provision nsjail
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            git make gcc g++ autoconf bison flex libtool pkg-config \
-            libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler
+          # security.ubuntu.com intermittently answers 503, and a bare
+          # `apt-get install` then fails the job before a single test runs
+          # (2026-11-19: two consecutive amd64 runs). Retry the pair, and let
+          # apt retry each download too.
+          export DEBIAN_FRONTEND=noninteractive
+          packages=(git make gcc g++ autoconf bison flex libtool pkg-config
+            libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler)
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 update -qq &&
+               sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y --no-install-recommends "${packages[@]}"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "::error title=apt unavailable::package downloads failed after $attempt attempts"
+              exit 1
+            fi
+            echo "apt attempt $attempt failed; retrying in $((attempt * 15))s" >&2
+            sleep $((attempt * 15))
+          done
+          for tool in gcc g++ make autoconf bison flex protoc pkg-config; do
+            command -v "$tool" >/dev/null || { echo "::error title=missing build tool::$tool"; exit 1; }
+          done
           git clone --filter=blob:none https://github.com/google/nsjail.git "$RUNNER_TEMP/nsjail-src"
           git -C "$RUNNER_TEMP/nsjail-src" checkout "$NSJAIL_REF"
           bash scripts/patch-nsjail.sh "$RUNNER_TEMP/nsjail-src"
@@ -693,7 +712,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: install jq + curl
-        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+        run: sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 update -qq &&
+          sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y jq curl
       - name: test release-asset verifier
         if: github.event_name == 'pull_request' || github.event_name == 'push'
         env:
@@ -888,7 +908,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: install jq + curl
-        run: sudo apt-get update -qq && sudo apt-get install -y jq curl
+        run: sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 update -qq &&
+          sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y jq curl
       - name: fetch exact released installer
         if: github.event_name == 'release' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:

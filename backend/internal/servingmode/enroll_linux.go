@@ -83,7 +83,10 @@ func (e *Enrollment) publish(step func(string) error) error {
 	if err := step("source_archived"); err != nil {
 		return err
 	}
-	return e.lock.relocateLocked(e.record, func(stage string) error {
+	// The mode-phase step names the only durable boundary between a relocated
+	// layout and a published one: the serving-mode record is staged and synced
+	// there, and the rename follows.
+	return e.lock.relocateLockedWithMode(e.record, func(stage string) error {
 		if err := step(stage); err != nil || stage != "relocated" {
 			return err
 		}
@@ -94,5 +97,5 @@ func (e *Enrollment) publish(step func(string) error) error {
 			return err
 		}
 		return step("intent_removed")
-	})
+	}, "mode_staged", step)
 }
