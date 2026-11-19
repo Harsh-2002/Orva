@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Traces
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Invocation chains across functions and triggers.
         </p>
       </div>

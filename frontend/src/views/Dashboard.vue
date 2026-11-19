@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
         System overview
       </h1>
-      <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+      <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
         Live platform health and activity.
       </p>
     </div>
@@ -359,7 +359,7 @@
         <div class="text-sm text-foreground-strong">
           No warm pools yet
         </div>
-        <div class="text-xs text-foreground-muted mt-1 max-w-prose mx-auto leading-body">
+        <div class="text-xs text-foreground-muted mt-1 measure-long mx-auto leading-body">
           Deploy a function to start collecting runtime metrics.
         </div>
       </div>

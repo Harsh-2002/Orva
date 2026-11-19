@@ -9,7 +9,7 @@
         >
           {{ inlineOnly ? 'Inline permissions' : 'Permissions' }}
         </component>
-        <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+        <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
           <template v-if="inlineOnly">
             The independent inline source for
           </template>
@@ -90,7 +90,7 @@
       <h2 class="text-sm font-semibold text-foreground-strong">
         {{ blockTitle }}
       </h2>
-      <p class="mx-auto mt-1.5 max-w-prose text-sm text-foreground-muted">
+      <p class="mx-auto mt-1.5 measure-long text-sm text-foreground-muted">
         {{ blockText }}
       </p>
     </div>
@@ -129,7 +129,7 @@
         </div>
         <p
           v-if="screen === 'view' || access.enforcement !== 'active'"
-          class="max-w-prose text-sm text-foreground"
+          class="measure text-sm text-foreground"
         >
           {{ enforcementText }}
         </p>
@@ -274,7 +274,7 @@
             >
               {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline platform grants (unverified)' : 'Inline platform grants') : 'What this function may do' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
+            <p class="mt-1 measure text-xs text-foreground-muted">
               {{ inlineOnly ? 'Only the inline source is shown here. Attached sources are listed in effective access above.' : (isEmptyPolicy ? 'No permissions are stored. Where enforcement is on, protected actions are denied by default.' : 'The stored policy, by service. An allowance to call another function is one half: that function must also accept this one as a caller.') }}
             </p>
           </header>
@@ -300,7 +300,7 @@
             >
               {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline caller grants (unverified)' : 'Inline caller grants') : 'Who may call this function' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
+            <p class="mt-1 measure text-xs text-foreground-muted">
               {{ inlineOnly ? 'Only inline caller acceptance, not acceptance from attached sources. Callers also need their own outbound allowance.' : 'Callers are matched by function ID. A caller also needs its own allowance to call this function.' }}
             </p>
           </header>
@@ -328,7 +328,7 @@
             >
               {{ inlineOnly ? 'Edit inline permissions' : 'Edit permissions' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
+            <p class="mt-1 measure text-xs text-foreground-muted">
               Changes stay in a draft until you review and save.
             </p>
           </div>
@@ -356,7 +356,7 @@
             class="rounded-lg border border-border bg-surface"
           >
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <p class="min-w-0 max-w-prose text-xs text-foreground-muted">
+              <p class="min-w-0 measure text-xs text-foreground-muted">
                 Each permission is one allowance. A call to another function also needs that function to accept this one as a caller.
               </p>
               <Button
@@ -403,7 +403,7 @@
             class="rounded-lg border border-border bg-surface"
           >
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <p class="min-w-0 max-w-prose text-xs text-foreground-muted">
+              <p class="min-w-0 measure text-xs text-foreground-muted">
                 Accepting a caller lets that function start this one. The caller also needs its own allowance to call this function.
               </p>
               <Button

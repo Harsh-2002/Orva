@@ -57,7 +57,7 @@
       <h2 class="text-lg font-semibold text-foreground-strong">
         Staged named permissions
       </h2>
-      <p class="max-w-prose text-sm text-foreground-muted">
+      <p class="measure text-sm text-foreground-muted">
         Named-policy management is available only in explicit scratch hosts, not
         normal production routing. Versions are immutable, attachments stay pinned,
         and effective access is read-only. Inline edits never replace attached
@@ -459,7 +459,7 @@
         <div class="doc-microlabel">
           Background jobs: jobs.enqueue()
         </div>
-        <details class="text-sm text-foreground-muted max-w-prose">
+        <details class="text-sm text-foreground-muted measure-long">
           <summary>Internal IAM jobs fixture (not active in normal serving)</summary>
           <p class="mt-2">
             Origin and creator are host-owned. Current grants and target acceptance
@@ -469,7 +469,7 @@
             Cron, adoption and restore are not enabled by this fixture.
           </p>
         </details>
-        <details class="text-sm text-foreground-muted max-w-prose">
+        <details class="text-sm text-foreground-muted measure-long">
           <summary>Separate cron controls fixture (not active in normal serving)</summary>
           <p class="mt-2">
             Schedule source and authority are host-owned. Explicit admin Resume

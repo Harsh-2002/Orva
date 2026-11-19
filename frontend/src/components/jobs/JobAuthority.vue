@@ -27,7 +27,7 @@
     </p>
     <p
       v-if="job.authority_state !== 'active'"
-      class="max-w-prose"
+      class="measure"
     >
       Stored work is not authorized to run. Restoring permissions does not resume it.
     </p>

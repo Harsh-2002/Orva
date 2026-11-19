@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Routes
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Public paths that invoke one function. Every change is checked against
           the mapping and owner authority it was read from, so a concurrent edit
           fails instead of overwriting it.

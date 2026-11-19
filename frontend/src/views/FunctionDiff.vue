@@ -1,13 +1,13 @@
 <template>
   <div class="space-y-6">
     <!-- Page head — matches the standardised dashboard pattern: H1 over
-         one-line subhead, max-w-prose, no icon. -->
+         one-line subhead, measure, no icon. -->
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight text-balance">
           Compare versions
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Compare source and configuration for
           <router-link
             :to="`/functions/${fnName}`"

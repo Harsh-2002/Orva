@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Test
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Send a request to
           <router-link
             :to="`/functions/${fnName}`"
