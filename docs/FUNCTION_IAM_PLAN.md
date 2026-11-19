@@ -1036,6 +1036,18 @@ and policy together. Serving wiring remains absent until the full proof gates.
   digest-bound source input, not the dependency or compiler output. Host build
   hooks remain denied. The seal limits accepted output; they are not a live
   aggregate disk quota during a build.
+  The real-nsjail disposable-VM fixture in `test/managed-enrollment.py` ran
+  pinned npm `semver`, pip `idna` and TypeScript through legacy deployment,
+  enrollment, and new managed upload/install. Each invocation checked the
+  expected body; TypeScript also checked the authored and executed paths.
+  The fixture then rebuilt all six dependency deployments under a second
+  Owner, verified source-only backup archives, and exercised same-Owner
+  replay and quarantine. VM egress was deny-by-default, allowing DNS and
+  resolved registry IPv4 `/32` addresses only on TCP 443. The first attempt
+  exposed an invalid build-domain metadata entry; moving the retained source
+  outside that metadata namespace fixed it. The dependency-free enrollment
+  and restore fixture also passed in a separate no-network VM. This is not
+  full installer or Docker E2E coverage.
 
 - Internal builder runtime binding now captures one concrete generation at Build
   entry, retains a pipeline anchor and leases each command through cleanup.
