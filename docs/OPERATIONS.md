@@ -38,6 +38,8 @@ HTTP. There is no downgrade or automated interrupted-enrollment repair.
    `orva setup --managed-witness PATH` if absent. Do **not** run
    `setup --managed-layout provision` on the legacy instance. Keep
    `ORVA_SERVING_MODE` unset, or set it to `legacy` for the enrollment commands.
+   If launching from an existing `orva.daemon` leaf, explicitly set
+   `ORVA_MANAGED_WORKLOAD_PARENT` to its sibling `orva.workers`.
 3. Run `orva managed enroll --dry-run --plan /safe/path/orva-enrollment.json`.
    Keep the plan outside the data directory. The dry run copies SQLite and
    its WAL, if present, and vacuums only in private scratch space. Review

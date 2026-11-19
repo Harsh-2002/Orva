@@ -28,10 +28,17 @@ func applyManagedEnrollment(ctx context.Context, root string, lock *servingmode.
 		return err
 	}
 	required := make(map[string]bool)
+	count := 0
 	for _, fn := range plan.Functions {
 		if !skipped[fn.ID] {
 			required[fn.Runtime] = true
+			count++
 		}
+	}
+	limits := managedOwnerConfig(root).CodeLimits
+	maxCurrent := limits.Bytes / managedOutputConfig(root, limits).ReservedBytes
+	if int64(count) > maxCurrent {
+		return fmt.Errorf("sealed store can reserve at most %d current builds; explicitly exclude more functions", maxCurrent)
 	}
 	runtimes := []string{}
 	for _, lang := range []string{"node", "python"} {
