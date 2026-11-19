@@ -136,9 +136,30 @@
             >
               Attach…
             </Button>
+            <p
+              v-if="!selected.length"
+              class="text-sm text-foreground-muted"
+            >
+              Select at least one function.
+            </p>
           </fieldset>
         </div>
       </template>
+      <p
+        v-if="attached.length"
+        role="status"
+        class="text-sm text-success-fg"
+      >
+        Attached to <template
+          v-for="(id, index) in attached"
+          :key="id"
+        >
+          <RouterLink
+            :to="`/functions/${id}/permissions`"
+            class="text-link hover:underline underline-offset-4"
+          >{{ label(id) }}</RouterLink>{{ index < attached.length - 1 ? ', ' : '' }}
+        </template>. Approve {{ attached.length === 1 ? 'it on its Permissions page' : 'each on its Permissions page' }} to make {{ attached.length === 1 ? 'it' : 'them' }} active.
+      </p>
       <div
         v-if="state.data.value.can_manage && (!state.data.value.policy.revoked || !state.data.value.attachments.length)"
         class="flex flex-wrap gap-3 border-t border-border pt-4"
@@ -226,6 +247,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import StatementList from '@/components/permissions/StatementList.vue'
@@ -236,7 +258,7 @@ import { useIAMResource } from '@/composables/useIAMResource.js'
 import { parseCounter } from '@/utils/permissionsModel.js'
 import { copyText } from '@/utils/clipboard'
 const props = defineProps({ policyId: { type: String, required: true }, api: { type: Object, required: true }, functions: { type: Array, default: () => [] } })
-const emit = defineEmits(['deleted', 'changed'])
+const emit = defineEmits(['deleted', 'changed', 'attachments'])
 const state = useIAMResource(() => props.policyId, (id, signal) => props.api.get(id, signal))
 const changeReason = computed(() => {
   if (!state.data.value?.can_manage) return 'Read only. An administrator must change this policy.'
@@ -262,13 +284,17 @@ const editing = ref(false)
 const editingRevision = ref('')
 const copied = ref(false)
 async function copyPolicyId() { copied.value = await copyText(props.policyId) }
+const attached = ref([])
+// The list rows have no attachment data of their own, so the detail reports its
+// verified count on every load for the selected policy's status.
+watch(() => state.data.value?.attachments.length, (count) => { if (Number.isInteger(count)) emit('attachments', count) }, { immediate: true })
 function startEdit() {
   if (changeReason.value) return
   editingRevision.value = state.data.value.policy.definition_revision
   editing.value = true
 }
 const label = (id) => props.functions.find((f) => f.id === id)?.name || id
-watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false; copied.value = false })
+watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false; copied.value = false; attached.value = [] })
 async function update({ policy }) {
   if (changeReason.value) return
   const result = await state.mutate((signal) => props.api.mutate(props.policyId, 'update', { definition_revision: editingRevision.value, policy }, signal))
@@ -277,6 +303,7 @@ async function update({ policy }) {
 async function prepare(operation) {
   if (changeReason.value) return
   reviewed.value = null
+  attached.value = []
   if (operation === 'attach' && parseCounter(version.value) === null) { state.error.value = 'Enter a valid existing version number.'; return }
   const p = state.data.value.policy
   const ids = operation === 'revoke' ? state.data.value.attachments.map((a) => a.owner_id) : selected.value
@@ -295,7 +322,10 @@ async function apply() {
   const plan = reviewed.value
   reviewed.value = null
   const result = await state.mutate((signal) => props.api.mutate(props.policyId, plan.operation, plan.body, signal))
-  if (result) emit('changed')
+  if (result) {
+    if (plan.operation === 'attach') { selected.value = []; attached.value = plan.body.owners.map((owner) => owner.function_id) }
+    emit('changed')
+  }
   if (result && plan.operation === 'delete') emit('deleted')
 }
 </script>
