@@ -6,6 +6,13 @@ recovery, managed SQLite and shutdown. It starts the managed scheduler before
 the listener and drains HTTP, stops the instance, then fences/closes the Owner.
 Legacy serve still follows directory aliases and requires an absent mode file
 and no root SQLite tombstone. The default installer doesn't enable managed mode.
+After layout publication, managed serve seals bounded, trusted installed trees
+for languages without a recorded generation or override. It commits each
+validated seal to `workload_enrollment_runtimes` before trying the next language.
+An unrecorded seal can be reused only on an exact match. Before the listener
+opens, the server checks the sealed worker endpoints for each selected
+generation, including overrides. Missing or invalid selections are not reset
+or replaced at boot; overrides do not rewrite the recorded defaults.
 The server-only `managed enroll` command plans from an offline SQLite scratch
 copy, checks exact DB/source identity, and writes a fail-closed outer intent.
 It rebuilds only current compatible deployments under the bound Owner, commits

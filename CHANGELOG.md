@@ -28,6 +28,13 @@ unreleased range, and the sections below as the record for everything before it.
   dependencies; portable restore rebuilds them from the retained source and
   needs access to their registries.
 
+### Fixed
+
+- Managed mode now applies the egress policy to function workers; egress
+  functions previously could not start. Policy changes rotate warm egress
+  workers without uninstalling the function or changing its IAM state.
+  The dashboard's Egress page is available to administrators.
+
 ### Managed operator parity
 
 - The managed composition now mounts the operator surfaces the normal server
@@ -73,13 +80,18 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST now supports outbound webhook subscription and delivery
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
-- Not yet on the managed composition: pool and firewall configuration, secrets,
+- Not yet on the managed composition: pool configuration, secrets,
   fixture execution, outbound webhook delivery, account password change, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 
 ### Upgrade notes
 
+- Fresh managed startup seals each installed Node or Python rootfs and records
+  it before moving to the next. Existing selections are preserved and checked
+  in the sealed store. Startup refuses if no runtime is available or a selected
+  generation is missing or invalid. An unsafe tree reports the path and rule;
+  ownership and writable-mode refusals also suggest a permission repair.
 - Managed backups use portable v2. Download with `orva backup download`
   and use the stopped server binary's `orva managed restore --archive FILE
   --confirm` on the independently provisioned destination, not the legacy

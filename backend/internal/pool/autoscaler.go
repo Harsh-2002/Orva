@@ -345,6 +345,11 @@ func (s *scaler) scaleUp(p *functionPool, want int, reason string) {
 }
 
 func (s *scaler) startSpawn(p *functionPool, reason string) bool {
+	if p.managed != nil {
+		if ready := s.pm.tmpl.ManagedSpawnReady; !p.managed.active.Load() || (ready != nil && !ready()) {
+			return false
+		}
+	}
 	p.mu.Lock()
 	// Named limit, not cap: the builtin is needed for cap(p.idle) below.
 	limit := int(p.dynamicMax.Load())
@@ -412,7 +417,7 @@ func (s *scaler) startSpawn(p *functionPool, reason string) bool {
 			p.spawnErrorCh = make(chan struct{})
 		}
 		parked := false
-		if !p.closing.Load() {
+		if !p.closing.Load() && (p.managed == nil || p.managed.active.Load()) {
 			select {
 			case p.idle <- w:
 				parked = true

@@ -47,6 +47,7 @@ type Worker struct {
 	verifiedPaths *artifactfs.PreparedPaths // owned until post-Wait cleanup, never exposed
 
 	workloadTransition WorkloadTransitionHook // immutable trusted Spawn configuration
+	dispatchAllowed    func() bool
 
 	// sdk is the host end of the per-worker SDK channel (nil when disabled).
 	sdk net.Conn
@@ -247,6 +248,7 @@ func Spawn(ctx context.Context, cfg ExecConfig) (*Worker, error) {
 		sdkEnabled:         sdkHost != nil,
 		identity:           &WorkloadIdentity{FunctionID: cfg.FunctionID, WorkerID: ids.New(), ArtifactRevision: cfg.ArtifactRevision},
 		workloadTransition: cfg.WorkloadTransitionHook,
+		dispatchAllowed:    cfg.WorkloadDispatchAllowed,
 		verifiedPaths:      owned,
 	}
 	owned = nil // only the reaper may release a successfully started worker's pair
@@ -710,7 +712,11 @@ func (w *Worker) DispatchEx(ctx context.Context, eventJSON []byte) (*DispatchRes
 
 	// The lease is published before anything is written, so a frame the
 	// adapter sends the instant it reads the request is already attributable.
-	leaseFrame := w.beginLease(ctx)
+	leaseFrame, err := w.beginLease(ctx)
+	if err != nil {
+		w.mu.Unlock()
+		return &DispatchResult{w: w, errBefore: errBefore}, err
+	}
 
 	// Wire write must complete or we bail.
 	writeErrCh := make(chan error, 1)
@@ -918,18 +924,45 @@ func (w *Worker) IsExpired(ttl time.Duration, maxUses int64) bool {
 	return false
 }
 
-// beginLease publishes this dispatch's identity and returns the lease frame to
-// write ahead of the request, or nil for a channel-less worker.
-func (w *Worker) beginLease(ctx context.Context) []byte {
-	if !w.sdkEnabled {
-		return nil
+// AcceptsNewDispatch is an observation; use under the transition gate for
+// atomicity with host retirement. It does not revoke an existing lease.
+func (w *Worker) AcceptsNewDispatch() bool {
+	return !w.dead.Load() && (w.dispatchAllowed == nil || w.dispatchAllowed())
+}
+
+func (w *Worker) beginLease(ctx context.Context) ([]byte, error) {
+	if !w.sdkEnabled && w.dispatchAllowed == nil {
+		return nil, nil
 	}
-	st := newDispatchState(ctx)
-	frame, _ := json.Marshal(map[string]string{"type": "lease", "lease": st.info.Lease})
-	var previous *dispatchState
-	w.transitionWorkload(func() { previous = w.disp.Swap(st) })
+	var st, previous *dispatchState
+	var frame []byte
+	if w.sdkEnabled {
+		st = newDispatchState(ctx)
+		frame, _ = json.Marshal(map[string]string{"type": "lease", "lease": st.info.Lease})
+	}
+	var err error
+	w.transitionWorkload(func() {
+		if w.dispatchAllowed != nil {
+			if err = ctx.Err(); err != nil {
+				return
+			}
+			if !w.AcceptsNewDispatch() {
+				err = fmt.Errorf("%w: worker pool retired", ErrWorkerExited)
+				return
+			}
+		}
+		if st != nil {
+			previous = w.disp.Swap(st)
+		}
+	})
+	if err != nil {
+		if st != nil {
+			st.cancel()
+		}
+		return nil, err
+	}
 	w.endDispatch(previous)
-	return frame
+	return frame, nil
 }
 
 // revokeLease ends the current dispatch's authority: later frames carrying its

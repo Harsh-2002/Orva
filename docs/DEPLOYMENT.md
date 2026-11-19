@@ -11,6 +11,11 @@ independently provision the destination witness, rootfs trees, adapters and
 delegated cgroup. Do not clone the witness or mount the source's sealed stores. Keep the
 first listener private during operator onboarding.
 
+For a fresh managed instance, install the trusted Node and Python rootfs
+trees before the first managed listener start. Startup seals the trees for
+languages without a recorded or explicitly selected generation; installing
+new rootfs files later does not replace an existing selection.
+
 Prepare an owned cgroup-v2 service/container budget with CPU, memory and PID
 delegation. The workload parent is its `orva.workers` child. Systemd can use
 the regular `orva.service` with `Delegate=yes`; no persistent slice is needed.
