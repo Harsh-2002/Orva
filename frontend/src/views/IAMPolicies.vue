@@ -55,14 +55,16 @@
       <li
         v-for="item in list.data.value.items"
         :key="item.id"
-        class="flex flex-wrap items-center justify-between gap-3 p-4"
+        class="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3"
+        @click="rowAction(() => $emit('select', item.id))($event)"
       >
-        <Button
-          variant="ghost"
+        <button
+          type="button"
+          class="inline-flex min-h-[1.5rem] touch-expand-xs max-w-full items-center truncate rounded-md text-left text-sm font-medium text-foreground-strong hover:underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           @click="$emit('select', item.id)"
         >
           {{ item.name }}
-        </Button>
+        </button>
         <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code> · {{ !list.fresh.value ? 'Last known state, unverified' : item.revoked ? 'Revoked permanently' : 'Available to attach' }}</span>
       </li>
     </ul>
@@ -88,6 +90,7 @@
 import { computed, ref } from 'vue'
 import Button from '@/components/common/Button.vue'
 import ManagedPolicyDraft from '@/components/permissions/ManagedPolicyDraft.vue'
+import { rowAction } from '@/utils/rowNav'
 import IAMPolicyDetail from './IAMPolicyDetail.vue'
 import { useIAMResource } from '@/composables/useIAMResource.js'
 const props = defineProps({ policyId: { type: String, default: '' }, api: { type: Object, required: true }, functions: { type: Array, default: () => [] } })

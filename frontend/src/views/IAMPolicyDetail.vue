@@ -4,7 +4,22 @@
     class="space-y-5 border-t border-border pt-6"
     aria-label="Policy details"
   >
-    <header class="space-y-2">
+    <header class="flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0 space-y-2">
+        <h2 class="text-lg font-semibold text-foreground-strong">
+          {{ state.data.value.policy.name }}
+        </h2>
+        <code class="block break-all text-xs text-foreground-muted">{{ policyId }}</code>
+        <p class="text-sm text-foreground-muted">
+          {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
+        </p>
+        <p
+          v-if="!state.data.value.can_manage"
+          class="text-sm text-foreground-muted"
+        >
+          Read only. An administrator must change permissions.
+        </p>
+      </div>
       <Button
         variant="secondary"
         :disabled="state.busy.value"
@@ -12,19 +27,6 @@
       >
         Refresh policy
       </Button>
-      <h2 class="text-lg font-semibold text-foreground-strong">
-        {{ state.data.value.policy.name }}
-      </h2>
-      <code class="block break-all text-xs text-foreground-muted">{{ policyId }}</code>
-      <p class="text-sm text-foreground-muted">
-        {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
-      </p>
-      <p
-        v-if="!state.data.value.can_manage"
-        class="text-sm text-foreground-muted"
-      >
-        Read only. An administrator must change permissions.
-      </p>
     </header>
     <p
       v-if="!state.fresh.value"
@@ -77,39 +79,43 @@
         >
           Create new version
         </Button>
-        <fieldset
-          :disabled="!!changeReason"
-          class="space-y-2 border-t border-border pt-4"
-        >
-          <legend class="pt-4 text-sm font-semibold text-foreground-strong">
+        <div class="space-y-3 border-t border-border pt-4">
+          <h3 class="text-sm font-semibold text-foreground-strong">
             Attach or roll out a version
-          </legend>
-          <Input
-            v-model="version"
-            label="Pinned version"
-            hint="An existing immutable version number. No automatic follow-latest."
-          />
-          <label
-            v-for="fn in functions"
-            :key="fn.id"
-            class="flex min-h-[44px] items-center gap-3 text-sm"
+          </h3>
+          <fieldset
+            :disabled="!!changeReason"
+            aria-label="Attach or roll out a version"
+            class="space-y-2"
           >
-            <input
-              v-model="selected"
-              type="checkbox"
-              :value="fn.id"
-              class="h-4 w-4 accent-primary"
+            <Input
+              v-model="version"
+              label="Pinned version"
+              hint="An existing immutable version number. No automatic follow-latest."
+              @update:model-value="versionTouched = true"
+            />
+            <label
+              v-for="fn in functions"
+              :key="fn.id"
+              class="flex min-h-[44px] items-center gap-3 text-sm"
             >
-            <span class="min-w-0 break-all">{{ fn.name }}</span>
-          </label>
-          <Button
-            :disabled="!selected.length || !!changeReason"
-            :title="changeReason"
-            @click="prepare('attach')"
-          >
-            Review attachment
-          </Button>
-        </fieldset>
+              <input
+                v-model="selected"
+                type="checkbox"
+                :value="fn.id"
+                class="h-4 w-4 accent-primary"
+              >
+              <span class="min-w-0 break-all">{{ fn.name }}</span>
+            </label>
+            <Button
+              :disabled="!selected.length || !!changeReason"
+              :title="changeReason"
+              @click="prepare('attach')"
+            >
+              Review attachment
+            </Button>
+          </fieldset>
+        </div>
       </template>
       <div
         v-if="state.data.value.can_manage"
@@ -217,7 +223,17 @@ const changeReason = computed(() => {
   return ''
 })
 const selected = ref([])
-const version = ref('1')
+const version = ref('')
+const versionTouched = ref(false)
+// Prefill the verified latest version for convenience; once edited, the
+// operator's explicit pin wins and no read ever overwrites it (no follow-latest).
+watch(
+  () => state.data.value?.policy.latest_version,
+  (latest) => {
+    if (latest != null && !versionTouched.value) version.value = String(latest)
+  },
+  { immediate: true }
+)
 const reviewed = ref(null)
 const editing = ref(false)
 const editingRevision = ref('')
