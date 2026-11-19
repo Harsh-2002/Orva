@@ -34,11 +34,13 @@ unreleased range, and the sections below as the record for everything before it.
   managed invocations store their request bodies (sensitive headers redacted);
   set `replay_capture_enabled` to `0` to stop that.
 - Managed channel tokens are accepted at `/mcp` as an invoke-only catalog that
-  dispatches through managed admission. The managed MCP and Chat catalog grows
-  from 47/13 to 65/22 tools (all-permissions / read-only key); it adds
-  `replay_execution`, `list_activity` and read-only `list_channels` and
-  `get_channel`, and now includes the API-key tools. The normal catalog is
-  unchanged (73/28).
+  dispatches through managed admission. Admission is not approval: an installed
+  but unreviewed function still runs its handler (protected SDK operations stay
+  denied until review), so bundle only functions agents should be able to run.
+  The managed MCP and Chat catalog grows from 47/13 to 66/22 tools
+  (all-permissions / read-only key); it adds `replay_execution`,
+  `list_activity` and read-only `list_channels` and `get_channel`, and now
+  includes the API-key tools. The normal catalog is unchanged (73/28).
 - Every managed request is written to the activity log, attributed to the key or
   session.
 - `invoke_function` and channel tools now return an error when the invocation

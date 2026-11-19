@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  65 and 22 respectively. Channel credentials are accepted at `/mcp` and expose
+  66 and 22 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -81,8 +81,10 @@ reports the plain data directory; it does not include sealed artifact stores.
   only through the managed pool: the acquired Factory must be the function's
   current version (otherwise `409 NOT_ACTIVE`, no dispatch), its timeout comes
   from the Factory, and a worker without managed resources is refused. A
-  paused or inactive function, a truncated capture (`410`) and a missing
-  capture (`404`) are refused with no new execution. The managed server loads
+  paused, inactive or not-installed function, a truncated capture (`410`) and a missing
+  capture (`404`) are refused with no new execution. Replaying into an installed
+  but unreviewed Factory runs the handler like any invocation, with protected SDK
+  operations denied. The managed server loads
   the replay-capture setting at start, so managed invocations store request
   bodies (sensitive headers redacted) for replay; disable it with
   `replay_capture_enabled=0`.
@@ -98,9 +100,14 @@ reports the plain data directory; it does not include sealed artifact stores.
 Channel tokens (`orva_chn_...`) are accepted at `POST /mcp` on the managed
 composition when it has a managed proxy. The catalog is invoke-only, one tool
 per bundled function, with no management tools; every call goes through the
-managed proxy and pool, so a paused, inactive, unreviewed or version-changed
+managed proxy and pool, so a paused, inactive, not-installed or version-changed
 function is refused exactly as `/fn/` would refuse it, and a function that is
-not `active` is never served from a prior code directory. Channel tokens remain
+not `active` is never served from a prior code directory. Admission is not
+approval: an installed Factory that has not been reviewed still executes handler
+code, and only its protected SDK operations (KV, calls, jobs, cron, spans) are
+denied until the policy is reviewed. A channel token therefore reaches handler
+code of any installed bundled function; bundle only functions you intend agents
+to run. Channel tokens remain
 `401` on `/api/v1/*`. Deleting or rotating a channel takes effect on the next
 request. Channels are created, rotated and deleted only through the admin REST
 routes above and the dashboard.
