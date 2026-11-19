@@ -670,11 +670,11 @@ const unenforcedNotices = computed(() => {
 // operator's own label; if no friendly name exists for a shipped rule we
 // fall back to the rule's stored label.
 const friendlyMap = {
-  '169.254.0.0/16':    { name: 'Cloud metadata service',  why: 'The address AWS, Azure and GCP use to expose VM credentials. Leaving it open is a common credential-leak path.' },
+  '169.254.0.0/16':    { name: 'Cloud metadata service',  why: 'The link-local range holding the metadata endpoint AWS, Azure and GCP use to expose VM credentials. Leaving it open is a common credential-leak path.' },
   'fd00:ec2::254/128': { name: 'Cloud metadata (IPv6)',   why: 'Same as above, over the IPv6 path GCP uses. Recommended on.' },
-  '10.0.0.0/8':        { name: 'Private network, 10.x', why: 'Standard internal range. Turn on to keep functions off your LAN.' },
+  '10.0.0.0/8':        { name: 'Private network, 10.x', why: 'Standard internal range. Turn on to block access to this private range.' },
   '172.16.0.0/12':     { name: 'Private network, 172.16.x', why: 'Internal range, often Docker\'s default bridge. Turn on for stricter isolation.' },
-  '192.168.0.0/16':    { name: 'Private network, 192.168.x', why: 'Common home or office range. Turn on to keep functions off your LAN.' },
+  '192.168.0.0/16':    { name: 'Private network, 192.168.x', why: 'Common home or office range. Turn on to block access to this private range.' },
   '100.64.0.0/10':     { name: 'CGNAT / Tailscale',       why: 'Used by Tailscale and large ISPs. Turn on to keep functions out of your tailnet.' },
 }
 

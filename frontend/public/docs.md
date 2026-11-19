@@ -2104,9 +2104,10 @@ orva completion bash | sudo tee /etc/bash_completion.d/orva
 On a managed server, a reusable policy is created once and attached to
 functions. Each attachment pins one version; editing a policy creates a new
 version, and attached functions keep theirs until you roll it out. A function's
-effective access is the union of its inline permissions and its enabled
-attached policies. Detaching removes one source; revoking disables a policy for
-every function it is attached to. Other sources may still grant the same access.
+stored policy combines its inline grants and its enabled attached policies;
+grants apply only once approved for the function's current deployment.
+Detaching removes one source; revoking disables a policy for every function it
+is attached to. Other sources may still grant the same access.
 
 The MCP and in-product Chat tools are:
 list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,

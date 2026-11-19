@@ -302,7 +302,7 @@
               v-else
               class="px-4 py-4 text-xs text-foreground-muted leading-snug"
             >
-              Nothing saved yet. Save current replays it later; MCP can run it as a fixture.
+              Nothing saved yet. Save the current request to replay it later or run it with test_function_with_fixture.
             </p>
           </section>
         </div>

@@ -782,7 +782,7 @@ const enforcementText = computed(() => {
   if (e === 'unknown') return 'The server did not report whether enforcement is on, so editing is off.'
   return screen.value === 'view'
     ? 'Enforcement is on. Below is the stored policy.'
-    : 'Enforcement is on. Draft changes are not applied.'
+    : 'Enforcement is on. Draft changes are not saved or applied.'
 })
 const lockNote = computed(() => {
   if (!readable.value) return ''
@@ -928,7 +928,7 @@ const reviewNotes = computed(() => {
     out.push("A permission on every key covers all of this function's storage, including keys added later.")
   }
   if (d.statements.added.some((s) => s.resource.own_cron && s.resource.own_cron.prefix === '')) {
-    out.push('Every-schedule access covers all schedules, including later ones.')
+    out.push('Covers every schedule for this function, including future ones.')
   }
   for (const w of policyWarnings(draft.value)) {
     out.push(`Incomplete: ${statementSummary(draft.value.allow[w.index])}. ${w.text}`)
