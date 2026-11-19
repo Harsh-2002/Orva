@@ -39,8 +39,10 @@ func TestPortableRestoreRebindsExactPromotionAndQuarantines(t *testing.T) {
 	operatorExec(t, db, `INSERT INTO workload_artifact_generations
 		(function_id,revision,epoch,generation,actor_kind,actor_id,change_kind,created_at,updated_at)
 		VALUES(?,1,1,?,'system',?,'initialize',?,?)`, owner, current, prior, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
-	operatorExec(t, db, `UPDATE workload_iam_policies SET approved_artifact=?,review_required=0 WHERE function_id=?`,
-		strings.Repeat("e", 64), owner)
+	const grant = `{"schema_version":1,"allow":[{"actions":["kv.get"],"resource":{"own_kv":{"key":"probe"}},"context":"execution"}],"inbound":[]}`
+	operatorExec(t, db, `UPDATE workload_iam_policies SET approved_artifact=?,review_required=0,policy_json=? WHERE function_id=?`,
+		strings.Repeat("e", 64), grant, owner)
+	operatorExec(t, db, `UPDATE workload_iam_inline SET policy_json=? WHERE function_id=?`, grant, owner)
 	operatorExec(t, db, `INSERT INTO workload_deployment_capture VALUES(?,?,?,?,?)`, deploy, owner,
 		text(deploymentProvenance{Owner: owner, Runtime: "node", Entrypoint: original.Entrypoint,
 			Artifact: WorkloadArtifactRecord{OwnerID: owner, Generation: initial}}), text(original), initial)
@@ -73,7 +75,7 @@ func TestPortableRestoreRebindsExactPromotionAndQuarantines(t *testing.T) {
 	p, err = db.PrepareWorkloadDeploymentInstallation(ctx, deploy)
 	must(err)
 	if p.Output() != replacement || !p.Policy().Quarantined || !p.Policy().ReviewRequired ||
-		p.Policy().ApprovedArtifact != IAMUnboundArtifact || p.Snapshot().Function.Status != "active" {
+		p.Policy().ApprovedArtifact != IAMRestoredUnapprovedArtifact || p.Policy().PolicyJSON != grant || p.Snapshot().Function.Status != "active" {
 		t.Fatal("restored deployment or deny policy did not match")
 	}
 	var id string

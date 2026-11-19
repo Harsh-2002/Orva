@@ -18,7 +18,9 @@ import (
 const (
 	// IAMUnboundArtifact is not a worker artifact; it can bind only an empty policy.
 	IAMUnboundArtifact = "iam:unbound"
-	IAMAuditRetention  = 32
+	// IAMRestoredUnapprovedArtifact permits retained policy text, never a worker artifact.
+	IAMRestoredUnapprovedArtifact = "iam:restored-unapproved"
+	IAMAuditRetention             = 32
 )
 
 var (
@@ -56,7 +58,7 @@ func (r *IAMPolicyRecord) AdmissionEvaluator() (*workloadiam.Evaluator, error) {
 	if err != nil || canonical != r.PolicyJSON {
 		return nil, ErrIAMInvalidPolicy
 	}
-	if r.ReviewRequired || r.Quarantined {
+	if r.ReviewRequired || r.Quarantined || r.ApprovedArtifact == IAMRestoredUnapprovedArtifact {
 		return workloadiam.CompileDeny(r.Metadata)
 	}
 	p, err := workloadiam.Decode([]byte(canonical))

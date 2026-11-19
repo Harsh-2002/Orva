@@ -263,7 +263,7 @@ func quarantineIAMTx(ctx context.Context, tx *sql.Tx, operation string, portable
 		r.AuthorityEpoch++
 		r.Quarantined = true
 		if portable {
-			r.ApprovedArtifact = IAMUnboundArtifact
+			r.ApprovedArtifact = IAMRestoredUnapprovedArtifact
 			r.ReviewRequired = true
 		}
 		r.UpdatedAt = time.Now().UTC()
