@@ -798,7 +798,8 @@ stdout line**, then classifies:
 | Condition | Status | Injected detail |
 |---|---|---|
 | no trailer match | FAIL | `missing RESULT trailer` |
-| `skip>0` + rc 3 + `fail==0` | **SKIP** | — |
+| `skip>0` + rc 3 + `fail==0`, with `ORVA_REQUIRE_SANDBOX=1` | **FAIL** | `ORVA_REQUIRE_SANDBOX forbids skips` and the module's reason |
+| `skip>0` + rc 3 + `fail==0`, otherwise | **SKIP** | — |
 | `skip>0` but rc≠3 or fail>0 | FAIL | `skip result requires exit 3 and zero failed checks` |
 | rc 0 + `fail==0` + `pass>0` | **PASS** | — |
 | rc 3 without `skip=1` | FAIL | `exit 3 requires RESULT skip=1` |
@@ -815,19 +816,18 @@ Three consequences worth internalizing:
 - `run.py`'s own exit codes: **0** all PASS/SKIP · **1** ≥1 FAIL · **2** setup
   failure (no docker, no modules, instance never came up).
 
-The protocol itself is unit-tested — `test/e2e/unit/test_runner.py`, 11 tests,
-run by CI *before* `make build`:
+The protocol itself is unit-tested in `test/e2e/unit/test_runner.py`, run by CI
+*before* `make build`:
 
 ```bash
 python3 -m unittest discover -s test/e2e/unit -p 'test_*.py'
-# Ran 11 tests in 0.161s — OK
 ```
 
 #### 3.2.3 `ORVA_REQUIRE_SANDBOX=1`
 
-Read by exactly three modules — `test_deploy_invoke.py:17`,
-`test_firewall.py:69`, `test_cli.py:154` — never by `run.py`, `harness.py`, or
-`env.py` (it is simply inherited through the environment). The shared idiom:
+Individual modules can read the flag to give a precise assertion failure.
+The runner also enforces it as a backstop: a valid whole-module skip is a
+suite failure when the flag is `1`, `true`, or `yes`. The shared module idiom:
 
 ```python
 def sandbox_unavailable(reason):
@@ -843,10 +843,11 @@ the kernel boundary works. Do **not** set it for an API-only target or a host
 that forbids nested namespaces — you will get failures that say nothing about
 your change.
 
-This matters because **a run whose sandbox modules all SKIP still exits 0**,
-prints no warning, and lists nothing under `## Failure details`. The only
-signal is the `- **Modules:** N passed, M failed, K skipped` line. That hole is
-exactly what the flag plugs.
+Without the flag, a run with no failures can still exit 0 with skipped modules.
+Check the `- **Modules:** N passed, M failed, K skipped` line before claiming
+sandbox coverage. The required firewall run also fails if it cannot verify and
+access the tested scratch instance's compiled policy. For an external scratch
+daemon, set `ORVA_E2E_DATA_DIR` to its data directory.
 
 #### 3.2.4 The fast inner loop: one module, no CHECKLIST.md
 
@@ -1633,9 +1634,10 @@ HTTP fallback, removed routes, operator-only jobs enqueue, and SDK operation
 while the live numeric private Orva address is refused by the egress policy.
 The isolated runner discovers its own container address. External scratch runs
 must supply `--control-plane-url http://<private-ip>:<port>`; absent network
-coverage is reported as unavailable, not a pass. The module verifies that the
-address reaches its unique fixture before testing policy refusal, and restores
-any private-network suggestion it enabled.
+coverage skips the module and fails a sandbox-required run. The source CI job
+uses an RFC1918 loopback alias on its disposable runner. The module verifies
+that the address reaches its unique fixture before testing policy refusal, and
+restores any private-network suggestion it enabled.
 
 **A separate compatibility constraint:** the bundled `orva` module is
 CommonJS-only; ESM handlers cannot import it. `runtimes/node/adapter.js:30-33` patches `Module._nodeModulePaths`,

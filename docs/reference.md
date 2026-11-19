@@ -1,5 +1,25 @@
 # Orva — Documentation
 
+> The internal managed server composition is not the default Orva server.
+> It exposes authenticated capability discovery at `GET /api/v1/iam/capabilities`,
+> fresh unbound creation at `POST /api/v1/iam/functions`, and exact Factory
+> installation at `POST /api/v1/deployments/{id}/install`. The managed
+> MCP/Chat tool `install_managed_deployment` does not review or approve policy.
+> Normal routes and tool catalogs remain unchanged. See `docs/API.md`.
+> On this composition, a configuration write leaves the function inactive
+> until explicit installation. After a same-boot restart, use the exact
+> current deployment ID to install the pending sealed pair, then review policy.
+> Managed function deletion takes an exact UUIDv7; it retires the current
+> Factory after reserving metadata-only history and does not reclaim sealed
+> assets. Work-history routes and tools are exposed by this composition.
+> A request authorized for a superseded function version cannot dispatch to
+> its replacement generation; it returns `409 NOT_ACTIVE`.
+> The managed Editor reads authored source from the seal, not from a legacy
+> `current` symlink. Reading source neither installs nor approves it.
+> Use `tools/list` to discover the tools available to your MCP credential.
+> An all-permissions key sees 73 tools on the normal server and 39 on this
+> composition; read-only keys see 28 and 10 respectively.
+
 > Internal configuration qualification: optional `workloadconfig` HTTP and
 > MCP/shared-AI adapters publish environment, execution settings and encrypted
 > secret upsert/delete through one exact-CAS/live-operator boundary. These are
@@ -2132,3 +2152,12 @@ plus the new signing `secret` once. Update returns only the masked
 `inbound_webhook` view; delete retains `id`/`status`. Route results retain their
 legacy projection. Display metadata adds no READ permission requirement and is
 not authority. These projections do not change the REST envelopes or CAS core.
+
+The internal managed listener mounts only route inspection (`kind=route`),
+upsert and confirmed delete via REST. It selects the exact published route or
+longest published literal `/prefix/*`; method rejection does not try a broader
+route. The same per-function auth and managed pool as `/fn/` apply. Platform
+roots and their descendants remain reserved for all methods. Inspect
+`route_published` separately from the stored mapping; after restore the mapping
+is inactive until a fresh, authorized CAS upsert. No route list, inbound
+webhook, or managed MCP/Chat route tools are installed by this slice.

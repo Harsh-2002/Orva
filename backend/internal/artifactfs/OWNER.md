@@ -1,7 +1,7 @@
 # One-instance persistent asset owner (internal opt-in)
 
 This is a trusted-host lifecycle consumer, not serving/boot wiring, IAM approval,
-restore adoption, current-generation authority or reboot recovery. Code/runtime
+restore adoption or current-generation authority. Code/runtime
 verifier profiles and the unbound persistent-store format remain unchanged.
 
 ## Association and trust
@@ -12,15 +12,18 @@ one root Domain under a caller-supplied process-local captured Budget. It never
 captures a writable ancestor or moves any process itself. All three resource
 controllers must be available. Root provisioning is privileged boot-owner work.
 
-The owner root has a separate version-1 wrapper format:
+The owner root has a separate versioned wrapper format:
 
 - `owner.json`: canonical bounded association for the exact metadata-root
   device/inode, owner UUID, code/runtime root paths and device/inodes, immutable
   store limits, provisioned cgroup parent, finite epoch-history bound, and each
-  exact epoch metadata UUID plus verified typed EpochReference data.
+   exact epoch metadata UUID plus verified typed EpochReference data. Unbound
+   owners retain version 1. Opt-in host-bound owners use version 2.
 - `epochs/epoch-<UUIDv7>/epoch.json`: workloadfence's existing root-v1 records.
 - `owner.intent` / `owner.json.tmp`: incomplete transition evidence. Reopening
-  denies if either is present, or if any unknown file/directory is found.
+  denies unless the exact host-bound same-boot prepared transition below matches.
+- `owner.prepared`: bounded, witness-authenticated digests of the predecessor
+  and successor records, written after the signed successor file is synced.
 
 No per-store epoch file is written: **one owner record binds both stores**.
 Store `.artifactfs-control` stays version 1. There is no in-place adoption of
@@ -55,8 +58,21 @@ so repeated construction cannot grow an unbounded new set of unknown epochs.
 A failed final unlink barrier attempts to restore the denial marker. The fault
 tests model syscall failures, not actual power loss or a filesystem that lies
 about persistence; complete visible committed state after a crash is distinct
-from incomplete/unknown intent. No general interrupted-transition repair is
-implemented.
+from incomplete/unknown intent.
+
+For host-bound same-boot recovery only, a synced `owner.prepared` permits
+reconciliation before or after the successor record's rename. With the
+witness and all root locks held, the opener verifies an exact one-epoch
+append, fences the candidate and all current-boot roots, and verifies the
+prior-boot associations as usual. It completes and rechecks the commit
+before clearing its markers. The candidate goes into history; it is never
+reopened for entry. Recovery must still provision a fresh live epoch within
+the original cap before any bindings are returned.
+
+Before a complete authenticated prepared transition is available, partial
+state still denies. Missing or replaced same-boot groups and unknown layouts
+also deny. This is not first-create repair, cold-transition replay, epoch
+retirement, or daemon boot wiring.
 
 `Bindings(ctx)` checks the still-owned association/layout/store identities and
 current verified Domain reference before returning trusted internal references.
@@ -78,10 +94,13 @@ must still use the same returned binding triple; it is not hostile-host isolatio
 `OpenOwnerRecovery(ctx, config)`:
 
 1. Holds the owner and both store locks, checks exact association/root/role/
-   limit/layout identity, then opens the associated root epochs through the
+   limit/layout identity, then opens all associated root epochs for version 1
+   or every exact epoch in the final boot run for version 2 through the
    narrow `OpenRecoveringUnderBudget` constructor. Every fresh verified
    Reference must equal its stored association data. It rejects wrong boot,
-   missing/replaced groups, corrupt records and mixed/unknown state.
+   missing/replaced current groups, corrupt records and mixed/unknown state.
+   A host-bound owner also verifies the host binding and each prior-boot
+   reference before skipping any previous run.
 2. Persists a transition intent and Fence/Checks the exact old roots under that
    valid captured budget. The root contains every typed build/worker descendant.
    No recovered tree is activated, removed or reclaimed before this proof.
@@ -106,6 +125,43 @@ mode switch, caller-supplied fenced boolean, alternate verifier or proof callbac
 Private reconstruction is reachable only through this complete owner protocol.
 Restored policies/grants/review flags are neither read nor compiled.
 
+## Opt-in cold recovery
+
+For a **fresh** owner only, set `OwnerConfig.Host` to an `OwnerHostConfig`.
+Pre-provision a dedicated local witness file with 32 cryptographically random
+bytes encoded as 64 lowercase hex characters followed by one newline. The file
+must be a mode-0600 single-link regular file in an euid-owned mode-0700 directory,
+without symlinks or xattrs. Supply the complete, explicit list of existing backup
+roots (`[]string{}` if none). The witness must be outside them and the three
+owner/store roots. Do not include the witness or a reachable alias in any backup,
+clone, VM snapshot, migration or restore. There is no automatic witness creation,
+rotation, replacement, adoption or version-1 upgrade.
+
+The witness is held under an exclusive nonblocking lock for the owner's entire
+lifetime. Version 2 pins its device/inode and authenticates the canonical whole
+association with HMAC-SHA-256 keyed by the witness; no witness bytes are written
+to the association. Each boot ID must occur in exactly one contiguous run. The
+old record, all prior metadata and the witness are checked before a cold
+transition may write intent or recover either store. Prior metadata is checked
+again before clearing intent. The fresh epoch's boot comes from the kernel-
+verified Domain reference; no boot ID is accepted from configuration.
+
+`OpenOwnerColdRecovery` accepts only an existing version-2 owner whose every
+recorded epoch validates through `ValidatePriorBootUnderBudget`. That API checks
+each exact old record against the current live captured budget and rejects the
+current boot. It does not open an old cgroup or mint a Domain or fence proof.
+If the final run is from this boot, use `OpenOwnerRecovery`; missing cgroups in
+that run deny, regardless of which entry point is used. Both entry points use
+the same intent and commit barrier and store verification, retain old metadata,
+and never repair incomplete state or reclaim anything.
+
+The witness is not hardware attestation or rollback detection. Host placement
+and backup-root completeness are trusted provisioning facts. Privileged host
+writers, namespace/mount substitution, filesystem aliases not represented by
+the configured roots, cloned witness/identity, and rollback of exact in-place
+state are outside this proof. Witness and existing asset filesystem identities
+must remain stable across reboots; changed device/inode values deny.
+
 ### Budget recapture prerequisite
 
 Ordinary OpenRecovering still requires a strict child of current membership.
@@ -116,6 +172,13 @@ prevent a cold replacement daemon from entering the old internal service budget
 to capture it. Boot placement/recapture is **not solved here**. Cross-process
 handoff tests capture the replacement's budget before delegation and move only
 their own test processes. They do not establish production cold-start recovery.
+The cold entry point assumes a trusted boot owner can provision an appropriate
+new budget and the same delegated parent path. The tagged
+`TestOwnerActualReboot` fixture passed on guest-local ext4: an enrolled child
+was present before hard stop, the new boot had no old cgroup, a foreign witness
+was rejected, and both exact seals reopened under cold then same-boot recovery.
+The guest overlay changed inode identities and was refused. Neither result
+qualifies daemon boot placement, power-loss durability or clone detection.
 
 ## Shutdown and remaining gates
 
@@ -145,8 +208,7 @@ bound Domain gate acquisition/drain work, not a kernel filesystem syscall alread
 in flight. Owner-method serialization is synchronous; waiting for another owner
 operation can outlast a waiting caller's deadline.
 
-Before serving activation: independently qualify the complete real-runtime
-crash/handoff matrix, design cold-start budget placement, durable deployment-to-
-generation publication, restore-marker quarantine and policy reconstruction,
-operator recovery procedures and any reviewed history/quarantine reclamation.
-No public flag, boot caller, pool integration or approval restoration is present.
+Before daemon cut-over, qualify cold-start budget placement and real-runtime
+handoff, resolve interrupted intent recovery and bounded epoch retirement,
+and define operator recovery and reclamation. The cold opener is not selected
+by `orva serve` and does not itself restore policy approval.

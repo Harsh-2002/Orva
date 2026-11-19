@@ -453,6 +453,7 @@ func (db *Database) AbandonWorkloadDeployments(ctx context.Context) error {
 
 type WorkloadDeploymentInstallation struct {
 	snapshot  *WorkloadArtifactSnapshot
+	policy    IAMPolicyRecord
 	sources   string
 	id        string
 	output    WorkloadBuildOutput
@@ -464,6 +465,7 @@ func (p *WorkloadDeploymentInstallation) Snapshot() *WorkloadArtifactSnapshot {
 	return p.snapshot.Clone()
 }
 func (p *WorkloadDeploymentInstallation) Output() WorkloadBuildOutput { return p.output }
+func (p *WorkloadDeploymentInstallation) Policy() IAMPolicyRecord     { return p.policy }
 
 func prepareDeploymentInstallationTx(ctx context.Context, tx *sql.Tx, id string) (*WorkloadDeploymentInstallation, error) {
 	var owner, generation, raw string
@@ -533,7 +535,7 @@ func prepareDeploymentInstallationTx(ctx context.Context, tx *sql.Tx, id string)
 	if err != nil {
 		return nil, err
 	}
-	return &WorkloadDeploymentInstallation{snapshot: snapshot, sources: digest, id: id, output: output, pauseMode: pauseMode, promotion: promotion}, nil
+	return &WorkloadDeploymentInstallation{snapshot: snapshot, policy: *sources.Record, sources: digest, id: id, output: output, pauseMode: pauseMode, promotion: promotion}, nil
 }
 
 func (db *Database) PrepareWorkloadDeploymentInstallation(ctx context.Context, id string) (*WorkloadDeploymentInstallation, error) {

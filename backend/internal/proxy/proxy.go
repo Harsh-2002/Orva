@@ -60,6 +60,7 @@ const sessionCookieName = "session_token"
 // configured cap. Callers map it to 413; the invoke error mapper keys on it
 // via errors.Is.
 var ErrBodyTooLarge = errors.New("request body too large")
+var ErrInvocationVersionChanged = errors.New("managed function changed during request admission")
 
 func SanitizeForwardedHeaders(h http.Header) map[string]string {
 	out := make(map[string]string, len(h))
@@ -342,6 +343,7 @@ func (p *Proxy) Forward(
 	stripPrefix string, // strip this from r.URL.Path before passing to the function
 	coldStart bool, // ignored; populated from pool Acquire result
 	startTime time.Time,
+	authorizedVersion int,
 ) (*Result, error) {
 	_ = codeDir
 	_ = cpus
@@ -458,6 +460,11 @@ func (p *Proxy) Forward(
 	if err != nil {
 		return &Result{}, fmt.Errorf("pool acquire: %w", err)
 	}
+	var reqErr error
+	defer func() { p.Pool.Release(acq, reqErr) }()
+	if !p.Pool.AcceptsManagedVersion(acq, authorizedVersion) {
+		return &Result{}, ErrInvocationVersionChanged
+	}
 	if facts, managed := acq.ManagedResources(); managed {
 		timeout = facts.Timeout
 		headers["x-orva-timeout-ms"] = strconv.FormatInt(timeout.Milliseconds(), 10)
@@ -480,9 +487,6 @@ func (p *Proxy) Forward(
 		ctx, execID, trace.TraceID(r.Context()), trace.SpanID(r.Context()), 0, startTime))
 	// reqErr is the error we pass back to Release — determines whether the
 	// worker gets returned to the pool or killed.
-	var reqErr error
-	defer func() { p.Pool.Release(acq, reqErr) }()
-
 	dres, err := acq.Worker.DispatchEx(ctx, reqJSON)
 	var stderr []byte
 	if dres != nil {

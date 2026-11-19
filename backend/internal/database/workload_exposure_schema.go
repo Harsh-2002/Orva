@@ -2,7 +2,7 @@ package database
 
 import "context"
 
-// Explicit fixture initialization only; absent from Migrate and normal boot.
+// Explicit opt-in initialization only; absent from Migrate and normal boot.
 func (db *Database) initWorkloadExposureSchema(ctx context.Context) error {
 	_, err := db.write.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS workload_exposure_versions (
@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS workload_exposure_audit (
 );
 CREATE TRIGGER IF NOT EXISTS workload_exposure_audit_immutable
  BEFORE UPDATE ON workload_exposure_audit BEGIN SELECT RAISE(ABORT,'immutable exposure audit'); END;
+CREATE TABLE IF NOT EXISTS workload_route_publications (
+ path TEXT PRIMARY KEY REFERENCES routes(path) ON DELETE CASCADE,
+ version INTEGER NOT NULL CHECK(typeof(version)='integer' AND version>0),
+ function_id TEXT NOT NULL,
+ methods TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS workload_route_unpublish_on_update
+ AFTER UPDATE ON routes BEGIN DELETE FROM workload_route_publications WHERE path IN (OLD.path,NEW.path); END;
+CREATE TRIGGER IF NOT EXISTS workload_route_unpublish_on_insert
+ AFTER INSERT ON routes BEGIN DELETE FROM workload_route_publications WHERE path=NEW.path; END;
 `)
 	return err
 }

@@ -18,8 +18,9 @@ type Service struct {
 	Authority       *workloadiam.Authority
 	CurrentArtifact func(string) string
 	// Managed and Registry must share this exact DB and Authority binding.
-	Managed  *workloadpolicy.Service
-	Registry *registry.Registry
+	Managed                    *workloadpolicy.Service
+	Registry                   *registry.Registry
+	InvalidateFactoryUnderGate func(string) func()
 }
 
 // Prepare is called only under Registry's function mutation lock. No mutation
@@ -33,7 +34,10 @@ func (s *Service) Prepare(ctx context.Context, id string) (func(), error) {
 		return nil, database.ErrOperatorDenied
 	}
 	if s.Managed != nil {
-		return s.Managed.RetireOwnerWithHistory(ctx, ref, id, s.DB, s.Registry, s.Authority)
+		return s.Managed.RetireOwnerWithHistoryAndFactory(ctx, ref, id, s.DB, s.Registry, s.Authority, s.InvalidateFactoryUnderGate)
+	}
+	if s.InvalidateFactoryUnderGate != nil {
+		return nil, workloadiam.ErrDenied
 	}
 	return s.Authority.RetireOwnerDeferred(id, func() error { return s.DB.ReserveHistoryDeletion(ctx, ref, id) })
 }

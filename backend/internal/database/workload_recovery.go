@@ -123,6 +123,9 @@ func (db *Database) ApplyRecoveryForFixture(ctx context.Context, operation strin
 	}
 	quarantine := operation != "" && (first || result.Operation != operation)
 	if quarantine {
+		if err := quarantineManagedRoutesTx(ctx, tx); err != nil {
+			return RecoveryResult{}, err
+		}
 		if err := quarantineIAMTx(ctx, tx, operation); err != nil {
 			return RecoveryResult{}, err
 		}

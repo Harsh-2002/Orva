@@ -2,6 +2,16 @@
 
 ## Recovery cutover is not enabled
 
+The managed test composition requires an exclusive, verified sealed Owner
+and a matching database. It cannot adopt an existing legacy installation
+or restore a managed archive onto a different Owner. Normal `orva serve`
+does not participate in the managed recovery lock; never point both at
+the same data directory.
+
+Managed custom routes do not carry public exposure across restore. To re-expose
+a retained mapping, use fresh inspection and the managed REST CAS upsert after
+the restore; do not use the legacy route writer.
+
 The internal `workloadrecovery` fixture is not wired into `serve`, normal
 migration, public restore routes or scheduler construction. Deploying this
 source does not activate IAM migration/quarantine guarantees. A later coordinated

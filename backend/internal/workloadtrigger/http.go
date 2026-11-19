@@ -5,11 +5,16 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 func HTTPError(w http.ResponseWriter, err error) {
@@ -99,4 +104,82 @@ func (h *HTTPAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, 200, out)
+}
+
+// RegisterManagedRoutes exposes only custom routes, with no legacy write handler.
+func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*http.Request) (*auth.Principal, error)) {
+	register := func(pattern string, next http.HandlerFunc) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			if s == nil || authenticate == nil {
+				HTTPError(w, database.ErrExposureUnavailable)
+				return
+			}
+			p, err := authenticate(r)
+			if err != nil || p == nil || p.Kind == auth.KindChannel {
+				HTTPError(w, database.ErrOperatorDenied)
+				return
+			}
+			next(w, r.WithContext(auth.WithOperator(r.Context(), p)))
+		})
+	}
+	register("GET /api/v1/exposures", func(w http.ResponseWriter, r *http.Request) {
+		q, err := managedRouteQuery(r, "kind", "key", "function_id")
+		owner := q.Get("function_id")
+		if err != nil || q.Get("kind") != "route" || q.Get("key") == "" || (owner != "" && !ids.IsUUID(owner)) {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		ref, ok := auth.OperatorFromContext(r.Context())
+		if !ok {
+			HTTPError(w, database.ErrOperatorDenied)
+			return
+		}
+		out, err := s.db.InspectExposure(r.Context(), ref, "route", q.Get("key"), owner)
+		if err != nil {
+			HTTPError(w, err)
+			return
+		}
+		respond.JSON(w, http.StatusOK, map[string]any{
+			"version": strconv.FormatUint(out.Version, 10), "expected": out.Expected, "route": out.Route, "route_published": out.RoutePublished,
+		})
+	})
+	register("POST /api/v1/routes", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := managedRouteQuery(r); err != nil {
+			HTTPError(w, err)
+			return
+		}
+		s.HTTP(w, r, "route_set", "", "")
+	})
+	register("DELETE /api/v1/routes", func(w http.ResponseWriter, r *http.Request) {
+		q, err := managedRouteQuery(r, "path")
+		if err != nil || q.Get("path") == "" {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		s.HTTP(w, r, "route_delete", "", q.Get("path"))
+	})
+}
+
+func managedRouteQuery(r *http.Request, allowed ...string) (url.Values, error) {
+	if len(r.URL.RawQuery) > MaxRequestBytes {
+		return nil, database.ErrExposureInvalid
+	}
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, database.ErrExposureInvalid
+	}
+	for _, key := range allowed {
+		if values, present := q[key]; present {
+			if len(values) != 1 || !utf8.ValidString(values[0]) {
+				return nil, database.ErrExposureInvalid
+			}
+		}
+	}
+	for key := range q {
+		if !slices.Contains(allowed, key) {
+			return nil, database.ErrExposureInvalid
+		}
+	}
+	return q, nil
 }

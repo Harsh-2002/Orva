@@ -1,6 +1,6 @@
 # Opt-in public exposure mutations
 
-Internal candidate; not registered by normal boot or the serving router.
+Internal candidate; not registered by normal boot or the normal serving router.
 Constructing `Service` requires the existing Database, Registry and Authority.
 The exposure schema must be explicitly initialized by a scratch fixture; no
 environment switch or migration activates it. Legacy handler/MCP dependencies
@@ -65,6 +65,14 @@ See `docs/API.md`'s staged exposure section. Requests use exact decimal **string
 for `version`, `policy_revision` and `authority_epoch`; no floating conversion.
 Unknown/duplicate fields, invalid UTF-8/unpaired UTF-16, null fields, oversize
 requests and operator/artifact claims are rejected. Maximum body: 32 KiB.
+
+`StartManaged` initializes the opt-in schema and mounts route-only REST
+inspection and mutations. The same InvokeHandler selects an exact or longest
+published prefix with one version/owner/method-attested lookup. Publication
+does not authorize invocation on its own. Raw rows and restored mappings are
+not dispatched. Restore preserves mappings and CAS counters but clears their
+publication; inspection distinguishes these states. No inbound webhook, managed
+MCP/Chat registration, or legacy route list is added here.
 
 Inbound ownership is immutable. Create generates a fresh UUID and signature
 secret outside the IAM gate and returns the secret once, preserving the existing

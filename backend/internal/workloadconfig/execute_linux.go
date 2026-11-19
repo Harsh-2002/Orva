@@ -73,7 +73,7 @@ func (s *Service) Inspect(ctx context.Context, ref database.OperatorCredentialRe
 	if s == nil || ctx == nil {
 		return nil, ErrUnavailable
 	}
-	if _, ok := s.bindings[owner]; !ok {
+	if _, ok := s.binding(owner); !ok {
 		return nil, ErrUnavailable
 	}
 	lock := s.reg.MutationLock(owner)
@@ -89,7 +89,7 @@ func (s *Service) Inspect(ctx context.Context, ref database.OperatorCredentialRe
 		}
 		out = map[string]any{"expected": row.Expected, "review_required": row.ReviewRequired, "quarantined": row.Quarantined,
 			"environment_entries": row.EnvironmentEntries, "secret_entries": row.SecretEntries, "current_artifact": ""}
-		if current := s.pool.CurrentFactory(owner); current != nil {
+		if current := s.pool.CurrentFactory(owner); s.matchesBinding(owner, current) {
 			code, runtime := current.Identities()
 			out["current_artifact"], out["code_digest"], out["runtime_digest"] = current.ArtifactRevision(), code.Digest, runtime.Digest
 		}

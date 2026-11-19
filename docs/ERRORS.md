@@ -38,6 +38,10 @@ function-to-function `orva.invoke()`, and the inbound-webhook trigger. An SDK
 can therefore tell a concurrency cap it should back off from a host OOM it
 should not.
 
+The opt-in managed listener also returns `409 NOT_ACTIVE` when an invocation
+was authorized against a function version different from its acquired Factory.
+No handler is dispatched in that case.
+
 A failure **after** a worker is running is reported per path:
 
 | path | function timed out | worker crashed |

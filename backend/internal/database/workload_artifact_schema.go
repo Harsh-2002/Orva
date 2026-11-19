@@ -32,3 +32,17 @@ CREATE TABLE IF NOT EXISTS workload_artifact_generations (
 	}
 	return nil
 }
+
+// InitManagedServingSchemas is explicit and requires admission-closed startup.
+// It leaves the normal database migration and legacy server unchanged.
+func (db *Database) InitManagedServingSchemas(ctx context.Context) error {
+	for _, init := range []func(context.Context) error{
+		db.initWorkloadArtifactSchema, db.InitWorkloadDeploymentSchema,
+		db.InitWorkloadOperatorPauseSchema, db.initSessionIdentitySchema, db.InitHistorySchemaForFixture, db.initWorkloadExposureSchema,
+	} {
+		if err := init(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}

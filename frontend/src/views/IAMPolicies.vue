@@ -5,25 +5,27 @@
         <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
           Policies
         </h1>
-        <p class="mt-1.5 max-w-prose text-sm text-foreground-muted">
-          Reusable permissions with immutable versions and explicit function attachments.
+        <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+          Reusable permissions pinned to a version for each function.
         </p>
       </div>
-      <Button
-        v-if="list.data.value?.can_manage && !creating"
-        :disabled="!list.fresh.value || list.loading.value || list.busy.value || !!list.error.value"
-        :title="list.loading.value || list.busy.value ? 'Wait for the current policy list.' : list.error.value ? 'Refresh policies before creating a reusable policy.' : ''"
-        @click="creating = true"
-      >
-        Create reusable policy
-      </Button>
-      <Button
-        variant="secondary"
-        :disabled="list.loading.value"
-        @click="list.refresh"
-      >
-        Refresh policies
-      </Button>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button
+          v-if="list.data.value?.can_manage && !creating"
+          :disabled="!list.fresh.value || list.loading.value || list.busy.value || !!list.error.value"
+          :title="list.loading.value || list.busy.value ? 'Wait for the current policy list.' : list.error.value ? 'Refresh policies before creating a reusable policy.' : ''"
+          @click="creating = true"
+        >
+          Create reusable policy
+        </Button>
+        <Button
+          variant="secondary"
+          :disabled="list.loading.value"
+          @click="list.refresh"
+        >
+          Refresh policies
+        </Button>
+      </div>
     </header>
     <p
       v-if="list.error.value"

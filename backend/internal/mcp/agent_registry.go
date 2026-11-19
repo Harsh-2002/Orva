@@ -189,6 +189,10 @@ func regAddTool[In, Out any](
 func BuildAgentRegistry(deps Deps, perms permSet) *Registry {
 	reg := newRegistry()
 	rc := &regCtx{deps: deps, perms: perms, reg: reg}
+	if deps.ManagedServer {
+		registerManagedServerTools(rc)
+		return reg
+	}
 
 	// Every operator-tool family, gated to this principal's perms inside
 	// regAddTool. This mirrors the external MCP server's registration in

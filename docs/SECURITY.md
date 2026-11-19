@@ -1,5 +1,17 @@
 # Security model
 
+The internal managed server uses the same Authority for the sealed pool,
+private SDK, job/cron admission, and protected writes. Startup holds admission
+closed while verifying the exact committed pair and pause state. Restore
+quarantine denies retained approvals; a normal same-boot restart retains only
+approval for the verified unchanged generation. The managed mux and shared
+MCP/Chat catalog are allowlists, not wrappers that fall through to legacy
+mutations. Session-backed mutations require a live UUID-backed session and
+a same-origin browser request. None of this selects managed mode in `orva serve`.
+Configuration writes preserve the exact sealed pair in the same transaction
+as the successor generation, inactive status and review-required deny. A
+restart cannot install a pending generation or grant its retained policy.
+
 ## Opt-in restore-quarantine boundary
 
 The internal Linux recovery coordinator treats the archive and restored approval
@@ -14,6 +26,10 @@ This is not installed in normal serving or the existing public restore handler.
 Filesystem administrators and host callbacks remain trusted. Direct copying
 without the marker procedure is outside the guarantee. The marker provides no
 kernel fencing, artifact adoption, old-Factory rebinding or GC authority.
+Managed startup checks the verified Owner identity before opening a SQLite
+writer. Managed in-place restore rejects foreign or unbound archives before
+promotion. This binding is not a process fence or protection against a host
+administrator replacing raw database or sealed-store data.
 [Recovery details and test limits](../backend/internal/workloadrecovery/README.md).
 
 ## Opt-in configuration and secret publication
@@ -1121,3 +1137,13 @@ and credential validity at its own ordered publication boundary; that writer
 cut-over is not implemented here. This is not a claim about legacy queued safety.
 Normal boot/router/catalog construction remains inactive. Signature-secret
 rotation stays delete/recreate and secrets are returned only once on create.
+
+The opt-in managed listener considers only route rows with an exact
+transactional publication for their version, owner and methods. A version
+high-water mark alone is not proof: legacy updates and recreations remove
+publication, and preexisting rows are not adopted. Selection precedes method
+checking. Reserved control-plane paths stay in the platform mux on all methods.
+Managed restore removes route publications in the durable quarantine
+transaction before admission opens; a backed-up grant is not a fresh decision
+to expose a function publicly. Inspection and explicit CAS republication do
+not change SDK policy or target admission.

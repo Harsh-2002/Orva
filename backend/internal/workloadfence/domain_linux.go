@@ -464,6 +464,23 @@ func openOwnerWithBudget(root, parent string, budget *budgetState) (*state, erro
 }
 
 func openMetadata(root, parent string) (*state, error) {
+	f, err := openPrivateRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrBusy
+		}
+		return nil, err
+	}
+	s := &state{root: f, parent: parent, gate: make(chan struct{}, 1)}
+	s.leave()
+	return s, nil
+}
+
+func openPrivateRoot(root string) (*os.File, error) {
 	if err := noLinks(root); err != nil {
 		return nil, err
 	}
@@ -481,16 +498,7 @@ func openMetadata(root, parent string) (*state, error) {
 		f.Close()
 		return nil, ErrInvalid
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, ErrBusy
-		}
-		return nil, err
-	}
-	s := &state{root: f, parent: parent, gate: make(chan struct{}, 1)}
-	s.leave()
-	return s, nil
+	return f, nil
 }
 
 func validateParent(parent, membership string) error {
@@ -844,12 +852,26 @@ func (s *state) persistenceStep(name string, op func() error) error {
 	return op()
 }
 
+const recordOpenFlags = syscall.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_CLOEXEC | syscall.O_NONBLOCK
+
 func readRecord(path string) (record, error) {
-	var r record
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
+	fd, err := syscall.Open(path, recordOpenFlags, 0)
 	if err != nil {
-		return r, err
+		return record{}, err
 	}
+	return decodeRecord(fd, path)
+}
+
+func readRecordAt(dir *os.File) (record, error) {
+	fd, err := syscall.Openat(int(dir.Fd()), "epoch.json", recordOpenFlags, 0)
+	if err != nil {
+		return record{}, err
+	}
+	return decodeRecord(fd, "epoch.json")
+}
+
+func decodeRecord(fd int, path string) (record, error) {
+	var r record
 	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
 	st, err := f.Stat()

@@ -1,15 +1,17 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import Sidebar from '@/components/layout/Sidebar.vue'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 
 const sections = [
-  ['/', 'Overview'], ['/ai', 'Chat'], ['/functions', 'Functions'],
-  ['/cron', 'Schedules'], ['/jobs', 'Jobs'], ['/activity', 'Activity'],
-  ['/invocations', 'Invocations'], ['/traces', 'Traces'], ['/api-keys', 'Keys'],
-  ['/channels', 'Channels'], ['/webhooks', 'Webhooks'], ['/firewall', 'Egress'],
-  ['/settings', 'Settings'], ['/docs', 'Docs'],
+  ['/', 'Overview'], ['/functions', 'Functions'], ['/cron', 'Schedules'], ['/jobs', 'Jobs'],
+  ['/webhooks', 'Webhooks'], ['/invocations', 'Invocations'], ['/traces', 'Traces'], ['/activity', 'Activity'],
+  ['/api-keys', 'Keys'], ['/channels', 'Channels'], ['/firewall', 'Egress'],
+  ['/ai', 'Chat'], ['/settings', 'Settings'], ['/docs', 'Docs'],
 ]
+const policy = ['/iam/policies', 'Policies']
 const mounted = []
 const originalWidth = window.innerWidth
 afterEach(() => {
@@ -20,13 +22,14 @@ afterEach(() => {
 async function make(path = '/') {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: sections.map(([url]) => ({ path: url, component: { render: () => null } })),
+    routes: [...sections, policy].map(([url]) => ({ path: url, component: { render: () => null } })),
   })
   await router.push(path)
   await router.isReady()
-  const view = mount(Sidebar, { global: { plugins: [router] }, attachTo: document.body })
+  const pinia = createPinia()
+  const view = mount(Sidebar, { global: { plugins: [router, pinia] }, attachTo: document.body })
   mounted.push(view)
-  return { view, router }
+  return { view, router, iam: useManagedIAMStore(pinia) }
 }
 
 describe('flat sidebar navigation', () => {
@@ -39,6 +42,14 @@ describe('flat sidebar navigation', () => {
     for (const label of ['Automation', 'Observe', 'Connect']) expect(view.text()).not.toContain(label)
     expect(view.find('nav').classes()).toContain('overflow-y-auto')
     expect(view.find('nav').classes()).toContain('min-h-0')
+  })
+
+  it('places Policies after Functions only when managed access is available', async () => {
+    const { view, iam } = await make()
+    iam.available = true
+    await flushPromises()
+    expect(view.findAll('nav > a').map(link => [link.attributes('href'), link.text()]))
+      .toEqual([...sections.slice(0, 2), policy, ...sections.slice(2)])
   })
 
   it('preserves active routes and closes the mobile drawer when a section is chosen', async () => {

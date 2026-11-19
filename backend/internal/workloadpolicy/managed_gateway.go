@@ -89,9 +89,13 @@ func (s *Service) inspectSources(ctx context.Context, ref auth.OperatorReference
 		current = artifactPointer(state.Artifact)
 	}
 	r := src.Record
+	enforcement := "scratch_opt_in"
+	if s.serving {
+		enforcement = "managed"
+	}
 	out := &FunctionSourcesDTO{Function: snapshotFunction{ID: id, Name: fn.Name}, InlinePolicy: json.RawMessage(src.InlineJSON), EffectivePolicy: json.RawMessage(r.PolicyJSON),
 		Host: ManagedHostDTO{Revision: strconv.FormatUint(r.Revision, 10), AuthorityEpoch: strconv.FormatUint(r.AuthorityEpoch, 10), CurrentArtifact: current, ApprovedArtifact: artifactPointer(r.ApprovedArtifact),
-			Quarantined: r.Quarantined, ReviewRequired: r.ReviewRequired, CanManage: s.db.CheckIAMOperator(ctx, ref, true) == nil, Enforcement: "scratch_opt_in"},
+			Quarantined: r.Quarantined, ReviewRequired: r.ReviewRequired, CanManage: s.db.CheckIAMOperator(ctx, ref, true) == nil, Enforcement: enforcement},
 		Attachments: []ManagedAttachmentDTO{}, History: []snapshotAudit{}}
 	for _, a := range src.Attachments {
 		out.Attachments = append(out.Attachments, ManagedAttachmentDTO{PolicyID: a.PolicyID, Name: a.Name, Version: strconv.FormatUint(a.Version, 10), Enabled: a.Enabled, Revoked: a.Revoked, Policy: json.RawMessage(a.PolicyJSON)})

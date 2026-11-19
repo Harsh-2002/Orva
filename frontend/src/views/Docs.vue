@@ -253,6 +253,10 @@
         <code class="doc-chip">/mcp/</code>
         <code class="doc-chip">/web/</code>
         <code class="doc-chip">/_orva/</code>.
+        On the internal managed listener, inspect the mapping and its CAS
+        tokens with <code class="doc-chip">GET /api/v1/exposures?kind=route</code>
+        (include the route path as <code class="doc-chip">key</code>).
+        Restored mappings must be explicitly republished before they can receive requests.
       </Callout>
     </section>
 
@@ -655,9 +659,8 @@
             MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
-            Same API surface the dashboard uses, exposed as 73 tools an agent
-            can call directly. API key permissions scope the available tool
-            set.
+            Let agents use Orva tools. The server and your credential determine
+            which tools are available.
           </p>
         </div>
       </div>
@@ -766,11 +769,12 @@
         <code class="doc-chip">ttlMs</code> and
         <code class="doc-chip">cacheScope</code>. Orva returns
         <code class="doc-chip">cacheScope: "private"</code> because the tool
-        catalog is permission-scoped (a full-permission key lists 73 tools; a
-        <code class="doc-chip">read</code>-only key lists 27) and
-        channel-specific (a channel token sees only that channel's
-        functions); a shared cache entry would hand one caller another
-        caller's tool surface. <code class="doc-chip">ttlMs</code> is
+        list depends on the caller. On a standard server, a full-permission
+        key lists 73 tools and a read-only key lists 28. Channel tokens list
+        only their bundled functions. The internal managed server lists
+        39 and 10 tools respectively, and does not accept channel tokens.
+        Use <code class="doc-chip">tools/list</code> for your exact count.
+        <code class="doc-chip">ttlMs</code> is
         <code class="doc-chip">0</code> because the catalog changes on any
         deploy, channel edit, or permission change, and statelessness removed
         the session a <code class="doc-chip">tools/list_changed</code>
@@ -2176,7 +2180,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 73 tools.',
+    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards and check the tools available to your key.',
     code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {

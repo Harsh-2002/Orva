@@ -38,6 +38,7 @@ type Service struct {
 	authority *workloadiam.Authority
 	observe   ObserveArtifact
 	managed   bool
+	serving   bool
 }
 
 func New(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, observe ObserveArtifact) (*Service, error) {

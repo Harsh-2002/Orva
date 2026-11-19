@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,7 +13,59 @@ import (
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
+
+func TestSealedRestoreDoesNotCreateLegacySymlinks(t *testing.T) {
+	source, dest := t.TempDir(), t.TempDir()
+	db, err := database.New(filepath.Join(source, "orva.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	id := ids.New()
+	if err := db.InsertFunction(&database.Function{ID: id, Name: "sealed", Runtime: "node",
+		Status: "active", CodeHash: strings.Repeat("a", 64)}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(source, "snapshot.db")
+	if err := SnapshotDB(db.ReadDB(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var archive bytes.Buffer
+	if err := ArchiveTo(&archive, source, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreSealedFromGuardedDB(&archive, dest, func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "functions")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sealed restore created a legacy source tree: %v", err)
+	}
+	before, err := os.ReadFile(filepath.Join(dest, "orva.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(source, "functions", id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ArchiveTo(&archive, source, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreSealedFromGuardedDB(&archive, dest, func(string) error {
+		t.Fatal("legacy tree reached the promotion barrier")
+		return nil
+	}); !errors.Is(err, ErrBadArchive) {
+		t.Fatalf("legacy tree refused with unexpected error: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(dest, "orva.db"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("refused restore changed the database")
+	}
+}
 
 // TestSnapshotArchiveRestoreRoundtrip exercises the full backup +
 // restore cycle: build a small data dir, snapshot the DB, archive it,

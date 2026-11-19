@@ -53,7 +53,8 @@ unbound artifact stores remain inspection-only.
   alone never constitute proof. Inode numbers can be recycled: same-boot
   inode equality is meaningful only under exclusive ownership and **no
   deletion/recreation/reuse**. A reboot, missing group, changed identity, or
-  ambiguous record denies; there is no reboot adoption or inode-reuse recovery.
+  ambiguous record denies same-boot recovery; there is no reboot adoption or
+  inode-reuse recovery.
 
 ## API and ordering
 
@@ -142,8 +143,8 @@ instance epoch/root, immediate parent epoch/metadata/group, and depth. The
 lineage excludes mutable closed flags so ancestor fencing does not invalidate
 child cleanup. `Reference(ctx)` returns verified owned association **data only**,
 not proof or start/approval authority. Generic OpenRecovering rejects version-2
-children; there is no child recovery/adoption constructor, reboot support or
-store-association loader.
+children; there is no child recovery/adoption constructor or store-association
+loader.
 
 On NewChild failure before cgroup creation, no child is returned. Failure after
 creation returns a **nonnil closed child plus error**: retain both its metadata
@@ -170,8 +171,8 @@ Serving publication must separately order exact generation/current-state
 identities, all worker/build ancestry and crash intents with closed/fenced
 ownership. The loader must verify boot and stable topology and obtain fresh
 kernel proof, never adopt by path/inode. Root proof alone, a reference or
-released flock is not artifact-store authority. Reboot proof, serving activation,
-policy restoration and general quarantine reclamation remain absent.
+released flock is not artifact-store authority. Reboot recovery, serving
+activation, policy restoration and general quarantine reclamation remain absent.
 
 ## Failure and strict metadata handling
 
@@ -298,6 +299,30 @@ Restart placement, recapturing a
 service budget after a crash, and production delegation remain integration
 obligations, not acceptance established by this process-local API.
 See the kernel's [no-internal-process constraint](https://docs.kernel.org/admin-guide/cgroup-v2.html#no-internal-process-constraint).
+
+### Prior-boot validation (no recovery)
+
+`ValidatePriorBootUnderBudget(ctx, budget, root, parent, expected)` is a
+read-only check for a trusted boot owner holding the wider durable ownership
+association. It takes the exact old metadata directory's nonblocking flock.
+Only an unambiguous root-v1 record matching every `EpochReference` field and
+the actual metadata directory's device/inode can pass. A copied, restored or
+renumbered metadata root is not a match. Both open and closed old records may
+pass; the closed bit is not evidence of process death.
+
+The budget must come from a fresh capture in the current process. Its boot ID
+must match the live kernel and differ from the durable record's ID. The current
+parent must be a valid strict descendant on the captured mount; its identity,
+the budget's live checks and the exact durable record are checked again before
+success. Old cgroup paths and device/inodes are not current authority and are
+not opened. This comparison assumes the same trusted host/kernel lineage; it
+cannot distinguish a reboot from moving storage to a different machine or VM.
+Do not use it for cross-host, imported, restored or ambiguous state.
+
+Success returns no `Domain`, `Proof`, or recovery authority. The check does
+not fence, write, activate or reclaim anything, change the existing same-boot
+constructors, or wire any recovery path. Fixture tests do not qualify a real
+reboot.
 
 ## Sandbox integration contract (internal opt-in only)
 

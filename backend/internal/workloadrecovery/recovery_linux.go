@@ -157,6 +157,30 @@ func (c *Coordinator) checkDBPaths() error {
 	return nil
 }
 
+func checkManagedSourceDirectory(root *os.File) error {
+	fd, err := unix.Openat(int(root.Fd()), "functions", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return database.ErrManagedOwnerInvalid
+	}
+	dir := os.NewFile(uintptr(fd), "functions")
+	defer dir.Close()
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Uid != uint32(os.Geteuid()) || st.Mode&0022 != 0 {
+		return database.ErrManagedOwnerInvalid
+	}
+	names, err := dir.Readdirnames(1)
+	if len(names) != 0 {
+		return database.ErrManagedOwnerLegacy
+	}
+	if !errors.Is(err, io.EOF) {
+		return database.ErrManagedOwnerInvalid
+	}
+	return nil
+}
+
 func (c *Coordinator) quiesce(ctx context.Context) error {
 	if c.root == nil {
 		return ErrClosed
@@ -318,11 +342,77 @@ func (c *Coordinator) Restore(ctx context.Context, r io.Reader) (string, error) 
 	return m.Operation, c.writeMarker(m)
 }
 
+// RestoreBound rejects foreign or unbound archives before promotion. It can
+// replace an installed ready restore only when that restore cannot start with
+// this verified Owner. It never clears the marker without a replacement.
+func (c *Coordinator) RestoreBound(ctx context.Context, owner string, r io.Reader) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.quiesce(ctx); err != nil {
+		return "", err
+	}
+	m, err := c.readMarker()
+	if err != nil {
+		return "", err
+	}
+	if err := checkManagedSourceDirectory(c.root); err != nil {
+		return "", err
+	}
+	if err := c.checkDBPaths(); err != nil {
+		return "", err
+	}
+	live := filepath.Join(c.dir, "orva.db")
+	if m != nil && m.State == "ready" {
+		err := database.RequireManagedOwnerBinding(ctx, live, owner)
+		if !errors.Is(err, database.ErrManagedOwnerMismatch) && !errors.Is(err, database.ErrManagedOwnerLegacy) {
+			return m.Operation, ErrIncomplete
+		}
+	} else if err := database.InspectManagedOwnerBinding(ctx, live, owner); err != nil {
+		return "", err
+	}
+	next := &marker{Version: 1, Operation: ids.New(), State: "installing"}
+	if err := backup.RestoreSealedFromGuardedDB(r, c.dir, func(path string) error {
+		if err := database.RequireManagedOwnerBinding(ctx, path, owner); err != nil {
+			return err
+		}
+		if !c.host.AdmissionClosed() {
+			return ErrClosed
+		}
+		if err := c.step("staged"); err != nil {
+			return err
+		}
+		return c.writeMarker(next)
+	}); err != nil {
+		return next.Operation, err
+	}
+	if err := c.step("installed"); err != nil {
+		return next.Operation, err
+	}
+	if err := c.syncInstalled(); err != nil {
+		return next.Operation, err
+	}
+	next.State = "ready"
+	return next.Operation, c.writeMarker(next)
+}
+
 // Start supplies the opened DB only after explicit migration/quarantine and
 // independent current-artifact reconstruction. It never restores approvals or
 // rebinds an old boot's Factory. Callbacks must fail with admission still closed.
 func (c *Coordinator) Start(ctx context.Context, reconstruct func(context.Context, *database.Database) error,
 	start func(context.Context, *database.Database) error) (*database.Database, database.RecoveryResult, error) {
+	return c.start(ctx, "", reconstruct, start)
+}
+
+// StartBound refuses legacy or foreign instance state before opening a writer.
+// The owner ID must come from the independently verified sealed-store Owner.
+func (c *Coordinator) StartBound(ctx context.Context, owner string, reconstruct, start func(context.Context, *database.Database) error) (*database.Database, database.RecoveryResult, error) {
+	if owner == "" {
+		return nil, database.RecoveryResult{}, database.ErrManagedOwnerInvalid
+	}
+	return c.start(ctx, owner, reconstruct, start)
+}
+
+func (c *Coordinator) start(ctx context.Context, owner string, reconstruct, start func(context.Context, *database.Database) error) (*database.Database, database.RecoveryResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var result database.RecoveryResult
@@ -347,7 +437,20 @@ func (c *Coordinator) Start(ctx context.Context, reconstruct func(context.Contex
 	if m != nil {
 		operation = m.Operation
 	}
-	db, err := database.New(filepath.Join(c.dir, "orva.db"))
+	path := filepath.Join(c.dir, "orva.db")
+	if owner != "" {
+		if err := checkManagedSourceDirectory(c.root); err != nil {
+			return nil, result, err
+		}
+		inspect := database.InspectManagedOwnerBinding
+		if m != nil {
+			inspect = database.RequireManagedOwnerBinding
+		}
+		if err := inspect(ctx, path, owner); err != nil {
+			return nil, result, err
+		}
+	}
+	db, err := database.New(path)
 	if err != nil {
 		return nil, result, err
 	}
@@ -357,6 +460,11 @@ func (c *Coordinator) Start(ctx context.Context, reconstruct func(context.Contex
 	}
 	if err := db.Migrate(); err != nil {
 		return fail(err)
+	}
+	if owner != "" {
+		if err := db.BindManagedOwner(ctx, owner); err != nil {
+			return fail(err)
+		}
 	}
 	if err := c.step("before_quarantine"); err != nil {
 		return fail(err)

@@ -157,6 +157,10 @@ func (b *budgetState) dispose() {
 }
 
 func (b *budgetState) check(parent string) error {
+	return b.checkParent(parent, nil)
+}
+
+func (b *budgetState) checkParent(parent string, expected *objectID) error {
 	if b.pid != os.Getpid() || b.disposed {
 		return ErrIntegrity
 	}
@@ -183,12 +187,21 @@ func (b *budgetState) check(parent string) error {
 			return err
 		}
 		mount, err := descriptorMountID(f)
-		f.Close()
+		defer f.Close()
 		if err != nil {
 			return err
 		}
 		if mount != b.mountID {
 			return ErrIntegrity
+		}
+		if expected != nil {
+			id, err := identity(f)
+			if err != nil {
+				return err
+			}
+			if id != *expected {
+				return ErrIntegrity
+			}
 		}
 	}
 	paths := [4]string{"/sys/fs/cgroup", b.path, "/proc/self/ns/cgroup", "/proc/self/ns/mnt"}

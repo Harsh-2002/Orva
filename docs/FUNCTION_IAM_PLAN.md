@@ -14,6 +14,34 @@ This is not implementation verification or rollout approval. The decisions in
 
 ## 1. Goal and current boundary
 
+An internal Linux server composition now joins the managed pool, SDK, job/cron
+admission, deployment/configuration and policy services without legacy route
+fallback. In delegated disposable VMs the managed HTTP path created and
+deployed both runtimes, installed their exact Factory, proved deny before
+review, exercised an attached named policy, and rechecked deny after revoke.
+Same-boot reopen retained durable pause and resumed into a separate inactive
+generation. Restore qualification reopened sealed assets and ran both
+interpreters without reviving quarantined authority. These are scoped
+integration checks, not the coordinated cut-over below. Ordinary reboot with a
+new kernel epoch, legacy source re-enrollment, and complete operator-surface
+acceptance remain gates; normal `orva serve` does not select this composition.
+
+Managed startup verifies the sealed Owner identity against SQLite before
+migration; in-place managed restore checks the same binding before archive
+promotion. This prevents enrolling legacy data or serving a foreign archive
+by accident. It does not make a managed backup portable.
+
+The real managed listener also qualifies explicit version rollout, stale
+rollout refusal and detach across REST and external MCP on jailed Node and
+Python. Chromium verifies the guided policy workflow and deterministic local
+Chat approval; the slim CLI commits through the same REST service.
+
+An unwired cold-recovery candidate passed a hard reboot on stable guest-local
+ext4: the previous cgroup was gone, the wrong witness was refused, and both
+seals reopened through the original witness. The guest overlay changed inode
+identities, so that layout is not qualified. This is not daemon recovery;
+crash resumption, epoch-history retirement and production provisioning remain open.
+
 SDK availability is normal runtime functionality. Authorization determines
 which actions a function identity may perform on which resources. Replace the
 coarse `sdk` switch, not the private transport or its host-owned identity.

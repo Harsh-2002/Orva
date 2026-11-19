@@ -605,6 +605,10 @@ func privateMetadata(path string, directory bool, max int) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return readPrivateMetadata(f, directory, max)
+}
+
+func readPrivateMetadata(f *os.File, directory bool, max int) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, ErrIO
@@ -618,7 +622,7 @@ func privateMetadata(path string, directory bool, max int) ([]byte, error) {
 		(!directory && (!info.Mode().IsRegular() || st.Nlink != 1)) {
 		return nil, ErrIntegrity
 	}
-	if err := noXattrs(path); err != nil {
+	if err := noXattrs(f.Name()); err != nil {
 		return nil, err
 	}
 	if directory {

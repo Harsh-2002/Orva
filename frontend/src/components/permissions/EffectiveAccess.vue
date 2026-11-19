@@ -4,25 +4,14 @@
     aria-label="Effective access"
   >
     <header class="space-y-2">
-      <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
-        Permissions
-      </h1>
       <h2 class="text-lg font-semibold text-foreground-strong">
         Effective access
       </h2>
-      <p class="max-w-prose text-sm text-foreground-muted">
-        Combined inline and enabled, non-revoked pinned sources for {{ source.function.name }}.
-        Removing one source leaves any overlapping grants from the others.
-      </p>
       <p
         role="status"
         class="max-w-prose text-sm text-foreground"
       >
         {{ stateText }}
-      </p>
-      <p class="max-w-prose text-xs text-foreground-muted">
-        Execution grants apply during a request. Startup grants apply only while loading the function, before a request.
-        An accepted caller still needs its own outbound allowance. This snapshot is not proof of any particular invocation.
       </p>
     </header>
     <template v-if="valid">
@@ -81,6 +70,15 @@
         </ul>
       </section>
     </template>
+    <details class="max-w-prose text-xs text-foreground-muted">
+      <summary class="cursor-pointer text-link">
+        How access is checked
+      </summary>
+      <p class="mt-2 leading-body">
+        Execution grants apply during a request. Startup grants apply while the function loads, before a request.
+        Accepted callers still need their own outbound grant. This view does not prove that a specific request was allowed.
+      </p>
+    </details>
   </section>
 </template>
 
@@ -97,26 +95,27 @@ const props = defineProps({
 const validation = computed(() => validatePolicy(props.source.effective_policy))
 const valid = computed(() => validation.value.ok)
 const policy = computed(() => validation.value.policy)
+const enforced = computed(() => ['scratch_opt_in', 'managed'].includes(props.source.host.enforcement))
 const active = computed(() => {
   const h = props.source.host
-  return valid.value && !props.unconfirmed && h.enforcement === 'scratch_opt_in'
+  return valid.value && !props.unconfirmed && enforced.value
     && !h.review_required && !h.quarantined && !!h.current_artifact
     && h.current_artifact === h.approved_artifact
 })
 const stateText = computed(() => {
   const h = props.source.host
-  if (props.unconfirmed) return 'Stale snapshot. Current access is not confirmed. Last known stored grants and approval are not currently verified; refreshing does not apply your draft.'
+  if (props.unconfirmed) return 'Stale snapshot. Current access is not confirmed. Refresh to check again.'
   if (!valid.value) return 'Effective permissions are unavailable. No access is inferred from unreadable policy data.'
   if (h.quarantined) return 'No effective grants are active: this function is quarantined. Stored sources are retained, not in force.'
   if (h.review_required) return 'No effective grants are active: the combined permissions require review. Stored sources are retained, not in force.'
-  if (h.enforcement !== 'scratch_opt_in') return 'Enforcement is not confirmed by this scratch host. Stored sources do not prove current access.'
+  if (!enforced.value) return 'Enforcement is not confirmed by this host. Stored sources do not prove current access.'
   if (!h.current_artifact || h.current_artifact !== h.approved_artifact) return 'No effective grants are confirmed for the current artifact. Approval is missing, unknown or no longer matches.'
-  return 'The combined source revision is approved for the reported current artifact. Protected requests still check identity, readiness and execution scope.'
+  return 'Approved for the current deployment. Access is checked on every protected request.'
 })
 const confirmation = computed(() => props.unconfirmed
-  || (props.source.host.enforcement !== 'scratch_opt_in' || !props.source.host.current_artifact ? 'error' : ''))
+  || (!enforced.value || !props.source.host.current_artifact ? 'error' : ''))
 const retainedInactive = computed(() => !props.unconfirmed && (props.source.host.quarantined
-  || props.source.host.review_required || (props.source.host.enforcement === 'scratch_opt_in'
+  || props.source.host.review_required || (enforced.value
     && !!props.source.host.current_artifact && props.source.host.current_artifact !== props.source.host.approved_artifact)))
 const retainedTitle = computed(() => retainedInactive.value
   ? 'Stored effective grants, not active' : 'Stored effective grants, active state not confirmed')

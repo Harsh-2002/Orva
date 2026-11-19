@@ -18,7 +18,7 @@ func TestCommandTree(t *testing.T) {
 		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"}, {"functions", "purge-cache"},
 		{"functions", "pause"}, {"functions", "resume"},
 		{"deploy"},
-		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
+		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"}, {"deployments", "install"},
 		{"rollback"},
 		{"invoke"},
 		{"logs"},

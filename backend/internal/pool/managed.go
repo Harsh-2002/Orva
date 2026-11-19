@@ -265,6 +265,20 @@ func (a *AcquireResult) ManagedResources() (workloadspawn.ResourceFacts, bool) {
 	return a.pool.managed.factory.Resources(), true
 }
 
+// AcceptsManagedVersion prevents a queued HTTP request from using authorization
+// based on a function version other than the Factory that will execute it.
+func (m *Manager) AcceptsManagedVersion(a *AcquireResult, authorizedVersion int) bool {
+	if m.managed == nil {
+		return true
+	}
+	if a == nil || a.pool == nil || a.pool.managed == nil || authorizedVersion <= 0 || m.closing.Load() {
+		return false
+	}
+	g := a.pool.managed
+	return g.factory.FunctionVersion() == authorizedVersion && g.active.Load() &&
+		m.managed.current.Load().generations[g.factory.Owner()] == g
+}
+
 func (m *Manager) TargetState(owner string, worker *sandbox.Worker) workloadiam.TargetState {
 	if worker == nil {
 		return workloadiam.TargetState{}
@@ -281,6 +295,9 @@ func (m *Manager) TargetState(owner string, worker *sandbox.Worker) workloadiam.
 func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sandbox.Worker, error) {
 	if m.closing.Load() || !g.active.Load() {
 		return nil, errPoolRetired
+	}
+	if ready := m.tmpl.ManagedSpawnReady; ready != nil && !ready() {
+		return nil, errors.New("managed worker startup is closed")
 	}
 	plan, err := g.factory.Prepare(ctx)
 	if err != nil {
@@ -307,6 +324,7 @@ func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sand
 	start := time.Now()
 	worker, err := plan.Spawn(ctx, sandbox.ExecConfig{
 		NsjailBin: tmpl.NsjailBin, MaxPids: maxPidsOr(tmpl.DefaultMaxPids, 32),
+		Domain:     tmpl.ManagedDomain,
 		SDKHandler: tmpl.SDKHandler, EgressPolicyPath: policy, EgressPolicyGen: revision,
 		ResolvConfPath: tmpl.DataDir + "/firewall/resolv.conf", HostsPath: tmpl.DataDir + "/firewall/hosts",
 		SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, sandbox.SeccompAllowForNetworkMode(facts.NetworkMode), nil),

@@ -28,6 +28,26 @@ required current-artifact reconstruction callback; only successful reconstructio
 with admission still closed permits the start callback. A failed start must keep
 admission closed (the coordinator also requests quiescence on that failure).
 This does not validate/rebind an old Factory or grant restored artifact approval.
+`PrepareSealedDeployment` consumes one exact installation snapshot after that
+barrier. It checks the source-aware policy's deny state, reads configuration and
+ciphertext from the same snapshot, and verifies the concrete code/runtime
+leases from the reopened Owner against that deployment. It returns an uninstalled
+Factory and a deny evaluator; callers still own the admission barrier and the
+separate install/review flow.
+`PrepareCurrentDeployment` is for normal same-boot restart without a new
+restore operation. It may return an existing approved evaluator only when its
+approval matches the exact reconstructed Factory; it never rewrites approval
+or enables paused owners.
+
+`StartManaged` uses `StartBound`: it compares the verified Owner instance
+identity against SQLite before opening the writer. A populated unbound
+database or a nonempty legacy `functions/` tree is refused, not migrated
+in place. `RestoreBound` verifies the staged SQLite binding and refuses
+mutable function trees before moving installed files. If an incompatible
+`ready` restore was installed through an older workflow, a validated
+same-owner archive can replace it without removing the admission marker.
+These are in-place recovery controls. They do not archive the sealed stores,
+enroll legacy functions, or fence non-cooperating daemon processes.
 
 ## Marker and interruptions
 
@@ -112,8 +132,12 @@ retained sources/approvals, metadata-only history, malformed/linked controls,
 work audit retention, counter/capacity denial, manual completion and callback
 ordering. Error-return seams and process crashes are **not power-loss tests**.
 
-No nsjail/Node/Python execution, hardware durability qualification, serving boot
-cutover, global mutation freeze, recovery of in-memory artifact generations,
-kernel descendant fencing, GC/adoption authority or complete lifecycle acceptance
-is established here. A later coordinated boot/restore cutover must wire all of
-those relevant boundaries before enabling IAM on a serving instance.
+The delegated same-boot test can optionally use the hash-pinned Node/Python
+runtime fixtures in `ORVA_STARTUP_SEALED_RUNTIME_DIR`. It reopens the sealed
+stores, runs both interpreters in nsjail under the new Owner domain, and
+checks that the private SDK host rejects the retained stored grant. Missing or
+mismatched sealed pairs prevent the start callback. This is controlled fixture
+dispatch, not an HTTP listener, normal server boot, or a scheduler run.
+
+Hardware durability, ordinary reboot, GC/adoption authority, legacy migration
+into sealed stores and full serving cut-over are not established here.

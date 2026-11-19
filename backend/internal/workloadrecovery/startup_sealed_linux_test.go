@@ -18,6 +18,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
+	"github.com/Harsh-2002/Orva/backend/internal/testutil/iamruntime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadspawn"
@@ -29,9 +30,14 @@ func TestStartupSealedSameBoot(t *testing.T) {
 		t.Skip("requires an explicitly delegated disposable VM cgroup")
 	}
 	budget, parent := startupSealedBudget(t)
+	runtimeDir := os.Getenv("ORVA_STARTUP_SEALED_RUNTIME_DIR")
 	for _, mode := range []string{"exact", "missing-runtime", "wrong-runtime"} {
 		t.Run(mode, func(t *testing.T) {
-			testStartupSealed(t, budget, parent, mode)
+			runDir := ""
+			if mode == "exact" {
+				runDir = runtimeDir
+			}
+			testStartupSealed(t, budget, parent, mode, runDir)
 		})
 	}
 }
@@ -67,9 +73,9 @@ type startupSealedPair struct {
 	code, runtime               artifactfs.Identity
 }
 
-func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode string) {
+func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode, runtimeDir string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	f, _ := seed(t, true)
 	limits := artifactfs.Limits{Generations: 8, Leases: 16, Staging: 2, Entries: 8,
@@ -78,6 +84,9 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 	cfg := artifactfs.OwnerConfig{MetadataRoot: filepath.Join(root, "owner"), CodeRoot: filepath.Join(root, "code"),
 		RuntimeRoot: filepath.Join(root, "runtime"), Parent: parent, Budget: budget,
 		CodeLimits: limits, RuntimeLimits: limits, MaxEpochs: 2}
+	if runtimeDir != "" {
+		cfg.RuntimeLimits = iamruntime.Limits()
+	}
 	for _, dir := range []string{cfg.MetadataRoot, cfg.CodeRoot, cfg.RuntimeRoot} {
 		must(t, os.Mkdir(dir, 0700))
 	}
@@ -89,7 +98,10 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 	oldRef, err := bindings.Domain.Reference(ctx)
 	must(t, err)
 
-	pairs := seedStartupSealed(t, f.dir, bindings, limits, mode)
+	pairs := seedStartupSealed(t, f.dir, bindings, limits, cfg.RuntimeLimits, mode, runtimeDir)
+	if mode == "exact" {
+		assertCurrentDeploymentProof(t, f.dir, old, pairs[0])
+	}
 	must(t, old.Close(ctx))
 	if lease, err := bindings.Code.Acquire(pairs[0].code.Generation); !errors.Is(err, artifactfs.ErrClosed) {
 		if lease != nil {
@@ -113,6 +125,8 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 
 	var recovered *artifactfs.Owner
 	var factories []*workloadspawn.Factory
+	var evaluators []*workloadiam.Evaluator
+	var domain *workloadfence.Domain
 	defer func() {
 		for _, factory := range factories {
 			factory.Close()
@@ -149,13 +163,19 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 		if ref.Boot != oldRef.Boot || ref.Epoch == oldRef.Epoch {
 			t.Fatal("reconstruction did not create a distinct same-boot domain")
 		}
+		domain = fresh.Domain
 		for _, pair := range pairs {
-			// Verify the persisted selection, not whichever generation remains acquirable.
-			factory, err := reconstructStartupPair(ctx, db, f.dir, fresh, pair)
+			factory, evaluator, err := PrepareSealedDeployment(ctx, db, secrets.New(db, f.dir),
+				recovered, pair.deployment, startupFactoryLimits)
 			if err != nil {
 				return err
 			}
 			factories = append(factories, factory)
+			evaluators = append(evaluators, evaluator)
+			code, runtime := factory.Identities()
+			if code != pair.code || runtime != pair.runtime {
+				return fmt.Errorf("recovered the wrong committed pair")
+			}
 		}
 		return nil
 	}, func(_ context.Context, db *database.Database) error {
@@ -169,7 +189,7 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 		return nil
 	})
 	if db != nil {
-		must(t, db.Close())
+		defer func() { must(t, db.Close()) }()
 	}
 	if !reconstructed || result.Operation != op || !c.host.AdmissionClosed() {
 		t.Fatalf("did not reconstruct after durable closed recovery: %v", err)
@@ -187,6 +207,9 @@ func testStartupSealed(t *testing.T, budget *workloadfence.Budget, parent, mode 
 	must(t, err)
 	if db == nil || !started {
 		t.Fatal("exact sealed pairs did not reach staged start callback")
+	}
+	if runtimeDir != "" {
+		probeStartupWorkers(t, ctx, db, domain, factories, evaluators, runtimeDir)
 	}
 }
 
@@ -234,7 +257,7 @@ func sealStartupFile(t *testing.T, store *artifactfs.Store, limits artifactfs.Li
 	return artifactfs.Identity{Kind: kind, Owner: owner, Generation: generation, Digest: digest}
 }
 
-func seedStartupSealed(t *testing.T, dir string, bindings artifactfs.OwnerBindings, limits artifactfs.Limits, mode string) []startupSealedPair {
+func seedStartupSealed(t *testing.T, dir string, bindings artifactfs.OwnerBindings, limits, runtimeLimits artifactfs.Limits, mode, runtimeDir string) []startupSealedPair {
 	t.Helper()
 	ctx := t.Context()
 	db := openDB(t, dir)
@@ -269,8 +292,16 @@ func seedStartupSealed(t *testing.T, dir string, bindings artifactfs.OwnerBindin
 		if lang == "python" {
 			entrypoint, source = "handler.py", "def handler(event):\n    return {'statusCode': 200, 'body': 'sealed-python'}\n"
 		}
+		if runtimeDir != "" {
+			source = startupSDKSource(lang)
+		}
 		code := sealStartupFile(t, bindings.Code, limits, artifactfs.KindCode, owner, entrypoint, source)
-		runtime := sealStartupFile(t, bindings.Runtime, limits, artifactfs.KindRuntime, lang, "fixture-runtime", lang)
+		var runtime artifactfs.Identity
+		if runtimeDir == "" {
+			runtime = sealStartupFile(t, bindings.Runtime, runtimeLimits, artifactfs.KindRuntime, lang, "fixture-runtime", lang)
+		} else {
+			runtime = iamruntime.Seal(t, bindings.Runtime, runtimeLimits, runtimeDir, lang)
+		}
 		must(t, db.InsertFunction(&database.Function{ID: owner, Name: "startup-" + lang, Runtime: lang,
 			Entrypoint: entrypoint, Status: "active", CodeHash: startupDigest(source), Version: 1, SDK: true,
 			MemoryMB: 256, CPUs: 1, TimeoutMS: 10000, NetworkMode: "none", EnvVars: map[string]string{}, ActiveDeploymentID: deployment}))
@@ -317,33 +348,28 @@ func seedStartupSealed(t *testing.T, dir string, bindings artifactfs.OwnerBindin
 var startupSecretLimits = secrets.SecretSnapshotLimits{MaxSecrets: 4, MaxTotalBytes: 4096}
 var startupFactoryLimits = workloadspawn.FactoryLimits{MaxPreparedPlans: 2, MaxPreparedBytes: 1 << 20, MaxSnapshotBytes: 1 << 20}
 
-func reconstructStartupPair(ctx context.Context, db *database.Database, dir string, bindings artifactfs.OwnerBindings, pair startupSealedPair) (*workloadspawn.Factory, error) {
-	installation, err := db.PrepareWorkloadDeploymentInstallation(ctx, pair.deployment)
-	if err != nil {
-		return nil, err
+func assertCurrentDeploymentProof(t *testing.T, dir string, owner *artifactfs.Owner, pair startupSealedPair) {
+	t.Helper()
+	db := openDB(t, dir)
+	defer func() { must(t, db.Close()) }()
+	sm := secrets.New(db, dir)
+	f, e, err := PrepareCurrentDeployment(t.Context(), db, sm, owner, pair.deployment, startupFactoryLimits)
+	must(t, err)
+	f.Close()
+	if e.Metadata().ApprovedArtifact != f.ArtifactRevision() {
+		t.Fatal("exact installed approval was not preserved on current reconstruction")
 	}
-	output := installation.Output()
-	prepared, err := secrets.New(db, dir).PrepareArtifactSnapshot(ctx, pair.owner, startupSecretLimits)
-	if err != nil {
-		return nil, err
+	if f, e, err := PrepareSealedDeployment(t.Context(), db, sm, owner, pair.deployment, startupFactoryLimits); f != nil || e != nil || !errors.Is(err, ErrClosed) {
+		t.Fatalf("restore-only reconstruction accepted an unquarantined policy: %v", err)
 	}
-	fn := prepared.Function
-	paths, err := artifactfs.PreparePaths(bindings.Code, output.CodeGeneration, bindings.Runtime, output.RuntimeGeneration)
-	if err != nil {
-		return nil, err
+	_, err = db.WriteDB().Exec(`UPDATE workload_iam_policies SET approved_artifact=? WHERE function_id=?`,
+		strings.Repeat("c", 64), pair.owner)
+	must(t, err)
+	if f, e, err := PrepareCurrentDeployment(t.Context(), db, sm, owner, pair.deployment, startupFactoryLimits); f != nil || e != nil || !errors.Is(err, ErrClosed) {
+		t.Fatalf("current reconstruction accepted mismatched approval: %v", err)
 	}
-	defer paths.Release()
-	code, runtime := paths.Identities()
-	if code.Owner != fn.ID || code.Digest != output.CodeDigest ||
-		runtime.Owner != fn.Runtime || runtime.Digest != output.RuntimeDigest ||
-		fn.ActiveDeploymentID != pair.deployment || fn.CodeHash != output.CodeHash ||
-		fn.Entrypoint != output.Entrypoint {
-		return nil, artifactfs.ErrIntegrity
-	}
-	if code != pair.code || runtime != pair.runtime {
-		return nil, fmt.Errorf("recovered the wrong committed pair")
-	}
-	return workloadspawn.NewFactory(ctx, prepared, bindings.Code, code.Generation, bindings.Runtime, runtime.Generation, startupFactoryLimits)
+	_, err = db.WriteDB().Exec(`UPDATE workload_iam_policies SET approved_artifact=? WHERE function_id=?`, pair.approved, pair.owner)
+	must(t, err)
 }
 
 func assertStartupSealedDeny(t *testing.T, db *database.Database, pair startupSealedPair) {

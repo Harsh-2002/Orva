@@ -540,6 +540,10 @@ jobs:
       - name: Start Orva
         run: |
           mkdir -p "$RUNNER_TEMP/orva-data"
+          # A local RFC1918 address lets the SDK E2E prove TCP reachability
+          # before enabling the private-network block, without an external host.
+          sudo ip -4 addr add 10.222.0.5/32 dev lo
+          touch "$RUNNER_TEMP/orva-e2e-ip-added"
           ORVA_DATA_DIR="$RUNNER_TEMP/orva-data" ORVA_DISABLE_USERNS=1 \
             ./build/orva serve > "$RUNNER_TEMP/orva.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/orva.pid"
@@ -560,7 +564,9 @@ jobs:
           # Clear prior diagnostics so a runner failure cannot show a stale report.
           : > test/e2e/CHECKLIST.md
           ADMIN_KEY="$(cat "$RUNNER_TEMP/orva-data/.admin-key")"
-          python3 test/e2e/run.py --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
+          ORVA_API_KEY="$ADMIN_KEY" ORVA_E2E_DATA_DIR="$RUNNER_TEMP/orva-data" \
+            python3 test/e2e/run.py --url http://127.0.0.1:8443 \
+              --control-plane-url http://10.222.0.5:8443
           ORVA_ENDPOINT=http://127.0.0.1:8443 ORVA_API_KEY="$ADMIN_KEY" \
             bash test/sdk-test.sh
 
@@ -589,6 +595,9 @@ jobs:
         run: |
           if [ -f "$RUNNER_TEMP/orva.pid" ]; then
             kill "$(cat "$RUNNER_TEMP/orva.pid")" 2>/dev/null || true
+          fi
+          if [ -f "$RUNNER_TEMP/orva-e2e-ip-added" ]; then
+            sudo ip -4 addr del 10.222.0.5/32 dev lo
           fi
 
       - name: Show checklist

@@ -461,13 +461,19 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 	baseURL := baseURLFromContext(ctx)
 	if baseURL != "" {
 		deps.BaseURL = baseURL
-		cfg.System = appendInstanceContext(cfg.System, baseURL, deps.Version)
+		if !deps.ManagedServer {
+			cfg.System = appendInstanceContext(cfg.System, baseURL, deps.Version)
+		}
 	}
 	// First turn of a new conversation: inline the complete reference once so the
 	// agent starts fully grounded without a docs round-trip. Later turns rely on
 	// the discipline in the prompt to call get_orva_docs on demand — the full
 	// doc is NOT re-appended every turn (see appendFullReference).
-	if firstTurn {
+	if deps.ManagedServer {
+		cfg.System += "\n\n# Managed workload tools\nOnly the tools listed for this turn are available. " +
+			"Never substitute a legacy operation. A successful deployment or resume does not grant authority. " +
+			"Installation and explicit source-aware review are separate. Use current exact IDs and revisions."
+	} else if firstTurn {
 		cfg.System = appendFullReference(cfg.System, baseURL)
 	}
 	reg := mcp.BuildAgentRegistry(deps, perms)

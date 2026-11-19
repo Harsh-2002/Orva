@@ -1,5 +1,24 @@
 # Backend
 
+`server.StartManaged` is an internal opt-in composition, not normal `serve`
+wiring. The caller owns the sealed artifact Owner and drains its HTTP listener
+before closing the instance. Startup restores durable pause and reconstructs
+only valid exact associations; restore gets a deny evaluator before dispatch.
+`scheduler.RunManaged` starts only shared-authority job/cron loops and drains
+before it returns. Legacy mutation routes and tools are not mounted in this
+composition. Cold boot, legacy enrollment and recovery tooling remain gates.
+
+Managed custom routes use one published-mapping lookup in `InvokeHandler`.
+Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
+Restore clears publications before admission; managed MCP/Chat and webhooks
+are not part of this route slice.
+
+Bound configuration writes persist the same pair against the new generation
+and mark it inactive in the deny publication transaction. Explicit installation
+can recover that association after a same-boot restart; policy review remains
+separate. Managed deletion reserves metadata history and retires the Factory
+at the same gate before deleting the row. It does not reclaim sealed outputs.
+
 `workloadconfig` is an internal opt-in environment/execution-settings/secret
 mutation service. It rechecks exact durable/source/ciphertext CAS and current
 operator authority under owner → IAM → DB ordering, commits review-required deny,
@@ -64,7 +83,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only; an internal Owner binds both stores to an instance epoch and gates committed-asset recovery on exact same-boot fencing. No serving, cold-start/reboot, approval restoration or GC wiring; see OWNER.md. |
+| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. The Owner gates same-boot recovery on exact fencing, including reconciliation of a fully prepared host-bound successor. Its explicit cold opener requires the private host witness and stable filesystem identities. Neither path is wired into daemon boot; see OWNER.md. |
 | `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `workloadpolicy` | Shared policy publication core and unregistered HTTP adapter. Requires trusted live authentication/current-artifact observation; mutations recheck live operator authority transactionally. The live scratch KV workflow exercises it, but no serving route or observer is installed. |

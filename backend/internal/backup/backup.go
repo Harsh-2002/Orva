@@ -458,7 +458,7 @@ func addFileToTar(tw *tar.Writer, srcPath, archivePath string) error {
 // HTTP handler returns success and asks the client to reload the page;
 // the operator restarts the process to pick up the new file.
 func RestoreFrom(r io.Reader, dataDir string) error {
-	return restoreFrom(r, dataDir, nil)
+	return restoreFrom(r, dataDir, nil, false)
 }
 
 // RestoreFromGuarded validates staging before the required promotion barrier.
@@ -467,10 +467,19 @@ func RestoreFromGuarded(r io.Reader, dataDir string, beforeInstall func() error)
 	if beforeInstall == nil {
 		return fmt.Errorf("restore: missing promotion barrier")
 	}
-	return restoreFrom(r, dataDir, beforeInstall)
+	return restoreFrom(r, dataDir, func(string) error { return beforeInstall() }, false)
 }
 
-func restoreFrom(r io.Reader, dataDir string, beforeInstall func() error) error {
+// RestoreSealedFromGuardedDB restores only the database and keys. Sealed stores
+// stay in place. The promotion barrier inspects the staged database read-only.
+func RestoreSealedFromGuardedDB(r io.Reader, dataDir string, beforeInstall func(stagedDB string) error) error {
+	if beforeInstall == nil {
+		return fmt.Errorf("restore: missing promotion barrier")
+	}
+	return restoreFrom(r, dataDir, beforeInstall, true)
+}
+
+func restoreFrom(r io.Reader, dataDir string, beforeInstall func(string) error, sealed bool) error {
 	if dataDir == "" {
 		return fmt.Errorf("restore: empty data dir")
 	}
@@ -495,9 +504,13 @@ func restoreFrom(r io.Reader, dataDir string, beforeInstall func() error) error 
 		return err
 	}
 
-	// Heal before any live state moves, so a failure here still rolls back
-	// to "nothing happened".
-	if err := healReadyMarkers(filepath.Join(stage, "functions")); err != nil {
+	stagedFns := filepath.Join(stage, "functions")
+	if sealed {
+		entries, err := os.ReadDir(stagedFns)
+		if (err != nil && !os.IsNotExist(err)) || len(entries) != 0 {
+			return fmt.Errorf("%w: sealed restore cannot include a mutable functions tree", ErrBadArchive)
+		}
+	} else if err := healReadyMarkers(stagedFns); err != nil {
 		return fmt.Errorf("restore: heal readiness markers: %w", err)
 	}
 
@@ -516,7 +529,7 @@ func restoreFrom(r io.Reader, dataDir string, beforeInstall func() error) error 
 		if err := validateRecoveryStage(stage, dataDir); err != nil {
 			return err
 		}
-		if err := beforeInstall(); err != nil {
+		if err := beforeInstall(stagedDB); err != nil {
 			return fmt.Errorf("restore: promotion barrier: %w", err)
 		}
 	}
@@ -573,10 +586,13 @@ func restoreFrom(r io.Reader, dataDir string, beforeInstall func() error) error 
 		}
 	}
 
+	if sealed {
+		return nil
+	}
+
 	// Move staged functions tree into place. We do per-function
 	// renames so unrelated functions in the live tree (i.e. ones not
 	// shipped in the backup) survive.
-	stagedFns := filepath.Join(stage, "functions")
 	liveFns := filepath.Join(dataDir, "functions")
 	if _, err := os.Stat(stagedFns); err == nil {
 		if err := os.MkdirAll(liveFns, 0o755); err != nil {

@@ -21,6 +21,20 @@ func NewManaged(db *database.Database, reg *registry.Registry, authority *worklo
 	return s, nil
 }
 
+// NewManagedServing requires the admission-gated, current Factory observer.
+// Discovery labels serving composition, not the approval of any policy.
+func NewManagedServing(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, observe ObserveArtifact) (*Service, error) {
+	if observe == nil {
+		return nil, ErrUnavailable
+	}
+	s, err := NewManaged(db, reg, authority, observe)
+	if err != nil {
+		return nil, err
+	}
+	s.serving = true
+	return s, nil
+}
+
 type ManagedResult struct {
 	Policy *database.IAMManagedPolicy
 	Owners []database.IAMPolicyRecord

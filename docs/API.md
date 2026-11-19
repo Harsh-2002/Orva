@@ -1,5 +1,41 @@
 # HTTP API reference
 
+## Admission-closed managed server integration (internal)
+
+This separate Linux composition is not selected by normal `orva serve`. It
+mounts managed handlers without falling back to legacy mutation routes.
+Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
+on this composition.
+
+- `POST /api/v1/iam/functions` accepts `name`, `runtime` (`node` or `python`)
+  and optional `entrypoint`. It requires live read and write permissions.
+  `201` returns `id`, `name`, `runtime` and `status`. The new function has
+  an unbound empty policy and a private SDK channel, not SDK grants.
+- `POST /api/v1/deployments/{id}/install` requires an exact deployment ID
+  and live read/admin authority. It returns `200` with `artifact` and
+  `review_required:true`. Installation does not review or grant authority.
+- Function permissions, named policies, configuration, and pause/resume
+  use the managed contracts below. The opt-in MCP catalog excludes legacy
+  tools and channel credentials. Managed Chat uses that same tool registry.
+- Use MCP `tools/list` to see the tools available to the current credential.
+  The normal server exposes 73 tools to a key with all four permissions and
+  28 to a read-only key. With the managed composition above, those counts are
+  39 and 10 respectively. Normal channel credentials expose only their
+  bundled functions; managed MCP does not accept channel credentials.
+- A configuration write atomically records the same sealed pair against the
+  new generation and leaves the function inactive. After a same-boot restart,
+  install the exact current deployment ID to recover that pending generation.
+  Installation still requires a separate permissions review.
+- `DELETE /api/v1/functions/{fn_id}` requires an exact UUIDv7 and live
+  read/admin authority. It reserves metadata history and invalidates the
+  current Factory before retiring the pool. It does not remove sealed assets.
+  The managed listener also mounts the work-history routes below.
+- An invocation whose authorized function version no longer matches the
+  acquired serving generation returns `409 NOT_ACTIVE` without dispatch.
+- `GET /api/v1/functions/{fn_id}/source` reads the authored entrypoint and
+  dependency manifest from the current sealed deployment; it never reads
+  a legacy `current` symlink. Pending and paused deployments remain readable.
+
 ## Internal opt-in configuration publication (not normal routes)
 
 `workloadconfig.HTTPAdapter` is an explicitly registered Linux scratch adapter.
@@ -1175,3 +1211,27 @@ These are public exposure edits, not SDK policy changes: revision/epoch,
 artifact approval, grant sources and current Factories are preserved. Queued
 publication, status/rollback, full lifecycle and production cut-over remain
 separate unimplemented/unqualified boundaries; see the package README.
+
+## Custom routes on the internal managed listener
+
+`StartManaged` mounts only the route subset above: `GET /api/v1/exposures`
+requires `kind=route` and a literal `key`; `POST /api/v1/routes` and
+`DELETE /api/v1/routes?path=...` require the staged CAS bodies. Inspection
+returns `route_published` separately from the stored `route` (which may be
+`null`). It describes publication only, not the target's runtime readiness.
+There is no managed route-list endpoint, inbound-webhook wiring, or route
+management through the managed MCP catalog or Chat. Normal serving is unchanged.
+
+Custom invocation resolves one published mapping: exact path, then longest
+literal `/prefix/*`. A method mismatch returns `405 METHOD_NOT_ALLOWED` without
+trying a broader route; `HEAD` requires explicit permission or `*`. The same
+per-function authentication and managed invocation path as `/fn/` apply.
+`/` and the roots and descendants of `/api`, `/auth`, `/web`, `/_orva`, `/fn`,
+`/mcp`, `/webhook`, `/metrics`, `/register`, `/oauth`, and `/.well-known` are
+reserved even when their method or endpoint is absent. Use clean decoded path
+patterns; encoded separators do not enter custom dispatch.
+
+An unattested or restored mapping is inspectable but cannot win lookup.
+Restore retains mappings and their version counters while clearing public
+publication. Reinspect and explicitly republish via the same CAS API to
+reactivate a route. This does not install or review the target workload.

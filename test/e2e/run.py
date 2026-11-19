@@ -67,13 +67,22 @@ def run_module(path, env):
     fail_n = int(m.group(2)) if m else 0
     skip_n = int(m.group(3) or 0) if m else 0
     protocol_error = ""
+    required_skip = ""
+    clean_stdout = ANSI_RE.sub("", p.stdout)
     if not m:
         status = "FAIL"
         fail_n = max(fail_n, 1)
         protocol_error = "missing RESULT trailer"
     elif skip_n > 0:
         if p.returncode == 3 and fail_n == 0:
-            status = "SKIP"
+            if env.get("ORVA_REQUIRE_SANDBOX") in ("1", "true", "yes"):
+                status = "FAIL"
+                fail_n = 1
+                reason = next((line.strip() for line in reversed(clean_stdout.splitlines())
+                               if line.strip().startswith("SKIP — ")), "module reported a skip")
+                required_skip = f"ORVA_REQUIRE_SANDBOX forbids skips: {reason}"
+            else:
+                status = "SKIP"
         else:
             status = "FAIL"
             fail_n = max(fail_n, 1)
@@ -87,15 +96,14 @@ def run_module(path, env):
             protocol_error = "exit 3 requires RESULT skip=1"
         elif p.returncode == 0 and pass_n == 0:
             protocol_error = "passing result requires at least one passed check"
-    clean_stdout = ANSI_RE.sub("", p.stdout)
     failure_lines = [line.strip() for line in clean_stdout.splitlines() if "✗" in line]
-    if status == "FAIL" and not failure_lines:
+    if status == "FAIL" and not failure_lines and not required_skip:
         clean_stderr = ANSI_RE.sub("", p.stderr).strip()
         fallback = clean_stderr or clean_stdout.strip()
         failure_lines = fallback.splitlines()[-5:]
     if protocol_error:
         failure_lines.append(protocol_error)
-    detail = " / ".join(failure_lines[-4:])[:1200]
+    detail = (required_skip or " / ".join(failure_lines[-4:]))[:1200]
     return {
         "name": name, "status": status, "pass": pass_n, "fail": fail_n,
         "rc": p.returncode, "detail": detail,

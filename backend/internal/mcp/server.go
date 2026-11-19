@@ -46,6 +46,7 @@ import (
 // Deps wires Orva's existing services into the MCP layer. Tool
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
+	ManagedServer bool
 	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
 	IAM              *workloadpolicy.Service
 	Configuration    *workloadconfig.Service
@@ -137,6 +138,10 @@ func permissionCacheKey(perms permSet) uint8 {
 }
 
 func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
+	instructions := serverInstructions
+	if deps.ManagedServer {
+		instructions = "Orva managed workloads. Only the listed operations are available. Deployment publication leaves a function inactive; installation and explicit source-aware review are separate."
+	}
 	s := mcpsdk.NewServer(
 		&mcpsdk.Implementation{
 			Name:    "orva",
@@ -144,7 +149,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 			Title:   "Orva — serverless platform",
 		},
 		&mcpsdk.ServerOptions{
-			Instructions: serverInstructions,
+			Instructions: instructions,
 			SchemaCache:  schemaCache,
 		},
 	)
@@ -156,6 +161,10 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	// Every operator-tool family is registered through a regCtx so the exact
 	// same definitions feed the external MCP server and in-process AI registry.
 	rc := serverRegCtx(s, deps, perms)
+	if deps.ManagedServer {
+		registerManagedServerTools(rc)
+		return s
+	}
 	registerSystemTools(rc)
 	registerFunctionTools(rc)
 	registerDeployTools(rc)
@@ -310,6 +319,10 @@ func NewHandler(deps Deps) http.Handler {
 		if !ok {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED",
 				"missing or invalid bearer token")
+			return
+		}
+		if deps.ManagedServer && principal.Kind == authpkg.KindChannel {
+			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "channel credentials unavailable on the managed tool surface")
 			return
 		}
 

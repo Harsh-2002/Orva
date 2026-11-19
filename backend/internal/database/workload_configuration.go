@@ -259,6 +259,14 @@ func (db *Database) checkWorkloadConfigurationTx(ctx context.Context, tx *sql.Tx
 
 // CommitWorkloadConfiguration is persistence-only; its caller holds owner then IAM.
 func (db *Database) CommitWorkloadConfiguration(ctx context.Context, ref OperatorCredentialReference, p *WorkloadConfigurationPlan) (*WorkloadEnvironmentPublication, error) {
+	return db.commitWorkloadConfiguration(ctx, ref, p, nil)
+}
+
+func (db *Database) CommitBoundWorkloadConfiguration(ctx context.Context, ref OperatorCredentialReference, p *WorkloadConfigurationPlan, pair WorkloadSealedPair) (*WorkloadEnvironmentPublication, error) {
+	return db.commitWorkloadConfiguration(ctx, ref, p, &pair)
+}
+
+func (db *Database) commitWorkloadConfiguration(ctx context.Context, ref OperatorCredentialReference, p *WorkloadConfigurationPlan, pair *WorkloadSealedPair) (*WorkloadEnvironmentPublication, error) {
 	if p == nil || p.before == nil {
 		return nil, ErrWorkloadArtifactInvalid
 	}
@@ -273,11 +281,23 @@ func (db *Database) CommitWorkloadConfiguration(ctx context.Context, ref Operato
 	if err != nil {
 		return nil, err
 	}
+	var bound rollbackAssociation
+	if pair != nil {
+		bound, err = checkBoundConfigurationTx(ctx, tx, p.before, *pair, true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	c := p.change
 	c.Actor = actor
 	out, err := publishWorkloadConfigurationTx(ctx, tx, c, p.envJSON, expiry, p)
 	if err != nil {
 		return nil, err
+	}
+	if pair != nil {
+		if err := stageBoundConfigurationTx(ctx, tx, p.before, out, bound); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := readWorkloadArtifactSnapshotTx(ctx, tx, c.OwnerID); err != nil {
 		return nil, err

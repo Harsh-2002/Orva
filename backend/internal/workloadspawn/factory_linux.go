@@ -59,6 +59,7 @@ type factoryState struct {
 	codeStore, runtimeStore *artifactfs.Store
 	code, runtime           artifactfs.Identity
 	owner, artifact         string
+	functionVersion         int
 	gen                     Generation
 	resources               ResourceFacts
 	limits                  FactoryLimits
@@ -118,7 +119,7 @@ func NewFactory(ctx context.Context, prepared *secrets.PreparedArtifactSnapshot,
 	code, runtime := in.paths.Identities()
 	s := &factoryState{
 		base: base, anchor: in.paths, codeStore: codeStore, runtimeStore: runtimeStore,
-		code: code, runtime: runtime, owner: fn.ID, artifact: plan.ArtifactRevision(),
+		code: code, runtime: runtime, owner: fn.ID, artifact: plan.ArtifactRevision(), functionVersion: fn.Version,
 		gen: Generation{base.Artifact.Generation, base.Artifact.Revision, base.Artifact.Epoch},
 		resources: ResourceFacts{MemoryMB: fn.MemoryMB, CPUs: fn.CPUs, Timeout: time.Duration(fn.TimeoutMS) * time.Millisecond,
 			MaxConcurrency: fn.MaxConcurrency, RateLimitPerMin: fn.RateLimitPerMin,
@@ -262,6 +263,13 @@ func (f *Factory) Identities() (artifactfs.Identity, artifactfs.Identity) {
 		return artifactfs.Identity{}, artifactfs.Identity{}
 	}
 	return f.state.code, f.state.runtime
+}
+
+func (f *Factory) FunctionVersion() int {
+	if f == nil || f.state == nil {
+		return 0
+	}
+	return f.state.functionVersion
 }
 
 func (f *Factory) UsesStores(code, runtime *artifactfs.Store) bool {

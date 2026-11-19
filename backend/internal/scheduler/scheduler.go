@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -102,7 +103,9 @@ type Scheduler struct {
 	httpClient *http.Client
 
 	// stop signals the loop to exit. Closed by Stop().
-	stop chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
+	started  atomic.Bool
 
 	// metrics is the shared metrics struct that owns per-function
 	// baselines. Optional — may be nil in tests; recordExecution
@@ -209,6 +212,9 @@ func (s *Scheduler) publishJob(status string, j *database.Job, fnName, errMsg st
 // Start kicks off the timer loops. Returns immediately. ctx cancellation
 // drains in-flight invocations before the goroutine exits.
 func (s *Scheduler) Start(ctx context.Context) {
+	if !s.started.CompareAndSwap(false, true) {
+		return
+	}
 	// Recompute next_run_at on boot so a long downtime doesn't leave
 	// thousands of "missed" rows pretending they're due. Best-effort —
 	// any errors are logged and the row simply won't fire until its
@@ -242,12 +248,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 // Stop drains in-flight invocations and signals the loop to exit. Safe
 // to call multiple times.
 func (s *Scheduler) Stop(timeout time.Duration) {
-	select {
-	case <-s.stop:
-		return
-	default:
-		close(s.stop)
-	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	done := make(chan struct{})
 	go func() { s.inflightWG.Wait(); close(done) }()
 	select {

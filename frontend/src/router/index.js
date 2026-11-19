@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import Layout from '@/components/layout/Layout.vue'
+import { isCanonicalUuid } from '@/utils/permissionsModel.js'
 
 // The Editor takes `?mode=edit` as a prop for the same reason it takes :name as
 // one: it is keep-alived, and useRoute() keeps moving under a deactivated view.
@@ -38,6 +40,8 @@ const router = createRouter({
         { path: 'functions/:name/kv', name: 'function-kv', component: () => import('@/views/KVStore.vue') },
         { path: 'functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: () => import('@/views/InboundWebhooks.vue'), props: true },
         { path: 'functions/:name/test', name: 'function-test', component: () => import('@/views/TestWorkbench.vue'), props: true },
+        { path: 'functions/:functionId/permissions', name: 'function-permissions', component: () => import('@/views/ManagedFunctionPermissions.vue'), props: true, meta: { managedIAM: true } },
+        { path: 'iam/policies/:policyId?', name: 'iam-policies', component: () => import('@/views/ManagedIAMPolicies.vue'), props: true, meta: { managedIAM: true } },
         // Canonical create route. The Editor keys off its `name` prop, which
         // this route leaves empty -- that is what puts it in create mode, and
         // why it resolves props too rather than inheriting a stale one.
@@ -118,6 +122,15 @@ router.beforeEach(async (to, _from, next) => {
   if (auth.isAuthenticated) {
     if (to.name === 'onboarding' || to.name === 'login') {
       return next({ name: 'dashboard' })
+    }
+    const iam = useManagedIAMStore()
+    if (to.meta.managedIAM) {
+      const id = to.params.functionId ?? to.params.policyId
+      if ((id && !isCanonicalUuid(id)) || !(await iam.check({ fresh: true }))) {
+        return next({ name: 'not-found', params: { pathMatch: to.path.slice(1).split('/') }, replace: true })
+      }
+    } else {
+      void iam.check()
     }
     return next()
   }

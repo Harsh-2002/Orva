@@ -38,6 +38,7 @@ type Service struct {
 	pool      *pool.Manager
 	secrets   *secrets.Manager
 	bindings  map[string]stores
+	owner     stores
 }
 
 func New(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager, sm *secrets.Manager, bindings map[string]Binding) (*Service, error) {
@@ -62,8 +63,32 @@ func New(db *database.Database, reg *registry.Registry, authority *workloadiam.A
 	return &Service{db: db, reg: reg, authority: authority, pool: manager, secrets: sm, bindings: owned}, nil
 }
 
-func (s *Service) matchesBinding(owner string, current *workloadspawn.Factory) bool {
+// NewOwnerBound uses the instance's leased stores, including for functions
+// installed after startup. A mutation still requires an exact current Factory.
+func NewOwnerBound(ctx context.Context, db *database.Database, reg *registry.Registry, authority *workloadiam.Authority,
+	manager *pool.Manager, sm *secrets.Manager, owner *artifactfs.Owner,
+) (*Service, error) {
+	if ctx == nil || db == nil || reg == nil || authority == nil || manager == nil ||
+		!manager.ManagedBy(authority) || sm == nil || owner == nil {
+		return nil, ErrUnavailable
+	}
+	b, err := owner.Bindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{db: db, reg: reg, authority: authority, pool: manager, secrets: sm, owner: stores{b.Code, b.Runtime}}, nil
+}
+
+func (s *Service) binding(owner string) (stores, bool) {
+	if s.owner.code != nil {
+		return s.owner, true
+	}
 	b, ok := s.bindings[owner]
+	return b, ok
+}
+
+func (s *Service) matchesBinding(owner string, current *workloadspawn.Factory) bool {
+	b, ok := s.binding(owner)
 	return ok && current.UsesStores(b.code, b.runtime)
 }
 
@@ -71,7 +96,7 @@ func (s *Service) prepare(ctx context.Context, owner string, expected database.W
 	if s == nil || ctx == nil {
 		return nil, nil, ErrUnavailable
 	}
-	if _, ok := s.bindings[owner]; !ok {
+	if _, ok := s.binding(owner); !ok {
 		return nil, nil, ErrUnavailable
 	}
 	plan, err := s.db.PrepareWorkloadConfiguration(ctx, owner, expected, env)
@@ -96,7 +121,7 @@ func (s *Service) snapshot(plan *database.WorkloadConfigurationPlan) (*secrets.P
 }
 
 func (s *Service) factory(ctx context.Context, owner string, input *secrets.PreparedArtifactSnapshot, source *workloadspawn.Factory) (*workloadspawn.Factory, error) {
-	b := s.bindings[owner]
+	b, _ := s.binding(owner)
 	code, runtime := source.Identities()
 	f, err := workloadspawn.NewFactory(ctx, input, b.code, code.Generation, b.runtime, runtime.Generation,
 		workloadspawn.FactoryLimits{MaxPreparedPlans: 16, MaxPreparedBytes: 64 << 20, MaxSnapshotBytes: 64 << 20})
@@ -125,8 +150,11 @@ func (s *Service) Settings(ctx context.Context, ref database.OperatorCredentialR
 	if s == nil || ctx == nil {
 		return nil, ErrUnavailable
 	}
-	if _, ok := s.bindings[owner]; !ok {
+	if _, ok := s.binding(owner); !ok {
 		return nil, ErrUnavailable
+	}
+	if s.owner.code != nil {
+		settings.SDK = true
 	}
 	plan, err := s.db.PrepareWorkloadSettings(ctx, owner, expected, settings, env)
 	if err != nil {
@@ -143,7 +171,7 @@ func (s *Service) Secret(ctx context.Context, ref database.OperatorCredentialRef
 	if s == nil || ctx == nil {
 		return nil, ErrUnavailable
 	}
-	if _, ok := s.bindings[owner]; !ok {
+	if _, ok := s.binding(owner); !ok {
 		return nil, ErrUnavailable
 	}
 	if len(value) > MaxRequestBytes || !utf8.ValidString(value) || strings.IndexByte(value, 0) >= 0 {
@@ -190,7 +218,7 @@ func (s *Service) publish(ctx context.Context, ref database.OperatorCredentialRe
 		return nil, err
 	}
 	candidate.Close()
-	b := s.bindings[owner]
+	b, _ := s.binding(owner)
 	code, runtime := current.Identities()
 	pin, err := artifactfs.PreparePaths(b.code, code.Generation, b.runtime, runtime.Generation)
 	if err != nil {
@@ -219,7 +247,11 @@ func (s *Service) publish(ctx context.Context, ref database.OperatorCredentialRe
 			return ErrUnavailable
 		}
 		var err error
-		out, err = s.db.CommitWorkloadConfiguration(ctx, ref, plan)
+		if s.owner.code != nil {
+			out, err = s.db.CommitBoundWorkloadConfiguration(ctx, ref, plan, sealedPair(code, runtime))
+		} else {
+			out, err = s.db.CommitWorkloadConfiguration(ctx, ref, plan)
+		}
 		if err != nil {
 			return err
 		}
@@ -258,6 +290,9 @@ func (s *Service) Install(ctx context.Context, ref database.OperatorCredentialRe
 	if err != nil || next != generation || !s.matchesBinding(owner, source) {
 		return "", ErrUnavailable
 	}
+	if s.owner.code != nil {
+		input.Function.Status = "active"
+	}
 	factory, err := s.factory(ctx, owner, input, source)
 	if err != nil {
 		return "", err
@@ -277,6 +312,15 @@ func (s *Service) Install(ctx context.Context, ref database.OperatorCredentialRe
 		if s.authority.PublicationRevisionUnderGate(owner) != expected.PolicyRevision {
 			return database.ErrIAMConflict
 		}
+		if s.owner.code != nil {
+			code, runtime := factory.Identities()
+			fn, err := s.db.ActivateBoundWorkloadConfiguration(ctx, ref, plan, sealedPair(code, runtime))
+			if err != nil {
+				return err
+			}
+			s.reg.CacheCommitted(fn)
+			return nil
+		}
 		return s.db.CheckWorkloadConfigurationInstallation(ctx, ref, plan)
 	})
 	lock.Unlock()
@@ -286,4 +330,9 @@ func (s *Service) Install(ctx context.Context, ref database.OperatorCredentialRe
 	keep = true
 	cleanup()
 	return factory.ArtifactRevision(), nil
+}
+
+func sealedPair(code, runtime artifactfs.Identity) database.WorkloadSealedPair {
+	return database.WorkloadSealedPair{CodeGeneration: code.Generation, CodeDigest: code.Digest,
+		RuntimeGeneration: runtime.Generation, RuntimeDigest: runtime.Digest}
 }

@@ -17,7 +17,7 @@ const apiClient = axios.create({
 })
 
 apiClient.interceptors.request.use((config) => {
-  const key = getApiKey()
+  const key = config.sessionOnly ? '' : getApiKey()
   if (key) {
     config.headers['X-Orva-API-Key'] = key
   }

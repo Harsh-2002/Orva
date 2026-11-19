@@ -1,5 +1,12 @@
 # Operations runbook
 
+The internal managed server binds its SQLite database to the sealed Owner
+instance. It refuses databases with existing unbound workloads before
+migration. In-place managed restores retain the sealed stores and validate
+the archive's binding before replacing the installed database. Replace
+an incompatible ready restore with a verified matching archive; do not
+remove the recovery marker to force serving.
+
 ## Internal restore-quarantine fixture
 
 `workloadrecovery` is an explicit Linux scratch composition, **not** the current
@@ -9,6 +16,11 @@ Its startup transaction migrates empty legacy authority, quarantines all durable
 work origins and policy/inbound authority, fails abandoned builds, and removes
 the marker only after durable commit. Same-operation replay is idempotent;
 normal restart does not reset individual reviews.
+
+Managed restore also unpublishes custom routes. Stored mappings and their
+version counters remain inspectable. Use a fresh route inspection and explicitly
+republish each desired mapping through the managed CAS API; this is separate
+from installing and reviewing the target workload.
 
 There is no shipped recovery CLI or production activation flag in this change.
 For internal manual fixtures, `PrepareManual` must precede stopped-instance file

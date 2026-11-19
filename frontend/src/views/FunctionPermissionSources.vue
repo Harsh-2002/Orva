@@ -1,5 +1,13 @@
 <template>
   <div class="space-y-6">
+    <header>
+      <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
+        Permissions
+      </h1>
+      <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+        {{ source ? `Platform access for ${source.function.name}.` : 'Platform access for this function.' }}
+      </p>
+    </header>
     <EffectiveAccess
       v-if="source"
       :source="source"
@@ -13,8 +21,8 @@
       <h2 class="text-lg font-semibold text-foreground-strong">
         Permission sources
       </h2>
-      <p class="text-sm text-foreground-muted">
-        Inline permissions and enabled pinned versions combine. Removing one source does not remove grants supplied elsewhere.
+      <p class="max-w-prose text-sm leading-body text-foreground-muted">
+        Removing one source leaves any overlapping grants in place.
       </p>
       <p
         v-if="unconfirmed"

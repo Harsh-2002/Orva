@@ -28,6 +28,7 @@ type OwnerConfig struct {
 	CodeLimits, RuntimeLimits                   Limits
 	Budget                                      *workloadfence.Budget
 	MaxEpochs                                   int
+	Host                                        *OwnerHostConfig
 }
 
 type ownerObject struct {
@@ -55,6 +56,7 @@ type ownerRecord struct {
 	Parent    string             `json:"parent"`
 	MaxEpochs int                `json:"max_epochs"`
 	Epochs    []ownerEpochRecord `json:"epochs"`
+	Host      *ownerHostBinding  `json:"host,omitempty"`
 }
 
 // Owner copies share one durable association and shutdown lifetime.
@@ -72,6 +74,7 @@ type ownerState struct {
 	domainReleased  bool
 	ops             persistentOps
 	closeFile       func(*os.File) error
+	witness         *ownerWitness
 }
 
 // OwnerBindings are trusted internal references. The host must use Domain for
@@ -92,9 +95,18 @@ func NewOwner(ctx context.Context, cfg OwnerConfig) (*Owner, error) {
 }
 
 // OpenOwnerRecovery is same-boot committed-asset recovery, not policy recovery.
-// Unknown/incomplete owner transitions deny; no reboot or legacy adoption exists.
+// It fences every epoch in the current boot run before recovering assets.
 func OpenOwnerRecovery(ctx context.Context, cfg OwnerConfig) (*Owner, error) {
 	return openLifecycleOwner(ctx, cfg, true, defaultOwnerOps())
+}
+
+// OpenOwnerColdRecovery requires an existing host binding and only prior-boot
+// epochs. It does not adopt legacy, restored or incomplete state.
+func OpenOwnerColdRecovery(ctx context.Context, cfg OwnerConfig) (*Owner, error) {
+	if cfg.Host == nil {
+		return nil, ErrInvalid
+	}
+	return openOwner(ctx, cfg, true, true, defaultOwnerOps())
 }
 
 func defaultOwnerOps() persistentOps {
@@ -137,18 +149,35 @@ func validateOwnerConfig(ctx context.Context, cfg OwnerConfig) error {
 }
 
 func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, ops persistentOps) (*Owner, error) {
+	return openOwner(ctx, cfg, recovering, false, ops)
+}
+
+func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops persistentOps) (*Owner, error) {
 	if err := validateOwnerConfig(ctx, cfg); err != nil {
 		return nil, err
 	}
 	s := &ownerState{cfg: cfg, ops: ops, closeFile: (*os.File).Close}
 	var err error
+	if cfg.Host != nil {
+		s.witness, err = openOwnerWitness(cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+	ok := false
+	defer func() {
+		if !ok && s.witness != nil {
+			_ = s.witness.file.Close()
+		}
+	}()
 	s.meta, err = openStore(cfg.MetadataRoot, ownerMetadataLimits(), !recovering)
 	if err != nil {
 		return nil, err
 	}
-	ok := false
 	var old []*workloadfence.Domain
 	var proofs []*workloadfence.Proof
+	var prior []ownerEpochRecord
+	var replay *preparedOwnerReplay
 	defer func() {
 		for _, d := range old {
 			_ = d.Close()
@@ -170,8 +199,24 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 		if err != nil {
 			return nil, err
 		}
-		if err := s.validateLayout(ctx); err != nil {
-			return nil, err
+		if (s.disk.Host == nil) != (s.witness == nil) {
+			return nil, ErrIntegrity
+		}
+		if s.witness != nil {
+			if err := s.witness.verify(s.disk); err != nil {
+				return nil, err
+			}
+		}
+		if !cold && s.witness != nil {
+			replay, err = s.readPreparedOwner(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if replay == nil {
+			if err := s.validateLayout(ctx); err != nil {
+				return nil, err
+			}
 		}
 		s.code, err = openStore(cfg.CodeRoot, cfg.CodeLimits, false)
 		if err != nil {
@@ -184,10 +229,20 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 		if err := s.matchStoreRoots(); err != nil {
 			return nil, err
 		}
-		if len(s.disk.Epochs) >= cfg.MaxEpochs {
+		if replay == nil && len(s.disk.Epochs) >= cfg.MaxEpochs {
 			return nil, ErrCapacity
 		}
-		for _, epoch := range s.disk.Epochs {
+		sameBoot := s.disk.Epochs
+		if cold {
+			prior, sameBoot = sameBoot, nil
+		} else if s.witness != nil {
+			start, err := lastOwnerBootRun(sameBoot)
+			if err != nil {
+				return nil, err
+			}
+			prior, sameBoot = sameBoot[:start], sameBoot[start:]
+		}
+		for _, epoch := range sameBoot {
 			d, err := workloadfence.OpenRecoveringUnderBudget(cfg.Budget, s.epochRoot(epoch.ID), cfg.Parent)
 			if err != nil {
 				return nil, err
@@ -201,8 +256,14 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 				return nil, ErrIntegrity
 			}
 		}
+		if err := s.validatePrior(ctx, prior); err != nil {
+			return nil, err
+		}
 	} else {
 		s.disk = ownerRecord{Version: 1, ID: ids.New(), Parent: cfg.Parent, MaxEpochs: cfg.MaxEpochs}
+		if s.witness != nil {
+			s.disk.Version = 2
+		}
 		s.disk.Root, err = ownerIdentity(s.meta.lock)
 		if err != nil {
 			return nil, err
@@ -219,8 +280,10 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := s.writeIntent(); err != nil {
-		return nil, err
+	if replay == nil {
+		if err := s.writeIntent(); err != nil {
+			return nil, err
+		}
 	}
 	if recovering {
 		// No recovered tree is activated or removed before exact old-root proof.
@@ -246,6 +309,17 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 		if err := validateRecoveredRole(s.runtime, KindRuntime); err != nil {
 			return nil, err
 		}
+		if replay != nil {
+			if err := s.reconcilePreparedOwner(ctx, replay, old, proofs, prior); err != nil {
+				return nil, err
+			}
+			if len(s.disk.Epochs) >= cfg.MaxEpochs {
+				return nil, ErrCapacity
+			}
+			if err := s.writeIntent(); err != nil {
+				return nil, err
+			}
+		}
 	} else {
 		if err := os.Mkdir(filepath.Join(cfg.MetadataRoot, "epochs"), 0700); err != nil {
 			return nil, ErrIO
@@ -268,6 +342,7 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 			return nil, err
 		}
 	}
+	predecessor := s.disk
 	epoch := ownerEpochRecord{ID: ids.New()}
 	if err := os.Mkdir(s.epochRoot(epoch.ID), 0700); err != nil {
 		return nil, ErrIO
@@ -287,18 +362,22 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 		return nil, err
 	}
 	s.disk.Epochs = append(s.disk.Epochs, epoch)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := s.commit(); err != nil {
-		return nil, err
-	}
-	for i, d := range old {
-		if err := d.Check(ctx, proofs[i]); err != nil {
+	if s.witness != nil {
+		if _, err := lastOwnerBootRun(s.disk.Epochs); err != nil {
+			return nil, err
+		}
+		if err := s.witness.sign(&s.disk); err != nil {
 			return nil, err
 		}
 	}
-	if err := s.matchStoreRoots(); err != nil {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	prepared := recovering && !cold && s.witness != nil
+	if err := s.commit(prepared, predecessor); err != nil {
+		return nil, err
+	}
+	if err := s.checkRecoveryBindings(ctx, old, proofs, prior); err != nil {
 		return nil, err
 	}
 	current, err := s.domain.Reference(ctx)
@@ -308,7 +387,17 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 	if current != epoch.Reference {
 		return nil, ErrIntegrity
 	}
-	if err := s.finishCommit(); err != nil {
+	if s.witness != nil {
+		if err := s.witness.verify(s.disk); err != nil {
+			return nil, err
+		}
+	}
+	if prepared {
+		if err := s.checkPreparedCommitted(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.finishOwnerCommit(prepared, true); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -325,6 +414,27 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 	}
 	ok = true
 	return &Owner{s}, nil
+}
+
+func (s *ownerState) checkRecoveryBindings(ctx context.Context, old []*workloadfence.Domain, proofs []*workloadfence.Proof, prior []ownerEpochRecord) error {
+	for i, d := range old {
+		if err := d.Check(ctx, proofs[i]); err != nil {
+			return err
+		}
+	}
+	if err := s.validatePrior(ctx, prior); err != nil {
+		return err
+	}
+	return s.matchStoreRoots()
+}
+
+func (s *ownerState) validatePrior(ctx context.Context, epochs []ownerEpochRecord) error {
+	for _, epoch := range epochs {
+		if err := workloadfence.ValidatePriorBootUnderBudget(ctx, s.cfg.Budget, s.epochRoot(epoch.ID), s.cfg.Parent, epoch.Reference); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ownerIdentity(f *os.File) (ownerObject, error) {
@@ -387,9 +497,24 @@ func readOwnerRecord(path string) (ownerRecord, error) {
 		return disk, ErrIntegrity
 	}
 	encoded, err := json.Marshal(disk)
-	if err != nil || !bytes.Equal(encoded, raw) || disk.Version != 1 || !generationID(disk.ID) ||
+	if err != nil || !bytes.Equal(encoded, raw) || !generationID(disk.ID) ||
 		disk.Root.Inode == 0 || disk.MaxEpochs < 2 || disk.MaxEpochs > 64 ||
 		len(disk.Epochs) == 0 || len(disk.Epochs) > disk.MaxEpochs {
+		return disk, ErrIntegrity
+	}
+	switch disk.Version {
+	case 1:
+		if disk.Host != nil {
+			return disk, ErrIntegrity
+		}
+	case 2:
+		if disk.Host == nil || disk.Host.Identity.Inode == 0 || !ownerHex(disk.Host.MAC, 64) {
+			return disk, ErrIntegrity
+		}
+		if _, err := lastOwnerBootRun(disk.Epochs); err != nil {
+			return disk, err
+		}
+	default:
 		return disk, ErrIntegrity
 	}
 	seen := make(map[string]bool)
@@ -423,6 +548,10 @@ func ownerBoot(value string) bool {
 }
 
 func (s *ownerState) validateLayout(ctx context.Context) error {
+	return s.validateOwnerLayout(ctx, "owner.json", "epochs")
+}
+
+func (s *ownerState) validateOwnerLayout(ctx context.Context, expected ...string) error {
 	root, err := ownerStoreIdentity(s.meta)
 	d := s.disk
 	if err != nil || root.Identity != d.Root || d.Parent != s.cfg.Parent || d.MaxEpochs != s.cfg.MaxEpochs ||
@@ -431,15 +560,19 @@ func (s *ownerState) validateLayout(ctx context.Context) error {
 		d.Code.Identity == d.Runtime.Identity {
 		return ErrIntegrity
 	}
-	names, err := boundedNames(ctx, s.cfg.MetadataRoot, 2)
+	names, err := boundedNames(ctx, s.cfg.MetadataRoot, len(expected))
 	if err != nil {
 		return err
 	}
-	if len(names) != 2 {
+	if len(names) != len(expected) {
 		return ErrIntegrity
 	}
+	entries := make(map[string]bool, len(expected))
+	for _, name := range expected {
+		entries[name] = true
+	}
 	for _, name := range names {
-		if name != "owner.json" && name != "epochs" {
+		if !entries[name] {
 			return ErrIntegrity
 		}
 	}
@@ -519,7 +652,7 @@ func (s *ownerState) writeIntent() error {
 	return s.syncDir(s.cfg.MetadataRoot)
 }
 
-func (s *ownerState) commit() error {
+func (s *ownerState) commit(prepared bool, predecessor ownerRecord) error {
 	raw, err := json.Marshal(s.disk)
 	if err != nil || len(raw) > ownerRecordLimit {
 		return ErrCapacity
@@ -527,6 +660,15 @@ func (s *ownerState) commit() error {
 	if err := s.writeFile("owner.json.tmp", raw); err != nil {
 		return err
 	}
+	if prepared {
+		if err := s.prepareOwnerTransition(predecessor); err != nil {
+			return err
+		}
+	}
+	return s.promoteOwnerRecord()
+}
+
+func (s *ownerState) promoteOwnerRecord() error {
 	if err := s.ops.rename(filepath.Join(s.cfg.MetadataRoot, "owner.json.tmp"), filepath.Join(s.cfg.MetadataRoot, "owner.json")); err != nil {
 		return ErrIO
 	}
@@ -534,6 +676,24 @@ func (s *ownerState) commit() error {
 		return err
 	}
 	return nil
+}
+
+func (s *ownerState) finishOwnerCommit(prepared, intent bool) error {
+	if !prepared {
+		return s.finishCommit()
+	}
+	if intent {
+		if err := s.ops.remove(filepath.Join(s.cfg.MetadataRoot, "owner.intent")); err != nil {
+			return ErrIO
+		}
+		if err := s.syncDir(s.cfg.MetadataRoot); err != nil {
+			return err
+		}
+	}
+	if err := s.ops.remove(filepath.Join(s.cfg.MetadataRoot, ownerPreparedFile)); err != nil {
+		return ErrIO
+	}
+	return s.syncDir(s.cfg.MetadataRoot)
 }
 
 func (s *ownerState) finishCommit() error {
@@ -597,6 +757,11 @@ func (o *Owner) Bindings(ctx context.Context) (OwnerBindings, error) {
 	actual, _ := json.Marshal(current)
 	if !bytes.Equal(expected, actual) {
 		return OwnerBindings{}, ErrIntegrity
+	}
+	if s.witness != nil {
+		if err := s.witness.verify(current); err != nil {
+			return OwnerBindings{}, err
+		}
 	}
 	if err := s.validateLayout(ctx); err != nil {
 		return OwnerBindings{}, err
@@ -690,6 +855,16 @@ func (o *Owner) Close(ctx context.Context) error {
 			}
 			store.lock = nil
 		}
+	}
+	if s.witness != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.closeFile(s.witness.file); err != nil && !errors.Is(err, os.ErrClosed) {
+			return ErrIO
+		}
+		clear(s.witness.token[:])
+		s.witness = nil
 	}
 	s.closed = true
 	return nil

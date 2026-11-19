@@ -29,6 +29,12 @@ func invokeError(err error, fn *database.Function, requestID string) (status int
 	opts.Message = err.Error()
 
 	switch {
+	case errors.Is(err, proxy.ErrInvocationVersionChanged):
+		return http.StatusConflict, respond.ErrorOpts{
+			Code: "NOT_ACTIVE", Message: "Managed function changed during admission; retry against the current generation",
+			RequestID: requestID,
+		}
+
 	// — Request shape —
 	case errors.Is(err, proxy.ErrBodyTooLarge):
 		return http.StatusRequestEntityTooLarge, respond.ErrorOpts{

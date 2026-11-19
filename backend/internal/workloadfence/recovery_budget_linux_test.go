@@ -61,4 +61,16 @@ func TestKernelRecoveringUnderBudgetPreservesStrictOrdinaryParent(t *testing.T) 
 	if err != nil || d.Check(timeout(t), proof) != nil {
 		t.Fatal("budget-root recovery could not prove emptiness", err)
 	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePriorBootUnderBudget(timeout(t), b, root, parent, expected); !errors.Is(err, ErrIntegrity) {
+		t.Fatal("prior-boot validation accepted a real same-boot epoch:", err)
+	}
+	r := d.s.rec
+	r.Boot = fixturePriorBoot
+	writePriorBootFixture(t, root, r)
+	if recovered, err := OpenRecoveringUnderBudget(b, root, parent); recovered != nil || !errors.Is(err, ErrIntegrity) {
+		t.Fatal("same-boot recovery accepted a prior-boot record over an existing group:", err)
+	}
 }

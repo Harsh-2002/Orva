@@ -124,7 +124,10 @@
                   <span v-if="fn.updated_at">{{ new Date(fn.updated_at).toLocaleDateString() }}</span>
                 </div>
               </div>
-              <div class="flex items-center gap-1 shrink-0">
+              <div
+                class="flex items-center shrink-0"
+                :class="iam.available ? 'gap-2' : 'gap-1'"
+              >
                 <IconButton
                   :icon="copiedId === fn.id ? Check : Copy"
                   :title="copiedId === fn.id ? 'Copied!' : 'Copy invoke URL'"
@@ -135,6 +138,12 @@
                   :icon="Pencil"
                   title="Edit function"
                   @click="router.push(fnPath(fn, 'edit'))"
+                />
+                <IconButton
+                  v-if="iam.available"
+                  :icon="ShieldCheck"
+                  title="Permissions"
+                  @click="openPermissions(fn.id)"
                 />
                 <IconButton
                   :icon="Trash2"
@@ -310,6 +319,12 @@
                     @click="router.push(fnPath(fn, 'edit'))"
                   />
                   <IconButton
+                    v-if="iam.available"
+                    :icon="ShieldCheck"
+                    title="Permissions"
+                    @click="openPermissions(fn.id)"
+                  />
+                  <IconButton
                     :icon="Trash2"
                     variant="danger"
                     title="Delete function"
@@ -428,7 +443,7 @@
 <script setup>
 import { ref, computed, onMounted, onActivated, onDeactivated, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Copy, Check, Globe, Search, RefreshCw, Lock, Gauge, ShieldCheck } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
 import LoadError from '@/components/common/LoadError.vue'
@@ -438,10 +453,13 @@ import { listFunctions } from '@/api/endpoints'
 import { copyText } from '@/utils/clipboard'
 import { useConfirmStore } from '@/stores/confirm'
 import { useEventsStore } from '@/stores/events'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import { rowNav } from '@/utils/rowNav'
 
 const confirmStore = useConfirmStore()
 const router = useRouter()
+const iam = useManagedIAMStore()
+const openPermissions = (functionId) => router.push({ name: 'function-permissions', params: { functionId } })
 
 // The function page opens in View mode; the pencil asks for Edit.
 const fnPath = (fn, mode) => ({ path: `/functions/${fn.name}`, query: mode ? { mode } : {} })

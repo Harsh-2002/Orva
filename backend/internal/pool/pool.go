@@ -22,6 +22,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
@@ -54,6 +55,11 @@ type SandboxTemplate struct {
 	RootfsDir      string
 	DataDir        string
 	DefaultSeccomp string
+	// ManagedDomain enrolls managed workers in the owning artifact epoch.
+	// Legacy pools never use it; nil preserves existing managed fixtures.
+	ManagedDomain *workloadfence.Domain
+	// ManagedSpawnReady keeps the autoscaler from starting workers during composition.
+	ManagedSpawnReady func() bool
 
 	// DefaultMaxPids is the per-sandbox process-count cap passed to nsjail
 	// (--cgroup_pids_max). Must be > 0 — a 0 value disables the cap, which is

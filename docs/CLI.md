@@ -1,5 +1,12 @@
 # Orva CLI
 
+On the internal managed server only, `orva functions create --managed --name
+NAME --runtime node|python` creates a fresh unbound function. Do not combine
+`--managed` with legacy SDK or resource flags. `orva deployments install
+DEPLOYMENT_UUID` installs the exact published generation without approving
+policy, releasing standing work, or changing deployment history. There is no
+legacy fallback for either command.
+
 The `orva` CLI is a slim HTTP client for any Orva server. Same Cobra command
 surface as the daemon binary's CLI side, but ~70 % smaller because it doesn't
 carry the server (no SQLite driver, nsjail, MCP server, OAuth, embedded UI,

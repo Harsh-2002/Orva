@@ -148,9 +148,7 @@
           </div>
         </div>
 
-        <!-- Bindings menu — KV / Webhooks / Docs. KV + Webhooks only
-           visible once the function is saved (they need an fnId).
-           Docs is always available. -->
+        <!-- Bindings menu. Function-specific actions require a saved function. -->
         <div
           ref="bindingsMenuRef"
           class="relative"
@@ -189,6 +187,16 @@
               <Webhook class="w-3.5 h-3.5" />
               <span class="flex-1 text-left truncate whitespace-nowrap">Webhooks</span>
               <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">signed POST</span>
+            </button>
+            <button
+              v-if="iam.available && isEditing && fnId"
+              class="menu-item"
+              role="menuitem"
+              @click="navMenu({ name: 'function-permissions', params: { functionId: fnId } })"
+            >
+              <ShieldCheck class="w-3.5 h-3.5" />
+              <span class="flex-1 text-left truncate whitespace-nowrap">Permissions</span>
+              <span class="text-[10px] text-foreground-muted shrink-0 whitespace-nowrap">function access</span>
             </button>
             <button
               class="menu-item"
@@ -1266,6 +1274,7 @@ import { templates, defaultCode, categoryOrder } from '@/templates'
 import { rollbackFunction, listRoutes as apiListRoutes, setRoute as apiSetRoute, deleteRoute as apiDeleteRoute } from '@/api/endpoints'
 import { copyFixSuggestionToClipboard, copyBuildFixToClipboard } from '@/utils/aiPrompts'
 import { useConfirmStore } from '@/stores/confirm'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import { useTestbenchStore } from '@/stores/testbench'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
 
@@ -1282,6 +1291,7 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const confirmStore = useConfirmStore()
+const iam = useManagedIAMStore()
 const testbench = useTestbenchStore()
 
 // Modals open-state. One per panel; clicking a header button toggles it.

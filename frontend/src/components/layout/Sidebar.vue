@@ -55,7 +55,7 @@
            fixed inset-y-0 left-0 transform transition-transform duration-150 ease-out
            lg:static lg:translate-x-0 lg:transform-none lg:transition-none
            pt-safe pb-safe pl-safe"
-    :class="open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+    :class="open ? 'translate-x-0' : 'invisible -translate-x-full lg:visible lg:translate-x-0'"
     @touchstart="onTouchStart"
     @touchmove="onTouchMove"
     @touchend="onTouchEnd"
@@ -68,7 +68,10 @@
 
     <!-- The drawer's vertical edge starts below the header rather than cutting
          through it; above lg the aside carries a full-height one instead. -->
-    <nav class="min-h-0 flex-1 p-3 space-y-1 overflow-y-auto scrollable border-r border-border lg:border-r-0">
+    <nav
+      aria-label="Main navigation"
+      class="min-h-0 flex-1 p-3 space-y-1 overflow-y-auto scrollable border-r border-border lg:border-r-0"
+    >
       <router-link
         v-for="item in navItems"
         :key="item.path"
@@ -93,8 +96,9 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import BrandLockup from './BrandLockup.vue'
 import {
   Gauge,
@@ -108,6 +112,7 @@ import {
   Fingerprint,
   Plug,
   Webhook,
+  ShieldCheck,
   ShieldHalf,
   Settings,
   LibraryBig,
@@ -116,30 +121,32 @@ import {
 } from '@lucide/vue'
 
 const route = useRoute()
+const iam = useManagedIAMStore()
 const open = ref(false)
 const drawerEl = ref(null)
 const toggleBtn = ref(null)
 const isActive = (path) => {
   if (path === '/') return route.path === '/'
-  return route.path.startsWith(path)
+  return route.path === path || route.path.startsWith(`${path}/`)
 }
 
-const navItems = [
+const navItems = computed(() => [
   { path: '/',          label: 'Overview',  icon: Gauge },
-  { path: '/ai',        label: 'Chat',      icon: MessagesSquare },
   { path: '/functions', label: 'Functions', icon: Boxes },
+  ...(iam.available ? [{ path: '/iam/policies', label: 'Policies', icon: ShieldCheck }] : []),
   { path: '/cron', label: 'Schedules', icon: CalendarClock },
   { path: '/jobs', label: 'Jobs', icon: ListChecks },
-  { path: '/activity', label: 'Activity', icon: Activity },
+  { path: '/webhooks', label: 'Webhooks', icon: Webhook },
   { path: '/invocations', label: 'Invocations', icon: ListTree },
   { path: '/traces', label: 'Traces', icon: Network },
+  { path: '/activity', label: 'Activity', icon: Activity },
   { path: '/api-keys', label: 'Keys', icon: Fingerprint },
   { path: '/channels', label: 'Channels', icon: Plug },
-  { path: '/webhooks', label: 'Webhooks', icon: Webhook },
   { path: '/firewall', label: 'Egress', icon: ShieldHalf },
+  { path: '/ai', label: 'Chat', icon: MessagesSquare },
   { path: '/settings', label: 'Settings', icon: Settings },
   { path: '/docs', label: 'Docs', icon: LibraryBig },
-]
+])
 
 watch(() => route.fullPath, () => {
   open.value = false
@@ -168,23 +175,19 @@ function onDrawerKeydown(event) {
   }
 }
 
-// Focus discipline: when the drawer opens, move focus into it (first
-// nav link) so keyboard users land where they can navigate. When it
-// closes, restore focus to the hamburger toggle so the operator's
-// place isn't lost. activeElement is the natural reference point;
-// we cache it on open and use it on close so a route navigation
-// from the drawer (which closes it) returns focus to the page link
-// rather than yanking back to the toggle.
+// Capture focus before hiding the drawer; visibility can blur the active link.
 watch(open, async (isOpen) => {
+  const shouldRestoreFocus = !isOpen && drawerEl.value?.contains(document.activeElement)
   if (isOpen) document.addEventListener('keydown', onDrawerKeydown)
   else document.removeEventListener('keydown', onDrawerKeydown)
   await nextTick()
+  if (open.value !== isOpen) return
   if (isOpen) {
     const firstLink = drawerEl.value?.querySelector('a[href]')
     firstLink?.focus?.()
   } else {
     // Only restore focus to the toggle if the drawer was the active region.
-    if (drawerEl.value?.contains(document.activeElement)) {
+    if (shouldRestoreFocus) {
       toggleBtn.value?.focus?.()
     }
   }

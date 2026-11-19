@@ -3,6 +3,13 @@
 Browser-driven UI verification: the checks that cannot be made by reading
 source, because they are about geometry, computed style and real interaction.
 
+`managed-iam.mjs` is driven by the Linux `TestManagedServingLive/browser`
+fixture, not the normal dashboard suite. It requires the fresh embedded UI and
+an owned loopback managed listener. The fixture's deterministic local provider
+lets the browser check that Chat cannot commit a named policy until approval.
+Copy out only the explicit scratch
+screenshots, never browser state, keys, traces or databases.
+
 ```bash
 cd test/browser
 node run.mjs --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"

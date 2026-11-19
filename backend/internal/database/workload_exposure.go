@@ -33,6 +33,7 @@ type ExposureInspection struct {
 	Version        uint64                           `json:"version,string"`
 	Expected       map[string]ExposureOwnerExpected `json:"expected"`
 	Route          *Route                           `json:"route,omitempty"`
+	RoutePublished bool                             `json:"route_published,omitempty"`
 	InboundWebhook *InboundWebhook                  `json:"inbound_webhook,omitempty"`
 }
 
@@ -47,9 +48,10 @@ type ExposureMutation struct {
 }
 
 type exposureState struct {
-	version uint64
-	route   *Route
-	inbound *InboundWebhook
+	version   uint64
+	route     *Route
+	published bool
+	inbound   *InboundWebhook
 }
 type exposureOwner struct {
 	sources    IAMSourceSnapshot
@@ -85,8 +87,10 @@ func readExposure(ctx context.Context, q iamQuery, kind, key string) (exposureSt
 		r := &Route{}
 		err = q.QueryRowContext(ctx, `SELECT
  CASE WHEN length(CAST(path AS BLOB))<=4096 THEN path END,function_id,
- CASE WHEN length(CAST(methods AS BLOB))<=256 THEN methods END,created_at
- FROM routes WHERE path=?`, key).Scan(&r.Path, &r.FunctionID, &r.Methods, &r.CreatedAt)
+ CASE WHEN length(CAST(methods AS BLOB))<=256 THEN methods END,created_at,
+ EXISTS(SELECT 1 FROM workload_route_publications AS p WHERE p.path=routes.path
+ AND p.version=? AND p.function_id=routes.function_id AND p.methods=routes.methods)
+ FROM routes WHERE path=?`, out.version, key).Scan(&r.Path, &r.FunctionID, &r.Methods, &r.CreatedAt, &out.published)
 		if err == nil {
 			out.route = r
 		}
@@ -172,7 +176,7 @@ func (db *Database) InspectExposure(ctx context.Context, ref OperatorCredentialR
 	if kind == "inbound" && state.inbound != nil && state.inbound.FunctionID != owner {
 		return nil, ErrExposureUnavailable
 	}
-	out := &ExposureInspection{Version: state.version, Expected: map[string]ExposureOwnerExpected{}, Route: state.route, InboundWebhook: state.inbound}
+	out := &ExposureInspection{Version: state.version, Expected: map[string]ExposureOwnerExpected{}, Route: state.route, RoutePublished: state.published, InboundWebhook: state.inbound}
 	for _, id := range exposureOwnerIDs(state, owner) {
 		o, e := readExposureOwner(ctx, tx, id)
 		if e != nil {
@@ -207,7 +211,7 @@ func (db *Database) PrepareExposure(ctx context.Context, c ExposureMutation) (*E
 	}
 	kind := exposureKind(c.Operation)
 	if kind == "route" {
-		if ValidateRoutePath(c.Key) != nil {
+		if !validManagedRoutePattern(c.Key) {
 			return nil, ErrExposureInvalid
 		}
 		if c.Methods == "" {
@@ -405,6 +409,14 @@ func (db *Database) CommitExposure(ctx context.Context, ref OperatorCredentialRe
 	_, err = tx.ExecContext(ctx, `INSERT INTO workload_exposure_versions(kind,key,version) VALUES(?,?,?) ON CONFLICT(kind,key) DO UPDATE SET version=excluded.version`, kind, c.Key, c.Version+1)
 	if err != nil {
 		return nil, ErrExposureUnavailable
+	}
+	if c.Operation == "route_set" {
+		// Updating the mapping clears its prior publication, even for same-value legacy writes.
+		_, err = tx.ExecContext(ctx, `INSERT INTO workload_route_publications(path,version,function_id,methods) VALUES(?,?,?,?)`,
+			c.Key, c.Version+1, c.FunctionID, c.Methods)
+		if err != nil {
+			return nil, ErrExposureUnavailable
+		}
 	}
 	// Audit hashes only public mapping identifiers, never signature secrets or bodies.
 	raw, _ := json.Marshal([]any{c.Operation, c.Key, c.FunctionID, c.Version + 1, p.Owners()})
