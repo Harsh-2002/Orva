@@ -6,7 +6,7 @@
           Policies
         </h1>
         <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
-          Reusable permissions pinned to a version for each function.
+          A policy is a reusable set of permissions. Attach it to functions, then approve each function.
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">

@@ -3,6 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import IAMPolicies from '@/views/IAMPolicies.vue'
 import IAMPolicyDetail from '@/views/IAMPolicyDetail.vue'
 import Button from '@/components/common/Button.vue'
+import { copyText } from '@/utils/clipboard'
+
+vi.mock('@/utils/clipboard', () => ({ copyText: vi.fn(async () => true) }))
 
 const wrappers = []
 afterEach(() => { while (wrappers.length) wrappers.pop().unmount() })
@@ -70,6 +73,33 @@ describe('policy detail header', () => {
     expect(children[children.length - 1].textContent.trim()).toBe('Refresh policy')
     const refresh = header.findAll('button').find((b) => b.text() === 'Refresh policy')
     expect(refresh.exists()).toBe(true)
+  })
+})
+
+describe('policy identity and versions', () => {
+  const detail = () => mountView(IAMPolicyDetail, { policyId: 'p1', api: listApi([], { get: vi.fn(async () => detailResponse()) }), functions: [] })
+
+  it('keeps the raw policy id behind a copy control instead of under the title', async () => {
+    const view = detail()
+    await flushPromises()
+    expect(view.find('header').text()).not.toContain('p1')
+    const identity = view.findAll('details').find((d) => d.find('summary').text() === 'Policy ID')
+    expect(identity.exists()).toBe(true)
+    expect(identity.text()).toContain('p1')
+    await identity.find('button').trigger('click')
+    await flushPromises()
+    expect(copyText).toHaveBeenCalledWith('p1')
+    expect(identity.find('button').text()).toBe('Copied')
+  })
+
+  it('collapses the pin and rollout explanation into a Versions detail', async () => {
+    const view = detail()
+    await flushPromises()
+    expect(view.find('header').text()).not.toContain('Latest verified version')
+    const versions = view.findAll('details').find((d) => d.find('summary').text() === 'Versions')
+    expect(versions.exists()).toBe(true)
+    expect(versions.text()).toContain('Latest verified version 2')
+    expect(versions.text()).toContain('keep their reviewed version until explicit rollout')
   })
 })
 

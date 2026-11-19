@@ -9,10 +9,6 @@
         <h2 class="text-lg font-semibold text-foreground-strong">
           {{ state.data.value.policy.name }}
         </h2>
-        <code class="block break-all text-xs text-foreground-muted">{{ policyId }}</code>
-        <p class="text-sm text-foreground-muted">
-          {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
-        </p>
         <p
           v-if="!state.data.value.can_manage"
           class="text-sm text-foreground-muted"
@@ -28,6 +24,32 @@
         Refresh policy
       </Button>
     </header>
+    <div class="flex flex-wrap items-start gap-x-5 gap-y-2">
+      <details>
+        <summary class="cursor-pointer text-sm text-link">
+          Policy ID
+        </summary>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <code class="break-all text-xs text-foreground-muted">{{ policyId }}</code>
+          <Button
+            size="xs"
+            variant="secondary"
+            class="touch-expand-xs"
+            @click="copyPolicyId"
+          >
+            {{ copied ? 'Copied' : 'Copy' }}
+          </Button>
+        </div>
+      </details>
+      <details>
+        <summary class="cursor-pointer text-sm text-link">
+          Versions
+        </summary>
+        <p class="measure mt-2 text-sm text-foreground-muted">
+          {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
+        </p>
+      </details>
+    </div>
     <p
       v-if="!state.fresh.value"
       role="status"
@@ -212,6 +234,7 @@ import ManagedPolicyDraft from '@/components/permissions/ManagedPolicyDraft.vue'
 import { sourceExpectation } from '@/api/managedPolicies.js'
 import { useIAMResource } from '@/composables/useIAMResource.js'
 import { parseCounter } from '@/utils/permissionsModel.js'
+import { copyText } from '@/utils/clipboard'
 const props = defineProps({ policyId: { type: String, required: true }, api: { type: Object, required: true }, functions: { type: Array, default: () => [] } })
 const emit = defineEmits(['deleted', 'changed'])
 const state = useIAMResource(() => props.policyId, (id, signal) => props.api.get(id, signal))
@@ -237,13 +260,15 @@ watch(
 const reviewed = ref(null)
 const editing = ref(false)
 const editingRevision = ref('')
+const copied = ref(false)
+async function copyPolicyId() { copied.value = await copyText(props.policyId) }
 function startEdit() {
   if (changeReason.value) return
   editingRevision.value = state.data.value.policy.definition_revision
   editing.value = true
 }
 const label = (id) => props.functions.find((f) => f.id === id)?.name || id
-watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false })
+watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false; copied.value = false })
 async function update({ policy }) {
   if (changeReason.value) return
   const result = await state.mutate((signal) => props.api.mutate(props.policyId, 'update', { definition_revision: editingRevision.value, policy }, signal))
