@@ -14,10 +14,7 @@ import (
 func TestInitialRuntimeReusesUnrecordedSeal(t *testing.T) {
 	limits := testLimits()
 	limits.Generations, limits.Staging = 1, 1
-	store, err := NewPersistent(t.TempDir(), limits)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store := persistentStore(t, limits)
 	defer store.Close()
 	src := t.TempDir()
 	bin := filepath.Join(src, "bin")
@@ -140,10 +137,7 @@ func initialRuntimeStore(t *testing.T) *Store {
 	t.Helper()
 	limits := testLimits()
 	limits.Generations, limits.Staging = 4, 1
-	s, err := NewPersistent(t.TempDir(), limits)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := persistentStore(t, limits)
 	s.boundKind, s.binding = KindRuntime, &ownerState{}
 	t.Cleanup(func() {
 		s.binding = nil
