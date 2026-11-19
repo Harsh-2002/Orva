@@ -241,7 +241,7 @@
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
-          :disabled="installing"
+          :disabled="installing || !!rollingBack"
           @click="deployFunction"
         >
           <Check
@@ -323,7 +323,7 @@
           <span
             v-else-if="lastBuild?.version"
             class="text-[10px] text-success-fg font-medium"
-          >v{{ lastBuild.version }} {{ lastBuild.managed ? 'built' : 'live' }}</span>
+          >v{{ lastBuild.version }} {{ lastBuild.rollback ? 'restored' : lastBuild.managed ? 'built' : 'live' }}</span>
           <span
             v-if="viewMode"
             class="text-[10px] text-foreground-muted font-medium"
@@ -400,7 +400,7 @@
           <span
             v-else-if="lastBuild?.managed"
             class="text-xs text-foreground"
-          >{{ lastBuild.installed ? 'Installed. Permissions review required.' : 'Build succeeded. Install required.' }}</span>
+          >{{ managedBuildHeadline(lastBuild) }}</span>
           <template v-else>
             <!-- No status chip. "Idle" reported nothing, and "Response" next to
                  a 200 said it twice; the status code carries the tone itself. -->
@@ -440,9 +440,10 @@
           variant="secondary"
           size="sm"
           :loading="installing"
+          :disabled="!!rollingBack"
           @click="installManagedBuild"
         >
-          Install build
+          {{ lastBuild.rollback ? 'Install restored version' : 'Install build' }}
         </Button>
         <router-link
           v-if="lastBuild?.managed && lastBuild.installed && iam.mode === 'managed'"
@@ -1077,7 +1078,7 @@
             </router-link>
             <button
               v-if="!viewMode"
-              :disabled="rollingBack"
+              :disabled="!!rollingBack || deploying || installing"
               class="touch-expand-xs inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong disabled:opacity-50"
               @click="rollbackToVersion(v)"
             >
@@ -1295,6 +1296,7 @@ import { useConfirmStore } from '@/stores/confirm'
 import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import { useTestbenchStore } from '@/stores/testbench'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
+import { isCanonicalUuid } from '@/utils/permissionsModel'
 
 // The function this Editor is scoped to; empty on /functions/new. A route prop,
 // not useRoute(): Vue does not patch a keep-alived view's props, and an Editor
@@ -1418,6 +1420,7 @@ const buildError = ref('')
 // What the last build produced, so the modal can name the version it made
 // rather than making the operator read it back out of the log.
 const lastBuild = ref(null)
+const rollingBack = shallowRef(null)
 const installingBuild = shallowRef(null)
 const installing = computed(() => installingBuild.value !== null && installingBuild.value === lastBuild.value)
 const awaitingInstall = computed(() => lastBuild.value?.managed && !lastBuild.value.installed)
@@ -1442,13 +1445,18 @@ const buildState = computed(() => {
   if (buildError.value) return 'failed'
   return lastBuild.value ? 'ok' : 'idle'
 })
+const managedBuildHeadline = (build, duration = '') => {
+  if (build.installed) return 'Installed. Permissions review required.'
+  if (build.rollback) return 'Version restored. Install required.'
+  return `Build succeeded${duration}. Install required.`
+}
 const buildHeadline = computed(() => {
   if (buildState.value === 'running') return 'Building'
   if (buildState.value === 'failed') return buildError.value
   const b = lastBuild.value
   if (!b) return 'No build has run in this session.'
   const ms = b.durationMs == null ? '' : ` in ${b.durationMs}ms`
-  if (b.managed) return b.installed ? 'Installed. Permissions review required.' : `Build succeeded${ms}. Install required.`
+  if (b.managed) return managedBuildHeadline(b, ms)
   return b.version ? `v${b.version} live${ms}` : `Build succeeded${ms}`
 })
 
@@ -1663,6 +1671,7 @@ onBeforeUnmount(removeFunctionGuard)
 // A mode that turns to View (switch or URL) must not leave an editable panel up.
 watch(viewMode, (on) => {
   if (!on) return
+  rollingBack.value = null
   closeMenus()
   for (const k of ['settings', 'envVars', 'deps', 'secrets']) modals.value[k] = false
 })
@@ -2031,6 +2040,7 @@ const invalidateBuild = () => {
 
 const resetEditorState = () => {
   editorEpoch += 1
+  rollingBack.value = null
   invalidateBuild()
   fnId.value = ''
   managedCreated.value = null
@@ -2249,6 +2259,7 @@ onActivated(() => {
 const deactivateEditor = () => {
   editorActive = false
   editorEpoch += 1
+  rollingBack.value = null
   invalidateBuild()
   unbindGlobals()
 }
@@ -2310,20 +2321,20 @@ const activeVersionDeploymentId = computed(() => {
 })
 
 // loadVersions builds the Versions card data from the deployments table.
-// We deduplicate by code_hash (keep the most recent succeeded deployment
-// for each unique hash) so a redeploy of identical content doesn't pad
-// the list. The rollback button uses deployment_id, which disambiguates
-// when the same hash was deployed twice via different code archives.
+// Legacy history collapses identical hashes. Managed history keeps the exact
+// deployment rows, since equal content does not imply equal sealed provenance.
 const loadVersions = async (fn, current = editorScope()) => {
   if (!current()) return
   try {
     const res = await apiClient.get(`/functions/${fn.id}/deployments?limit=50`)
     if (!current()) return
     const deps = res.data.deployments || []
+    const managed = iam.mode === 'managed'
     const seen = new Set()
     versions.value = deps
       .filter((d) => d.status === 'succeeded' && d.code_hash)
       .filter((d) => {
+        if (managed) return true
         if (seen.has(d.code_hash)) return false
         seen.add(d.code_hash)
         return true
@@ -2334,7 +2345,7 @@ const loadVersions = async (fn, current = editorScope()) => {
         code_hash: d.code_hash,
         short_hash: d.code_hash.slice(0, 12),
         created_at: d.finished_at || d.submitted_at,
-        is_active: d.code_hash === fn.code_hash,
+        is_active: managed ? d.id === fn.active_deployment_id : d.code_hash === fn.code_hash,
       }))
   } catch (e) {
     if (current()) console.warn('failed to load versions', e)
@@ -2399,7 +2410,7 @@ const managedCreation = (form, entrypoint) => {
 const runDeploy = async () => {
   const inScope = editorScope()
   let id = fnId.value
-  if (!inScope() || viewMode.value || deploying.value || installing.value || (isEditing.value && !id)) return
+  if (!inScope() || viewMode.value || deploying.value || installing.value || rollingBack.value || (isEditing.value && !id)) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2687,7 +2698,7 @@ const installManagedBuild = async () => {
   const inScope = editorScope()
   const current = () => inScope() && fnId.value === build?.owner
     && lastBuild.value === build && !viewMode.value && iam.mode === 'managed'
-  if (!awaitingInstall.value || deploying.value || installing.value || !current()) return
+  if (!awaitingInstall.value || deploying.value || installing.value || rollingBack.value || !current()) return
   installingBuild.value = build
   try {
     const res = await apiClient.post(`/deployments/${build.deploymentId}/install`)
@@ -2869,53 +2880,96 @@ const suggestBuildFix = async () => {
   }
 }
 
-const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
-  if (viewMode.value) return
-  if (!fnId.value || !v?.deployment_id || rollingBack.value) return
-
-  // Pull the target deployment's snapshot + the current function record
-  // so we can show the operator exactly what will change before they
-  // confirm. Best-effort: if either fetch fails, fall through to a plain
-  // confirm — the rollback itself still works.
-  let diffMessage = `Code hash ${v.short_hash}. Your current version stays in the history.`
+  const owner = fnId.value
+  const deploymentId = v?.deployment_id
+  const inScope = editorScope()
+  if (!inScope() || viewMode.value || !owner || !deploymentId || rollingBack.value
+    || deploying.value || installing.value) return
+  const operation = Symbol()
+  rollingBack.value = operation
+  const current = () => inScope() && !viewMode.value && fnId.value === owner && rollingBack.value === operation
+  let mode
+  const currentMode = () => current() && iam.mode === mode
   try {
-    const [depRes, listRes] = await Promise.all([
-      apiClient.get(`/deployments/${v.deployment_id}`),
-      apiClient.get('/functions'),
-    ])
-    const snap = depRes.data?.snapshot
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
-    if (snap && fn) {
-      const lines = describeSnapshotDiff(fn, snap)
-      if (lines.length) {
-        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
-      } else {
-        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+
+    let message
+    if (mode === 'managed') {
+      if (!isCanonicalUuid(owner) || !isCanonicalUuid(deploymentId)) {
+        throw new Error('Managed rollback requires exact function and deployment IDs.')
+      }
+      message = `Restore v${v.version} (code ${v.short_hash})? Install the restored version before invoking it. Review permissions separately. Settings, environment and secrets stay unchanged.`
+    } else {
+      message = `Code hash ${v.short_hash}. Your current version stays in the history.`
+      try {
+        const [depRes, listRes] = await Promise.all([
+          apiClient.get(`/deployments/${deploymentId}`),
+          apiClient.get('/functions'),
+        ])
+        if (!currentMode()) return
+        const snap = depRes.data?.snapshot
+        const fn = (listRes.data.functions || []).find((f) => f.id === owner)
+        if (snap && fn) {
+          const lines = describeSnapshotDiff(fn, snap)
+          message = lines.length
+            ? `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
+            : `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
+        }
+      } catch {
+        // The legacy diff is best-effort.
       }
     }
-  } catch {
-    // fall through to default message
-  }
 
-  const ok = await confirmStore.ask({
-    title: `Restore v${v.version}?`,
-    message: diffMessage,
-    confirmLabel: 'Rollback',
-  })
-  if (!ok) return
-  rollingBack.value = true
-  try {
-    managedSettingsCAS = null
-    await rollbackFunction(fnId.value, { deployment_id: v.deployment_id })
-    // Re-pull function metadata, source, AND versions so the Active
-    // pill moves AND the editor buffer reflects the rolled-back code.
-    // Without the reloadSource() call, CodeMirror keeps showing the
-    // pre-rollback content and the operator has to hard-refresh —
-    // that was the original bug report ("I rolled back, navigated
-    // back to the function, still saw the new code").
+    if (!currentMode() || confirmStore.visible) return
+    const ok = await confirmStore.ask({
+      title: `Restore v${v.version}?`,
+      message,
+      confirmLabel: 'Rollback',
+    })
+    if (!ok || !currentMode()) return
+
+    if (managedSettingsCAS?.owner === owner) managedSettingsCAS = null
+    if (mode === 'managed') lastBuild.value = null
+    const { data } = await rollbackFunction(owner, { deployment_id: deploymentId })
+    if (!currentMode()) return
+    if (mode === 'managed') {
+      if (data?.id !== deploymentId || data.deployment_id !== deploymentId || data.function_id !== owner
+        || !Number.isSafeInteger(data.version) || data.version < 1 || data.version !== v.version
+        || !data.code_hash || data.code_hash !== v.code_hash || data.status !== 'succeeded'
+        || data.phase !== 'review_required' || data.function_status !== 'inactive') {
+        throw new Error('Rollback result could not be verified. Check deployment history before retrying.')
+      }
+      lastBuild.value = { managed: true, rollback: true, owner, deploymentId, installed: false, version: data.version }
+      buildError.value = ''
+      buildLogs.value = ['Version restored. Install required.']
+      modals.value.versions = false
+      versions.value = versions.value.map((row) => ({ ...row, is_active: row.deployment_id === deploymentId }))
+      if (!isDirty.value) {
+        try {
+          const source = await apiClient.get(`/functions/${owner}/source`)
+          if (!currentMode() || isDirty.value) return
+          if (typeof source.data?.code !== 'string' || typeof source.data?.dependencies !== 'string') throw new Error()
+          code.value = source.data.code
+          dependencyText.value = source.data.dependencies
+          markSourceClean()
+        } catch {
+          if (!currentMode()) return
+          confirmStore.notify({
+            title: 'Source refresh failed',
+            message: 'The version was restored. Reopen the editor to load its source before editing.',
+            danger: true,
+          })
+        }
+      }
+      return
+    }
+
     const listRes = await apiClient.get('/functions')
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (!currentMode()) return
+    const fn = (listRes.data.functions || []).find((f) => f.id === owner)
     if (fn) {
       // Re-hydrate the form too — rollback restores env_vars,
       // memory, network_mode, etc. from the deployment snapshot.
@@ -2938,11 +2992,13 @@ const rollbackToVersion = async (v) => {
       } else {
         envVars.value = []
       }
-      await reloadSource(fn)
+      await reloadSource(fn, { current: currentMode })
+      if (!currentMode()) return
       markFormClean()
-      await loadVersions(fn)
+      await loadVersions(fn, currentMode)
     }
   } catch (e) {
+    if (!current() || (mode && mode !== 'unknown' && !currentMode())) return
     const code = e.response?.data?.error?.code || ''
     const msg = e.response?.data?.error?.message || e.message || 'Rollback failed'
     if (code === 'VERSION_GCD') {
@@ -2951,7 +3007,7 @@ const rollbackToVersion = async (v) => {
       confirmStore.notify({ title: 'Rollback failed', message: msg, danger: true })
     }
   } finally {
-    rollingBack.value = false
+    if (rollingBack.value === operation) rollingBack.value = null
   }
 }
 

@@ -136,6 +136,11 @@ which violet is correct.
 
 ## Non-obvious
 
+- Editor managed rollback promotes an exact deployment ID without restoring
+  configuration. A verified inactive, review-required response offers explicit
+  installation in the existing result strip; navigation invalidates pending
+  confirmation and response handling. Legacy rollback still restores its snapshot.
+
 - Cron descriptions are advisory: `cronDescription.js` spells out known aliases
   and exact whole-second `@every` intervals. Complex durations/time-zone prefixes
   retain literal copy pending server validation; the backend remains authoritative.

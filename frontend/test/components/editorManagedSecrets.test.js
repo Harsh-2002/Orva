@@ -23,6 +23,13 @@ const FN = {
 const FN_B = { ...FN, id: 'fn-b', name: 'beta', code_hash: 'hb' }
 const ARTIFACT = 'a'.repeat(64)
 const BUILD = '12345678-1234-7234-8234-123456789abc'
+const ROLLBACK = '12345678-1234-7234-8234-123456789abd'
+const FN_ROLLBACK = { ...FN, id: '12345678-1234-7234-8234-123456789abe', name: 'rollback-demo', active_deployment_id: BUILD }
+const ROLLBACK_TARGET = { deployment_id: ROLLBACK, version: 2, code_hash: 'ha', short_hash: 'ha' }
+const rollbackData = {
+  id: ROLLBACK, deployment_id: ROLLBACK, function_id: FN_ROLLBACK.id, version: 2,
+  code_hash: 'ha', status: 'succeeded', phase: 'review_required', function_status: 'inactive',
+}
 let buildStream
 
 class ManagedBuildStream {
@@ -48,6 +55,7 @@ const h = vi.hoisted(() => ({
   post: vi.fn(),
   put: vi.fn(),
   del: vi.fn(),
+  rollback: vi.fn(),
   configuration: null,
 }))
 vi.mock('@/api/managedPolicies.js', () => ({
@@ -61,7 +69,7 @@ vi.mock('@/api/endpoints', () => ({
   __esModule: true,
   listFunctions: vi.fn(async () => ({ data: { functions: [FN, FN_B], total: 2 } })),
   listDeployments: vi.fn(async () => ({ data: { deployments: [] } })),
-  rollbackFunction: vi.fn(async () => ({ data: {} })),
+  rollbackFunction: h.rollback,
   listFixtures: vi.fn(async () => ({ data: { fixtures: [] } })),
   updateFixture: vi.fn(async () => ({ data: {} })),
   deleteFixture: vi.fn(async () => ({ data: {} })),
@@ -216,11 +224,18 @@ beforeEach(() => {
   h.post.mockReset()
   h.put.mockReset()
   h.del.mockReset()
+  h.rollback.mockReset()
   let revision = 5
   h.configuration = () => settings(revision++)
   h.get.mockImplementation(async (url) => {
-    if (url === '/functions') return { data: { functions: [FN, FN_B] } }
+    if (url === '/functions') return { data: { functions: [FN, FN_B, FN_ROLLBACK] } }
     if (url.endsWith('/source')) return { data: { code: url.includes('fn-b') ? 'print(2)' : 'print(1)', dependencies: '' } }
+    if (url.startsWith(`/functions/${FN_ROLLBACK.id}/deployments`)) {
+      return { data: { deployments: [
+        { id: BUILD, status: 'succeeded', version: 3, code_hash: 'ha' },
+        { id: ROLLBACK, status: 'succeeded', version: 2, code_hash: 'ha' },
+      ] } }
+    }
     if (url.includes('/deployments')) return { data: { deployments: [] } }
     if (url.endsWith('/secrets')) return { data: { secrets: [url.includes('fn-b') ? 'BETA_TOKEN' : 'API_TOKEN'] } }
     if (url.endsWith('/configuration')) return h.configuration()
@@ -541,6 +556,56 @@ describe('editor deploy in managed mode', () => {
     expect(putCalls('/functions/fn-a/configuration/settings')).toHaveLength(1)
     expect(deployInlineCalls()).toHaveLength(2)
     expect(editor.buildError).toContain('reload')
+  })
+})
+
+describe('editor rollback in managed mode', () => {
+  const open = () => boot({ managed: true, path: '/functions/rollback-demo?mode=edit' })
+
+  it('keeps same-hash deployments distinct and restores the selected ID without installing it', async () => {
+    h.rollback.mockResolvedValue({ data: rollbackData })
+    const { editor, confirm } = await open()
+    expect(editor.versions.map(({ deployment_id, is_active }) => [deployment_id, is_active]))
+      .toEqual([[BUILD, true], [ROLLBACK, false]])
+    await editor.rollbackToVersion(ROLLBACK_TARGET)
+    await settle()
+    expect(confirm.ask.mock.calls[0][0].message).toContain('Review permissions separately')
+    expect(h.rollback.mock.calls).toEqual([[FN_ROLLBACK.id, { deployment_id: ROLLBACK }]])
+    expect(body().textContent).toContain('Version restored. Install required.')
+    expect(byText('Install restored version')).toBeTruthy()
+    expect(h.post).not.toHaveBeenCalled()
+  })
+
+  it('refuses to show an install control for a different deployment response', async () => {
+    h.rollback.mockResolvedValue({ data: { ...rollbackData, id: BUILD, deployment_id: BUILD } })
+    const { editor, confirm } = await open()
+    await editor.rollbackToVersion(ROLLBACK_TARGET)
+    expect(confirm.notify.mock.calls[0][0].message).toContain('Rollback result could not be verified')
+    expect(editor.lastBuild).toBeNull()
+    expect(h.post).not.toHaveBeenCalled()
+  })
+
+  it.each(['confirmation', 'request'])('does not update a new owner after navigation during the rollback %s', async (stage) => {
+    const gate = deferred()
+    const { editor, router, confirm } = await open()
+    if (stage === 'confirmation') confirm.ask.mockReturnValueOnce(gate.promise)
+    else h.rollback.mockReturnValueOnce(gate.promise)
+    const pending = editor.rollbackToVersion(ROLLBACK_TARGET)
+    await settle()
+    expect(confirm.ask).toHaveBeenCalledTimes(1)
+    expect(h.rollback).toHaveBeenCalledTimes(stage === 'confirmation' ? 0 : 1)
+
+    await router.push('/functions/beta?mode=edit')
+    await settle()
+    gate.resolve(stage === 'confirmation' ? true : { data: rollbackData })
+    await pending
+    await settle()
+
+    expect(h.rollback).toHaveBeenCalledTimes(stage === 'confirmation' ? 0 : 1)
+    expect(editor.fnId).toBe('fn-b')
+    expect(editor.lastBuild).toBeNull()
+    expect(confirm.notify).not.toHaveBeenCalled()
+    expect(byText('Install restored version')).toBeUndefined()
   })
 })
 
