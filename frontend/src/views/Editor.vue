@@ -1659,6 +1659,9 @@ const templateEntrypoint = ref('')
 // posted handler.js, so tsc never ran and the build died looking for output it
 // had not been asked to produce.
 const loadedEntrypoint = ref('')
+// The record the editor loaded, so a managed redeploy can publish settings with
+// the fields the form does not edit (timeout) and detect a real change.
+const loadedFunction = ref(null)
 
 const fileName = computed(() => {
   if (templateEntrypoint.value) return templateEntrypoint.value
@@ -2033,6 +2036,7 @@ const loadRouteData = async () => {
       if (!fn) throw new Error('Function not found')
 
       fnId.value = fn.id
+      loadedFunction.value = fn
       form.value.name = fn.name
       form.value.description = fn.description || ''
       form.value.runtime = fn.runtime
@@ -2369,6 +2373,20 @@ const runDeploy = async () => {
         } else {
           throw err
         }
+      }
+    } else if (iam.available) {
+      // Managed mode publishes configuration; its router does not mount the
+      // legacy PUT /functions/{id}, and an unchanged redeploy must not
+      // publish a new configuration.
+      const settings = managedSettings()
+      const changed = JSON.stringify(settings) !== JSON.stringify(loadedManagedSettings())
+        || !sameEnvironment(envVarsMap, loadedFunction.value?.env_vars)
+      if (changed) {
+        await publishManagedSettings(settings, envVarsMap)
+        buildLogs.value.push('Updated function configuration')
+      }
+      if (form.value.description !== (loadedFunction.value?.description || '')) {
+        buildLogs.value.push('Description is not saved in managed mode')
       }
     } else {
       // Existing function — update config (memory, cpus, env_vars,
@@ -2781,10 +2799,10 @@ const loadManagedConfiguration = async () => {
   return res.data
 }
 
-const managedConfigurationError = (err, fallback) => {
+const managedConfigurationError = (err, fallback, forbidden = 'An administrator must change secrets.') => {
   const status = err.response?.status
   if (status === 409) return 'Configuration changed elsewhere; reload to continue.'
-  if (status === 403) return 'An administrator must change secrets.'
+  if (status === 403) return forbidden
   return err.response?.data?.error?.message || err?.message || fallback
 }
 
@@ -2799,6 +2817,57 @@ const writeManagedSecret = async (key, value, { remove = false } = {}) => {
     return apiClient.delete(`/functions/${fnId.value}/configuration/secrets`, { data: body })
   }
   return apiClient.put(`/functions/${fnId.value}/configuration/secrets`, body)
+}
+
+// The 9 fields the managed settings publication accepts, exactly. timeout_ms is
+// not in the form, so it comes from the record the editor loaded.
+const managedSettings = () => ({
+  timeout_ms: Number(loadedFunction.value?.timeout_ms),
+  memory_mb: form.value.memory_mb,
+  cpus: form.value.cpus,
+  network_mode: form.value.network_mode,
+  sdk: form.value.sdk === true,
+  max_concurrency: form.value.max_concurrency || 0,
+  concurrency_policy: form.value.concurrency_policy || 'queue',
+  auth_mode: form.value.auth_mode || 'none',
+  rate_limit_per_min: form.value.rate_limit_per_min || 0,
+})
+
+const loadedManagedSettings = () => ({
+  timeout_ms: Number(loadedFunction.value?.timeout_ms),
+  memory_mb: loadedFunction.value?.memory_mb,
+  cpus: loadedFunction.value?.cpus,
+  network_mode: loadedFunction.value?.network_mode || 'none',
+  sdk: loadedFunction.value?.sdk === true,
+  max_concurrency: loadedFunction.value?.max_concurrency || 0,
+  concurrency_policy: loadedFunction.value?.concurrency_policy || 'queue',
+  auth_mode: loadedFunction.value?.auth_mode || 'none',
+  rate_limit_per_min: loadedFunction.value?.rate_limit_per_min || 0,
+})
+
+const sameEnvironment = (current, loaded) => JSON.stringify(Object.entries(current || {}).sort())
+  === JSON.stringify(Object.entries(loaded || {}).sort())
+
+// Managed mode publishes configuration through the CAS-checked service; the
+// legacy PUT /functions/{id} is not mounted there.
+const publishManagedSettings = async (settings, environment) => {
+  try {
+    if (!Number.isInteger(settings.timeout_ms) || settings.timeout_ms < 1) {
+      throw new Error('Configuration is unavailable; reload to continue.')
+    }
+    const config = await loadManagedConfiguration()
+    if (!config?.expected || !config?.current_artifact) {
+      throw new Error('Configuration is unavailable; reload to continue.')
+    }
+    await apiClient.put(`/functions/${fnId.value}/configuration/settings`, {
+      expected: config.expected,
+      current_artifact: config.current_artifact,
+      environment,
+      settings,
+    })
+  } catch (err) {
+    throw new Error(managedConfigurationError(err, 'Failed to update configuration', 'An administrator must change the configuration.'))
+  }
 }
 
 const loadSecrets = async () => {

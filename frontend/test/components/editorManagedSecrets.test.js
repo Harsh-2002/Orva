@@ -13,7 +13,12 @@ window.matchMedia = window.matchMedia || ((q) => ({
   addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
 }))
 
-const FN = { id: 'fn-a', name: 'alpha', runtime: 'python', entrypoint: 'handler.py', memory_mb: 64, cpus: 0.5, code_hash: 'ha' }
+const FN = {
+  id: 'fn-a', name: 'alpha', description: '', runtime: 'python', entrypoint: 'handler.py',
+  memory_mb: 64, cpus: 0.5, code_hash: 'ha', timeout_ms: 5000, network_mode: 'none', sdk: false,
+  max_concurrency: 0, concurrency_policy: 'queue', auth_mode: 'none', rate_limit_per_min: 0,
+  env_vars: { EXISTING: 'keep' },
+}
 const ARTIFACT = 'a'.repeat(64)
 
 const h = vi.hoisted(() => ({
@@ -112,6 +117,30 @@ const saveSecret = async (name, value) => {
   valueInput.dispatchEvent(new window.Event('input'))
   await settle()
   byText('Save secret').click()
+  await settle()
+}
+
+const deployInlineCalls = () => h.post.mock.calls.filter(([url]) => url.endsWith('/deploy-inline'))
+const postCalls = (url) => h.post.mock.calls.filter(([call]) => call === url)
+const putCalls = (url) => h.put.mock.calls.filter(([call]) => call === url)
+
+const deploy = async () => {
+  byText('Deploy').click()
+  await settle(14)
+}
+
+const setValue = (element, value) => {
+  element.value = value
+  element.dispatchEvent(new window.Event('input'))
+}
+
+const setEnvironment = async (key, value) => {
+  byText('Config').click()
+  await settle()
+  byText('Env').click()
+  await settle()
+  if (key) setValue(body().querySelector('input[placeholder="KEY"]'), key)
+  setValue(body().querySelector('input[placeholder="VALUE"]'), value)
   await settle()
 }
 
@@ -236,5 +265,81 @@ describe('editor secrets in legacy mode', () => {
     expect(h.put).not.toHaveBeenCalled()
     expect(configurationCalls()).toHaveLength(0)
     expect(confirm.notify).not.toHaveBeenCalled()
+  })
+})
+
+describe('editor deploy in managed mode', () => {
+  it('does not publish a configuration an unchanged redeploy did not change', async () => {
+    await boot({ managed: true })
+    await deploy()
+
+    expect(configurationCalls()).toHaveLength(0)
+    expect(h.put).not.toHaveBeenCalled()
+    expect(postCalls('/functions/fn-a')).toHaveLength(0)
+    expect(deployInlineCalls()).toHaveLength(1)
+  })
+
+  it('publishes the exact settings body before the build when configuration changed', async () => {
+    await boot({ managed: true })
+    await setEnvironment('', 'changed')
+    await deploy()
+
+    expect(putCalls('/functions/fn-a')).toHaveLength(0)
+    expect(h.put).toHaveBeenCalledTimes(1)
+    const [url, payload] = h.put.mock.calls[0]
+    expect(url).toBe('/functions/fn-a/configuration/settings')
+    expect(Object.keys(payload).sort()).toEqual(['current_artifact', 'environment', 'expected', 'settings'])
+    expect(payload.current_artifact).toBe(ARTIFACT)
+    expect(payload.expected).toEqual(settings(5).data.expected)
+    expect(payload.environment).toEqual({ EXISTING: 'changed' })
+    expect(payload.settings).toEqual({
+      timeout_ms: 5000,
+      memory_mb: 64,
+      cpus: 0.5,
+      network_mode: 'none',
+      sdk: false,
+      max_concurrency: 0,
+      concurrency_policy: 'queue',
+      auth_mode: 'none',
+      rate_limit_per_min: 0,
+    })
+    expect(deployInlineCalls()).toHaveLength(1)
+    expect(h.put.mock.invocationCallOrder[0]).toBeLessThan(h.post.mock.invocationCallOrder.find((_, i) => h.post.mock.calls[i][0].endsWith('/deploy-inline')))
+  })
+
+  it('stops before the build when the configuration moved elsewhere', async () => {
+    await boot({ managed: true })
+    await setEnvironment('', 'changed')
+    h.put.mockRejectedValueOnce({ response: { status: 409, data: { error: { message: 'conflict' } } } })
+
+    await deploy()
+
+    expect(deployInlineCalls()).toHaveLength(0)
+    expect(body().textContent).toContain('Configuration changed elsewhere; reload to continue.')
+  })
+})
+
+describe('editor deploy in legacy mode', () => {
+  it('keeps the legacy configuration update unchanged', async () => {
+    await boot({ managed: false })
+    await deploy()
+
+    expect(configurationCalls()).toHaveLength(0)
+    expect(h.put).toHaveBeenCalledTimes(1)
+    const [url, payload] = h.put.mock.calls[0]
+    expect(url).toBe('/functions/fn-a')
+    expect(payload).toMatchObject({
+      description: '',
+      memory_mb: 64,
+      cpus: 0.5,
+      env_vars: { EXISTING: 'keep' },
+      network_mode: 'none',
+      sdk: false,
+      max_concurrency: 0,
+      concurrency_policy: 'queue',
+      auth_mode: 'none',
+      rate_limit_per_min: 0,
+    })
+    expect(deployInlineCalls()).toHaveLength(1)
   })
 })
