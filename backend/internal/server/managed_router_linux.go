@@ -16,6 +16,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
@@ -105,6 +106,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
+	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service
 	if publication != nil {
@@ -209,6 +211,43 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 		replay.PublishEvent = ops.Hub.Publish
 	}
 	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, true, replay.Replay))
+}
+
+// mountManagedObservability mounts traces, the activity feed, the SSE event
+// stream and the system endpoints with the legacy permission tiers: read for
+// views, admin for storage and vacuum. Health and the Prometheus /metrics alias
+// stay unauthenticated, as on the legacy router, for probes and scrapers.
+func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	dataDir string, ops *managedRouteDeps,
+) {
+	met := ops.Metrics
+	if met == nil {
+		met = metrics.New()
+	}
+	traces := &handlers.TracesHandler{DB: db, Registry: reg, Metrics: met}
+	mux.HandleFunc("GET /api/v1/traces", requireManagedOperator(db, false, traces.ListTraces))
+	mux.HandleFunc("GET /api/v1/traces/{trace_id}", requireManagedOperator(db, false, traces.GetTrace))
+	mux.HandleFunc("GET /api/v1/functions/{id}/baseline", requireManagedOperator(db, false, traces.GetFunctionBaseline))
+	activity := &handlers.ActivityHandler{DB: db}
+	mux.HandleFunc("GET /api/v1/activity", requireManagedOperator(db, false, activity.List))
+	if ops.Hub != nil {
+		mux.HandleFunc("GET /api/v1/events", requireManagedOperator(db, false, ops.Hub.Handler()))
+	}
+	started := ops.StartTime
+	if started.IsZero() {
+		started = time.Now()
+	}
+	system := &handlers.SystemHandler{Metrics: met, DB: db, PoolMgr: manager, Registry: reg,
+		StartTime: started, NsjailBin: ops.NsjailBin}
+	mux.HandleFunc("GET /api/v1/system/health", system.Health)
+	mux.HandleFunc("GET /metrics", system.GetMetrics)
+	mux.HandleFunc("GET /api/v1/system/metrics", requireManagedOperator(db, false, system.GetMetrics))
+	mux.HandleFunc("GET /api/v1/system/metrics.json", requireManagedOperator(db, false, system.GetMetricsJSON))
+	if dataDir != "" {
+		storage := &handlers.SystemStorageHandler{DB: db, Cfg: &config.Config{Data: config.DataConfig{Dir: dataDir}}}
+		mux.HandleFunc("GET /api/v1/system/storage", requireManagedOperator(db, true, storage.GetStorage))
+		mux.HandleFunc("POST /api/v1/system/vacuum", requireManagedOperator(db, true, storage.Vacuum))
+	}
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,
