@@ -4,17 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
+	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // Two child re-execs make these real process deaths rather than injected errors:
@@ -129,10 +133,10 @@ func enrollmentKillFixture(t *testing.T) (string, []string) {
 // enrollmentPayload fingerprints the legacy source tree and key files by
 // content, mode and symlink target — never mtime, so a rename-free interruption
 // cannot present itself as a change.
-func enrollmentPayload(t *testing.T, dir string) string {
+func enrollmentPayload(t *testing.T, source, keyDir string) string {
 	t.Helper()
 	h := sha256.New()
-	err := filepath.WalkDir(filepath.Join(dir, "functions"), func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -140,7 +144,11 @@ func enrollmentPayload(t *testing.T, dir string) string {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(h, "%q:%v:%d\n", path, info.Mode(), info.Size())
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "%q:%v:%d\n", rel, info.Mode(), info.Size())
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(path)
 			if err != nil {
@@ -158,7 +166,13 @@ func enrollmentPayload(t *testing.T, dir string) string {
 	})
 	enrollmentMust(t, err)
 	for _, name := range []string{".master.key", ".admin-key"} {
-		raw, err := os.ReadFile(filepath.Join(dir, name))
+		path := filepath.Join(keyDir, name)
+		st, err := os.Lstat(path)
+		enrollmentMust(t, err)
+		if st.Mode() != 0600 {
+			t.Fatalf("fixture key %s has mode %v, want a 0600 regular file", name, st.Mode())
+		}
+		raw, err := os.ReadFile(path)
 		enrollmentMust(t, err)
 		fmt.Fprintf(h, "%q:%s\n", name, raw)
 	}
@@ -166,7 +180,7 @@ func enrollmentPayload(t *testing.T, dir string) string {
 }
 
 // enrollmentLegacyRows reads the stopped legacy database without writing it.
-// Identity and code hash only: the commit boundary legitimately rewrites status.
+// Identity, deployment and code hash only: the commit legitimately rewrites status.
 func enrollmentLegacyRows(t *testing.T, dir string) (rows []string, digest string) {
 	t.Helper()
 	path := filepath.Join(dir, "orva.db")
@@ -175,16 +189,85 @@ func enrollmentLegacyRows(t *testing.T, dir string) (rows []string, digest strin
 	conn, err := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
 	enrollmentMust(t, err)
 	defer conn.Close()
-	cur, err := conn.Query(`SELECT id, COALESCE(code_hash,'') FROM functions ORDER BY id`)
+	cur, err := conn.Query(`SELECT id, code_hash, active_deployment_id FROM functions ORDER BY id`)
 	enrollmentMust(t, err)
 	defer cur.Close()
 	for cur.Next() {
-		var id, hash string
-		enrollmentMust(t, cur.Scan(&id, &hash))
-		rows = append(rows, id+":"+hash)
+		var id, hash, deployment string
+		enrollmentMust(t, cur.Scan(&id, &hash, &deployment))
+		rows = append(rows, id+":"+hash+":"+deployment)
 	}
 	enrollmentMust(t, cur.Err())
 	return rows, fmt.Sprintf("%x", sha256.Sum256(raw))
+}
+
+// Both commit cases exclude every function and install no runtime.
+func assertExcludedEnrollmentCommit(t *testing.T, dir string, record servingmode.Record, plan enrollmentPlan, digest string) {
+	t.Helper()
+	path := filepath.Join(dir, "orva.db")
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if _, err := os.Lstat(path + suffix); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("checkpointed database sidecar %s: %v; want absent", suffix, err)
+		}
+	}
+	conn, err := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
+	enrollmentMust(t, err)
+	defer conn.Close()
+	var owner, operation, recoveryOp, planDigest string
+	var ownerVersion, migrated, epoch int
+	enrollmentMust(t, conn.QueryRow(`SELECT b.version,b.owner,e.operation,e.plan_digest,r.migrated,r.epoch,r.operation
+		FROM workload_owner_binding b JOIN workload_enrollment e USING(id) JOIN workload_recovery r USING(id)
+		WHERE id=1`).Scan(&ownerVersion, &owner, &operation, &planDigest, &migrated, &epoch, &recoveryOp))
+	if ownerVersion != 1 || owner != record.Owner || operation != record.Operation || planDigest != digest ||
+		migrated != 1 || epoch != 0 || recoveryOp != record.Operation {
+		t.Fatalf("committed owner, enrollment or recovery record disagrees with operation %s and its plan", record.Operation)
+	}
+	for table, want := range map[string]int{
+		"workload_enrollment_functions": len(plan.Functions), "workload_enrollment_runtimes": 0,
+		"workload_deployment_capture": 0, "workload_iam_audit": len(plan.Functions),
+	} {
+		var count int
+		enrollmentMust(t, conn.QueryRow("SELECT count(*) FROM "+table).Scan(&count))
+		if count != want {
+			t.Fatalf("%s contains %d rows, want %d", table, count, want)
+		}
+	}
+	for _, fn := range plan.Functions {
+		type functionCommit struct {
+			hash, digest, note, status, policy, approval                                                string
+			excluded, sdk, legacySDK, review, quarantine                                                bool
+			policyRevision, policyEpoch, generationRevision, generationEpoch, auditRevision, auditEpoch int
+			generationActor, change, auditActor                                                         string
+		}
+		var got functionCommit
+		var generation string
+		enrollmentMust(t, conn.QueryRow(`SELECT e.legacy_hash,e.revision_digest,e.note,f.status,p.policy_json,p.approved_artifact,
+			e.excluded,f.sdk,l.sdk_was_enabled,p.review_required,p.quarantined,
+			p.revision,p.authority_epoch,g.revision,g.epoch,a.revision,a.authority_epoch,
+			g.generation,g.actor_id,g.change_kind,a.actor_id
+			FROM workload_enrollment_functions e JOIN functions f ON f.id=e.function_id
+			JOIN workload_iam_policies p USING(function_id) JOIN workload_iam_legacy l USING(function_id)
+			JOIN workload_artifact_generations g USING(function_id) JOIN workload_iam_audit a USING(function_id)
+			WHERE e.function_id=? AND g.actor_kind='system' AND a.actor_kind='system'`, fn.ID).Scan(
+			&got.hash, &got.digest, &got.note, &got.status, &got.policy, &got.approval,
+			&got.excluded, &got.sdk, &got.legacySDK, &got.review, &got.quarantine,
+			&got.policyRevision, &got.policyEpoch, &got.generationRevision, &got.generationEpoch, &got.auditRevision, &got.auditEpoch,
+			&generation, &got.generationActor, &got.change, &got.auditActor))
+		note := "legacy enrollment; no grants imported"
+		if fn.SDK {
+			note += "; legacy SDK enabled; policy review required"
+		}
+		want := functionCommit{
+			hash: fn.CodeHash, digest: fn.Revision, note: note + "; explicitly excluded from enrollment",
+			status: "inactive", policy: database.RecoveryEmptyPolicy, approval: database.IAMUnboundArtifact,
+			excluded: true, sdk: fn.SDK, legacySDK: fn.SDK, review: fn.SDK, quarantine: true,
+			policyRevision: 1, policyEpoch: 1, generationRevision: 1, generationEpoch: 1, auditRevision: 1, auditEpoch: 1,
+			generationActor: record.Operation, change: "initialize", auditActor: record.Operation,
+		}
+		if got != want || !ids.IsUUID(generation) {
+			t.Fatalf("committed function %s = %+v (generation %q), want %+v and a UUID generation", fn.ID, got, generation, want)
+		}
+	}
 }
 
 // enrollmentKernelBudget returns a fresh per-case budget under the VM's root
@@ -346,13 +429,18 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, ids := enrollmentKillFixture(t)
-			excluded := ids[1:] // the TypeScript fixture can only be excluded
+			dir, functionIDs := enrollmentKillFixture(t)
+			excluded := functionIDs[1:] // the TypeScript fixture can only be excluded
 			if tc.excludeAll {
-				excluded = ids
+				excluded = functionIDs
 			}
 			planPath := filepath.Join(t.TempDir(), "plan.json")
 			enrollmentMust(t, planManagedEnrollment(t.Context(), dir, planPath, func([]byte) error { return nil }))
+			rawPlan, err := os.ReadFile(planPath)
+			enrollmentMust(t, err)
+			planDigest := fmt.Sprintf("%x", sha256.Sum256(rawPlan))
+			var plan enrollmentPlan
+			enrollmentMust(t, json.Unmarshal(rawPlan, &plan))
 
 			env := append(os.Environ(),
 				enrollKillDataEnv+"="+dir, enrollKillPlanEnv+"="+planPath,
@@ -379,12 +467,9 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 				enrollmentProvisionedRuntime(t, dir)
 			}
 
-			var payload, dbDigest string
-			var functions []string
-			if tc.stage != "" {
-				payload = enrollmentPayload(t, dir)
-				functions, dbDigest = enrollmentLegacyRows(t, dir)
-			}
+			source := filepath.Join(dir, "functions")
+			payload := enrollmentPayload(t, source, dir)
+			functions, dbDigest := enrollmentLegacyRows(t, dir)
 
 			cmd := exec.Command(launch[0], launch[1:]...)
 			cmd.Env, cmd.Dir = env, t.TempDir()
@@ -409,6 +494,8 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 					t.Fatalf("stat %s at %q: %v; want present=%t", name, tc.stage, err, present)
 				}
 			}
+			var record servingmode.Record
+			dbDir := dir
 			if published {
 				// Completion control: the apply must end in a layout the managed
 				// path serves, otherwise the boundary cases prove nothing.
@@ -416,23 +503,57 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 				lock, err := servingmode.Acquire(dir)
 				enrollmentMust(t, err)
 				defer lock.Close()
-				record, root, err := lock.OpenData()
-				if err != nil || record.Mode != servingmode.Managed || record.Owner == "" {
-					t.Fatalf("published layout is not serveable: %+v %v", record, err)
+				publishedRecord, root, err := lock.OpenData()
+				if err != nil || publishedRecord.Mode != servingmode.Managed || publishedRecord.Owner == "" {
+					t.Fatalf("published layout is not serveable: %+v %v", publishedRecord, err)
 				}
 				root.Close()
-				return
+				record = publishedRecord
+				dbDir = filepath.Join(dir, servingmode.Managed)
+				for _, path := range []string{source, filepath.Join(dir, ".master.key"), filepath.Join(dir, ".admin-key")} {
+					if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("unrelocated fixture path %s: %v; want absent", path, err)
+					}
+				}
+				source = filepath.Join(dir, "legacy-functions.enrolled-"+record.Operation)
+			} else {
+				if _, err := os.Lstat(filepath.Join(dir, servingmode.Managed)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("managed layout at %q: %v; want absent", tc.stage, err)
+				}
+				var intent struct {
+					servingmode.Record
+					Plan string `json:"plan_sha256"`
+				}
+				raw, err := os.ReadFile(filepath.Join(dir, intentName))
+				enrollmentMust(t, err)
+				enrollmentMust(t, json.Unmarshal(raw, &intent))
+				if intent.Version != 1 || intent.Mode != servingmode.Managed || !ids.IsUUID(intent.Owner) ||
+					!ids.IsUUID(intent.Operation) || intent.Plan != planDigest {
+					t.Fatal("interrupted apply left an intent with the wrong identity or plan digest")
+				}
+				record = intent.Record
+			}
+			archives, err := filepath.Glob(filepath.Join(dir, "legacy-functions.enrolled-*"))
+			enrollmentMust(t, err)
+			if (!published && len(archives) != 0) || (published && !slices.Equal(archives, []string{source})) {
+				t.Fatalf("unexpected source archives at %q: %v", tc.stage, archives)
 			}
 
-			if enrollmentPayload(t, dir) != payload {
-				t.Fatal("interrupted apply changed the legacy source tree or keys")
+			if enrollmentPayload(t, source, dbDir) != payload {
+				t.Fatal("apply changed the fixture source tree or keys")
 			}
-			afterFunctions, afterDigest := enrollmentLegacyRows(t, dir)
-			if strings.Join(afterFunctions, "\n") != strings.Join(functions, "\n") {
-				t.Fatal("interrupted apply lost or rewrote legacy function identities")
+			afterFunctions, afterDigest := enrollmentLegacyRows(t, dbDir)
+			if !slices.Equal(afterFunctions, functions) {
+				t.Fatal("apply lost or rewrote legacy identities or deployment pointers")
 			}
 			if !tc.dbWrites && afterDigest != dbDigest {
 				t.Fatal("interrupted apply wrote the legacy database before its commit boundary")
+			}
+			if tc.dbWrites {
+				assertExcludedEnrollmentCommit(t, dbDir, record, plan, planDigest)
+			}
+			if published {
+				return
 			}
 
 			// Both serving paths must refuse. runServe takes the legacy path while

@@ -2,11 +2,15 @@ package servingmode
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // The child re-execs this test binary so an interrupted enrollment is a real
@@ -47,6 +51,7 @@ func enrollmentCrashChild(root, stage string) {
 	if err != nil {
 		os.Exit(1)
 	}
+	fmt.Println(e.Record().Operation)
 	if stage == "intent" {
 		os.Exit(enrollCrashExit)
 	}
@@ -69,7 +74,7 @@ func enrollmentCrashFixture(t *testing.T) string {
 	root := t.TempDir()
 	for _, name := range []string{dbName, ".master.key", ".admin-key"} {
 		path := filepath.Join(root, name)
-		if err := os.WriteFile(path, []byte("preserved"), 0600); err != nil {
+		if err := os.WriteFile(path, []byte("preserved:"+name), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,7 +82,7 @@ func enrollmentCrashFixture(t *testing.T) string {
 	if err := os.Mkdir(source, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(source, "historical"), []byte("preserved"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(source, "historical"), []byte("preserved:historical"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	legacy, err := AcquireLegacy(root)
@@ -90,11 +95,62 @@ func enrollmentCrashFixture(t *testing.T) string {
 	return root
 }
 
-// enrollmentCrashPreserved checks that every durable payload still exists once,
-// wherever the interrupted relocation left it.
-func enrollmentCrashPreserved(t *testing.T, root string) error {
+func enrollmentCrashPreserved(t *testing.T, root, stage, operation string) {
 	t.Helper()
-	want := map[string]int{"orva.db": 1, ".master.key": 1, ".admin-key": 1, "historical": 1}
+	archived, exchanged, relocated := true, true, true
+	switch stage {
+	case "intent":
+		archived = false
+		fallthrough
+	case "source_archived", "staged":
+		exchanged = false
+		fallthrough
+	case "exchanged", "tombstone":
+		relocated = false
+	}
+	source := "functions"
+	var wantArchives []string
+	if archived {
+		source = "legacy-functions.enrolled-" + operation
+		wantArchives = []string{filepath.Join(root, source)}
+		if _, err := os.Lstat(filepath.Join(root, "functions")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("unarchived functions at %q: %v; want absent", stage, err)
+		}
+	}
+	if archives, err := filepath.Glob(filepath.Join(root, "legacy-functions.enrolled-*")); err != nil || !slices.Equal(archives, wantArchives) {
+		t.Errorf("source archives at %q = %v, %v; want %v", stage, archives, err, wantArchives)
+	}
+	if stage == "intent" || stage == "source_archived" {
+		if _, err := os.Lstat(filepath.Join(root, Managed)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("managed directory at %q: %v; want absent", stage, err)
+		}
+	}
+	dbDir, keyDir := "", ""
+	if exchanged {
+		dbDir = Managed
+		mode := os.ModeDir | 0500
+		if stage == "exchanged" {
+			mode = os.ModeDir | 0700
+		}
+		st, err := os.Lstat(filepath.Join(root, dbName))
+		if err != nil || st.Mode() != mode {
+			t.Errorf("root SQLite tombstone at %q = %v, %v; want mode %v", stage, st, err, mode)
+		}
+	} else if stage == "staged" {
+		st, err := os.Lstat(filepath.Join(root, Managed, dbName))
+		if err != nil || st.Mode() != os.ModeDir|0700 {
+			t.Errorf("staged SQLite tombstone = %v, %v; want a 0700 directory", st, err)
+		}
+	}
+	if relocated {
+		keyDir = Managed
+	}
+	want := map[string]string{
+		filepath.Join(dbDir, dbName):         dbName,
+		filepath.Join(keyDir, ".master.key"): ".master.key",
+		filepath.Join(keyDir, ".admin-key"):  ".admin-key",
+		filepath.Join(source, "historical"):  "historical",
+	}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -103,17 +159,29 @@ func enrollmentCrashPreserved(t *testing.T, root string) error {
 		if err != nil {
 			return err
 		}
-		if string(raw) == "preserved" {
-			want[filepath.Base(path)]--
+		if !strings.HasPrefix(string(raw), "preserved:") {
+			return nil
 		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if name, ok := want[rel]; !ok || string(raw) != "preserved:"+name || info.Mode() != 0600 {
+			t.Errorf("unexpected fixture payload at %q in stage %q", rel, stage)
+		}
+		delete(want, rel)
 		return nil
 	})
-	for name, n := range want {
-		if n != 0 {
-			t.Errorf("%s preserved %d times, want 1", name, 1-n)
-		}
+	if err != nil {
+		t.Fatal(err)
 	}
-	return err
+	for path := range want {
+		t.Errorf("missing fixture payload %q at stage %q", path, stage)
+	}
 }
 
 // TestEnrollmentPublicationProcessKill kills a real enrollment process at every
@@ -137,6 +205,10 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 				t.Fatalf("uninterrupted publication failed: %v\n%s", err, out)
 			case stage != "" && (!errors.As(err, &status) || status.ExitCode() != enrollCrashExit):
 				t.Fatalf("child did not stop at %q: %v\n%s", stage, err, out)
+			}
+			operation := strings.TrimSpace(string(out))
+			if !ids.IsUUID(operation) {
+				t.Fatalf("invalid child enrollment operation: %q", operation)
 			}
 
 			// No serving mode before the last boundary; the intent is unlinked
@@ -193,7 +265,7 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 			defer lock.Close()
 			record, dir, err := lock.OpenData()
 			if published {
-				if err != nil || record.Mode != Managed || record.Owner == "" || record.Operation == "" {
+				if err != nil || record.Mode != Managed || record.Owner == "" || record.Operation != operation {
 					t.Fatalf("managed serve refused a published layout: %+v %v", record, err)
 				}
 				dir.Close()
@@ -204,18 +276,7 @@ func TestEnrollmentPublicationProcessKill(t *testing.T) {
 				t.Fatalf("OpenData refused for the wrong reason at %q: %v", stage, err)
 			}
 
-			if err := enrollmentCrashPreserved(t, root); err != nil {
-				t.Fatalf("lost durable data: %v", err)
-			}
-			archived, err := filepath.Glob(filepath.Join(root, "legacy-functions.enrolled-*"))
-			if err != nil || len(archived) > 1 || (stage != "intent" && len(archived) != 1) {
-				t.Fatalf("legacy source archives at %q = %v, %v", stage, archived, err)
-			}
-			if stage == "intent" {
-				if st, err := os.Stat(filepath.Join(root, "functions", "historical")); err != nil || !st.Mode().IsRegular() {
-					t.Fatalf("legacy source moved before publication: %v", err)
-				}
-			}
+			enrollmentCrashPreserved(t, root, stage, operation)
 		})
 	}
 }
