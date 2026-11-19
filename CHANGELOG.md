@@ -23,6 +23,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- Fresh managed startup seals the installed Node and Python rootfs trees and
+  records their generations. Existing selections are preserved. Managed
+  instances with neither runtime installed or selected now refuse startup
+  instead of opening a listener that cannot build.
 - Managed backups use portable v2. Download with `orva backup download`
   and use the stopped server binary's `orva managed restore --archive FILE
   --confirm` on the independently provisioned destination, not the legacy

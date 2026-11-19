@@ -90,7 +90,14 @@ managed environment that the daemon will use:
    owned by the daemon user. If its grandparent is not writable by that user,
    have the host administrator create the private parent first. Use the
    configured path if different.
-2. `orva setup --managed-layout provision` publishes provisioning intent.
+2. Install both trusted runtime trees in `rootfs/node` and `rootfs/python`
+   under the instance data directory, with the current Orva adapters and SDKs.
+   Use the verified release installer or image artifacts; ordinary
+   `orva setup` can install the matching adapters into pre-positioned trees.
+   Do not use source trees writable by other users. Stop all writers to
+   those trees before importing them. Then run `orva setup --managed-layout
+   provision` to publish provisioning intent; the layout command does not
+   itself install rootfs trees.
 3. From the prepared cgroup, run `orva serve`. In provisioning mode it creates
    the Owner only if the three private roots are empty, then exits without
    opening a database or listener.
@@ -100,8 +107,21 @@ managed environment that the daemon will use:
    Owner before explicitly publishing managed mode. If you set
    `ORVA_SERVING_MODE`, update it from `provisioning` to `managed` only after
    publication; leaving it unset is simpler.
-5. Run `orva serve` again in that service layout. Without explicitly configured
-   sealed runtimes the listener can start, but new builds cannot run.
+5. Run `orva serve` again in that service layout. Before opening the listener,
+   it checks and seals each installed language without a recorded selection or
+   explicit generation override. The selections are stored in the managed
+   database. Later starts use those exact sealed generations even if the
+   installed trees have moved or changed. Setup and startup do not rotate an
+   existing selection. A retry after sealing but before the database commit
+   can reuse a verified seal that exactly matches the installed tree.
+
+If neither language has a usable generation and neither tree is installed
+(for example after `setup --skip-rootfs`), managed serving exits 78. Install
+the trusted runtime trees and retry `orva serve`; do not delete the Owner or
+edit the mode marker. One configured or installed runtime is sufficient for
+startup, but builds in the other language remain unavailable. A present
+untrusted, oversized, or invalid runtime tree that would need to be sealed
+causes startup to refuse rather than silently accepting it.
 
 SIGTERM closes and drains HTTP, then closes the managed instance (including
 its scheduler), then fences and closes its Owner. Startup or shutdown refusal
