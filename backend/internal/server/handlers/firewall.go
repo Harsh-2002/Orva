@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -131,55 +132,16 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
-	req.RuleType = strings.TrimSpace(req.RuleType)
-	req.Value = strings.TrimSpace(req.Value)
-	if req.RuleType == "" {
-		// Auto-detect: '/' → CIDR, '*.' → wildcard (refused just below, with
-		// the reason, rather than silently downgraded to a hostname), else
-		// hostname.
-		switch {
-		case strings.Contains(req.Value, "/"):
-			req.RuleType = database.BlocklistTypeCIDR
-		case strings.HasPrefix(req.Value, "*."):
-			req.RuleType = database.BlocklistTypeWildcard
-		default:
-			// Bare IP without /N is also CIDR-able as /32 / /128.
-			if ip := net.ParseIP(req.Value); ip != nil {
-				if ip.To4() != nil {
-					req.Value += "/32"
-				} else {
-					req.Value += "/128"
-				}
-				req.RuleType = database.BlocklistTypeCIDR
-			} else {
-				req.RuleType = database.BlocklistTypeHostname
-			}
-		}
-	}
-	if !database.ValidBlocklistRuleType(req.RuleType) {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"rule_type must be one of: cidr, hostname", reqID)
-		return
-	}
-	// A wildcard is stored-but-never-enforced (the compiler drops it into
-	// status.unenforced_rules), so accepting a new one would hand the operator a
-	// rule that looks armed and blocks nothing. Refuse at the door. Legacy rows
-	// stay readable and deletable — only creating and enabling are closed off.
-	if req.RuleType == database.BlocklistTypeWildcard {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", wildcardUnenforceable, reqID)
-		return
-	}
-	if err := validateEnforceableRule(req.RuleType, req.Value); err != nil {
+	ruleType, value, err := NormalizeFirewallRule(req.RuleType, req.Value)
+	if err != nil {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
 		return
 	}
-
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-
-	rule, err := h.DB.InsertCustomBlocklistRule(req.RuleType, req.Value, req.Label, enabled)
+	rule, err := h.DB.InsertCustomBlocklistRule(ruleType, value, req.Label, enabled)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			respond.Error(w, http.StatusConflict, "CONFLICT", "rule with this value already exists", reqID)
@@ -192,6 +154,45 @@ func (h *FirewallHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.refreshEnforcement(r)
 	}
 	respond.JSON(w, http.StatusCreated, rule)
+}
+
+// NormalizeFirewallRule prepares a new rule and rejects targets the compiler cannot enforce.
+func NormalizeFirewallRule(ruleType, value string) (string, string, error) {
+	ruleType, value = strings.TrimSpace(ruleType), strings.TrimSpace(value)
+	if ruleType == "" {
+		// Auto-detect: '/' → CIDR, '*.' → wildcard (refused just below, with
+		// the reason, rather than silently downgraded to a hostname), else
+		// hostname.
+		switch {
+		case strings.Contains(value, "/"):
+			ruleType = database.BlocklistTypeCIDR
+		case strings.HasPrefix(value, "*."):
+			ruleType = database.BlocklistTypeWildcard
+		default:
+			// Bare IP without /N is also CIDR-able as /32 / /128.
+			if ip := net.ParseIP(value); ip != nil {
+				if ip.To4() != nil {
+					value += "/32"
+				} else {
+					value += "/128"
+				}
+				ruleType = database.BlocklistTypeCIDR
+			} else {
+				ruleType = database.BlocklistTypeHostname
+			}
+		}
+	}
+	if !database.ValidBlocklistRuleType(ruleType) {
+		return "", "", errors.New("rule_type must be one of: cidr, hostname")
+	}
+	// A wildcard is stored-but-never-enforced (the compiler drops it into
+	// status.unenforced_rules), so accepting a new one would hand the operator a
+	// rule that looks armed and blocks nothing. Refuse at the door. Legacy rows
+	// stay readable and deletable — only creating and enabling are closed off.
+	if ruleType == database.BlocklistTypeWildcard {
+		return "", "", errors.New(wildcardUnenforceable)
+	}
+	return ruleType, value, validateEnforceableRule(ruleType, value)
 }
 
 type updateFirewallRequest struct {
@@ -361,91 +362,69 @@ func (h *FirewallHandler) PutDNS(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "INVALID_JSON", "invalid request body", reqID)
 		return
 	}
+	if err := SaveSandboxDNSConfig(r.Context(), h.DB, req.Servers, req.Search, req.Records); err != nil {
+		var invalid dnsValidationError
+		if errors.As(err, &invalid) {
+			respond.Error(w, http.StatusBadRequest, "VALIDATION", err.Error(), reqID)
+		} else {
+			respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
+		}
+		return
+	}
+	h.refreshEnforcement(r)
+	respond.JSON(w, http.StatusOK, firewall.LoadDNSConfig(h.DB))
+}
+
+type dnsValidationError string
+
+func (e dnsValidationError) Error() string { return string(e) }
+
+// SaveSandboxDNSConfig validates the entire update before replacing the settings together.
+func SaveSandboxDNSConfig(ctx context.Context, db *database.Database, servers []string, rawSearch string, records []firewall.DNSRecord) error {
 	clean := []string{}
-	for _, s := range req.Servers {
+	for _, s := range servers {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			continue
 		}
 		if net.ParseIP(s) == nil || firewall.ValidateTarget(s) != nil {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"invalid resolver IP: "+s+" (use a specific IPv4 or IPv6 address)", reqID)
-			return
+			return dnsValidationError("invalid resolver IP: " + s + " (use a specific IPv4 or IPv6 address)")
 		}
 		clean = append(clean, s)
 	}
 	if len(clean) > 8 {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max 8 resolvers", reqID)
-		return
+		return dnsValidationError("max 8 resolvers")
 	}
 
 	cleanRecords := []firewall.DNSRecord{}
 	seenHosts := map[string]bool{}
-	for _, rec := range req.Records {
+	for _, rec := range records {
 		host := strings.TrimSpace(rec.Host)
 		ip := strings.TrimSpace(rec.IP)
 		if host == "" && ip == "" {
 			continue
 		}
 		if !validHostnameRe.MatchString(host) {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"invalid hostname: "+host+" (use letters, digits, dots, hyphens)", reqID)
-			return
+			return dnsValidationError("invalid hostname: " + host + " (use letters, digits, dots, hyphens)")
 		}
 		if net.ParseIP(ip) == nil {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"invalid IP for "+host+": "+ip+" (must be a literal IPv4 or IPv6 address)", reqID)
-			return
+			return dnsValidationError("invalid IP for " + host + ": " + ip + " (must be a literal IPv4 or IPv6 address)")
 		}
 		if seenHosts[host] {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION",
-				"duplicate host in records: "+host, reqID)
-			return
+			return dnsValidationError("duplicate host in records: " + host)
 		}
 		seenHosts[host] = true
 		cleanRecords = append(cleanRecords, firewall.DNSRecord{Host: host, IP: ip})
 	}
 	if len(cleanRecords) > 64 {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "max 64 host records", reqID)
-		return
+		return dnsValidationError("max 64 host records")
 	}
 
-	if err := h.DB.SetSystemConfig("dns_servers", strings.Join(clean, ",")); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
-		return
-	}
-	// resolv.conf is rendered as "search %s\n" BEFORE the nameserver lines,
-	// so a newline here injects a line that wins: "corp.local\nnameserver
-	// 203.0.113.9" makes the attacker's resolver primary for every egress
-	// sandbox, persisted in system_config. Servers and record hosts were
-	// already validated; this field only had TrimSpace.
-	search, err := sanitizeDNSSearch(req.Search)
+	search, err := sanitizeDNSSearch(rawSearch)
 	if err != nil {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION",
-			"invalid dns search: "+err.Error(), reqID)
-		return
+		return dnsValidationError("invalid dns search: " + err.Error())
 	}
-	if err := h.DB.SetSystemConfig("dns_search", search); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
-		return
-	}
-	if err := h.DB.SetSystemConfig("dns_records", firewall.SerializeDNSRecords(cleanRecords)); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", err.Error(), reqID)
-		return
-	}
-
-	// ForceRefresh re-renders resolv.conf and hosts immediately; sandboxes
-	// spawned after this point mount the new files. A resolver change also
-	// shifts the compiled policy (resolvers get an explicit allow), so it
-	// publishes a new generation and the warm egress pools are retired for
-	// us. A search-domain- or records-only edit does not move the policy, so
-	// existing warm workers keep the files they were spawned with until they
-	// age out via idle TTL.
-	if h.Manager != nil {
-		h.refreshEnforcement(r)
-	}
-
-	respond.JSON(w, http.StatusOK, firewall.LoadDNSConfig(h.DB))
+	return db.SetSandboxDNSConfig(ctx, strings.Join(clean, ","), search, firewall.SerializeDNSRecords(cleanRecords))
 }
 
 // Resolve handles POST /api/v1/firewall/resolve. Force re-resolve and

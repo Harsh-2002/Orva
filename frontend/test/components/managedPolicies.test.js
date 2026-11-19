@@ -20,10 +20,11 @@ describe('managed policy authoring', () => {
     const page = mount(ManagedPolicyDraft)
     await page.find('input').setValue('reader')
     expect(page.find('textarea').exists()).toBe(false)
-    await page.findAll('button').find((b) => b.text() === 'Review policy').trigger('click')
+    await page.findAll('button').find((b) => b.text() === 'Review and save').trigger('click')
     expect(page.emitted('save')).toBeUndefined()
-    await page.findAll('button').find((b) => b.text() === 'Create reusable policy').trigger('click')
+    await page.findAll('button').find((b) => b.text() === 'Save policy').trigger('click')
     expect(page.emitted('save')[0][0].name).toBe('reader')
+    expect(page.findAll('button').filter((b) => b.text() === 'Create reusable policy')).toHaveLength(0)
     page.unmount()
   })
   it('only maps the inline source into the incumbent editor', () => {
