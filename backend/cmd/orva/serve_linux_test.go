@@ -25,6 +25,8 @@ func TestServeRefusesBeforeOpeningDatabase(t *testing.T) {
 		{"absent", servingmode.Managed},
 		{"absent", ""},
 		{"lock held", servingmode.Legacy},
+		{"portable intent", servingmode.Legacy},
+		{"portable provisioning intent", servingmode.Provisioning},
 	} {
 		t.Run(fmt.Sprintf("layout=%s/env=%q", tc.mode, tc.env), func(t *testing.T) {
 			dir := t.TempDir()
@@ -55,6 +57,15 @@ func TestServeRefusesBeforeOpeningDatabase(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer layout.Close()
+			case "portable intent", "portable provisioning intent":
+				l, err := servingmode.Acquire(dir)
+				mustManagedBoot(t, err)
+				if tc.mode == "portable provisioning intent" {
+					mustManagedBoot(t, l.BeginProvisioning())
+				}
+				_, err = l.BeginPortableRestore(ids.New())
+				mustManagedBoot(t, err)
+				mustManagedBoot(t, l.Close())
 			}
 			if got := runServe(newServeCmd(), nil); got != 78 {
 				t.Fatalf("exit status = %d, want 78", got)

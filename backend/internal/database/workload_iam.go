@@ -18,8 +18,8 @@ import (
 const (
 	// IAMUnboundArtifact is not a worker artifact; it can bind only an empty policy.
 	IAMUnboundArtifact = "iam:unbound"
-	// IAMRestoredUnapprovedArtifact permits retained policy text, never a worker artifact.
-	IAMRestoredUnapprovedArtifact = "iam:restored-unapproved"
+	// IAMRestoredUnapprovedArtifact is a reserved CAS value, never worker approval.
+	IAMRestoredUnapprovedArtifact = "0000000000000000000000000000000000000000000000000000000000000000"
 	IAMAuditRetention             = 32
 )
 
