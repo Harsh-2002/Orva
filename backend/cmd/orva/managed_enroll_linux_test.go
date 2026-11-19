@@ -153,3 +153,46 @@ func TestManagedEnrollDryRun(t *testing.T) {
 		t.Fatal("refused dry run changed data directory")
 	}
 }
+
+func TestManagedEnrollApplyGate(t *testing.T) {
+	dir, first, excluded, hash := enrollmentFixture(t, false)
+	path := filepath.Join(t.TempDir(), "plan.json")
+	enrollmentMust(t, planManagedEnrollment(t.Context(), dir, path, func([]byte) error { return nil }))
+	assertGate := func(exclude []string, want string) {
+		t.Helper()
+		before := enrollmentTreeHash(t, dir)
+		err := withEnrollmentPlan(t.Context(), dir, func(_ string, _ *servingmode.Lock, _ string, p *enrollmentPlan) error {
+			skipped, err := validateEnrollmentApply(path, p, exclude)
+			if err == nil && !skipped[excluded] {
+				t.Fatal("explicit exclusion was lost")
+			}
+			return err
+		})
+		if (want == "" && err != nil) || (want != "" && (err == nil || !strings.Contains(err.Error(), want))) {
+			t.Fatalf("gate error = %v, want %q", err, want)
+		}
+		if before != enrollmentTreeHash(t, dir) {
+			t.Fatal("apply gate changed legacy data directory")
+		}
+	}
+	assertGate(nil, "explicit --exclude")
+	assertGate([]string{ids.New()}, "known function UUID")
+	assertGate([]string{excluded, excluded}, "at most once")
+	assertGate([]string{excluded}, "")
+	cmd := newManagedCmd()
+	cmd.SetArgs([]string{"enroll", "--data-dir", dir, "--apply", "--plan", path})
+	if err := cmd.ExecuteContext(t.Context()); err == nil || !strings.Contains(err.Error(), "--confirm") {
+		t.Fatalf("missing confirmation: %v", err)
+	}
+	db, err := database.New(filepath.Join(dir, "orva.db"))
+	enrollmentMust(t, err)
+	_, err = db.WriteDB().Exec(`UPDATE functions SET description='changed' WHERE id=?`, first)
+	enrollmentMust(t, err)
+	enrollmentMust(t, db.Close())
+	assertGate([]string{excluded}, "plan differs")
+	path = filepath.Join(t.TempDir(), "source-plan.json")
+	enrollmentMust(t, planManagedEnrollment(t.Context(), dir, path, func([]byte) error { return nil }))
+	source := filepath.Join(dir, "functions", first, "versions", hash, "handler.js")
+	enrollmentMust(t, os.WriteFile(source, []byte("exports.handler = () => ({body:'changed'})\n"), 0644))
+	assertGate([]string{excluded}, "plan differs")
+}
