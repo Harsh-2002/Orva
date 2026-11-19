@@ -80,8 +80,11 @@ header, active flag and secret digest must match `workload_inbound_publications`
 which only a managed create/update writes (row triggers clear it on any other
 write, and restore clears it). An unpublished or legacy row is a 404; the
 existing signature verifiers then run, and dispatch requires the current managed
-Factory (`AcceptsManagedVersion`). Republish after restore with `PUT` carrying no
-field changes. Managed MCP/Chat route/webhook tools are not added here.
+Factory (`AcceptsManagedVersion`). The handler re-reads that exact publication (version, owner, format, header,
+active, secret) after acquiring the worker and immediately before dispatch, and
+releases the worker with 404 if it changed. Owner and trigger selectors use the
+one canonical lowercase-UUID validator (`database.ValidExposureUUID`).
+Republish after restore with `PUT` carrying no field changes. Managed MCP/Chat route/webhook tools are not added here.
 
 Inbound ownership is immutable. Create generates a fresh UUID and signature
 secret outside the IAM gate and returns the secret once, preserving the existing

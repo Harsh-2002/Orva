@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
-
-	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 // InboundSecretDigest binds a publication to the exact stored signature secret
@@ -24,29 +22,37 @@ func InboundSecretDigest(secret string) string {
 // secret digest from the managed mutation that published it. Rows written by
 // legacy paths, or preserved by a restore, never match.
 func (db *Database) MatchManagedInbound(ctx context.Context, id string) (*InboundWebhook, error) {
-	if !ids.IsUUID(id) {
-		return nil, nil
+	w, _, err := db.MatchManagedInboundVersion(ctx, id)
+	return w, err
+}
+
+// MatchManagedInboundVersion also returns the exposure version that attested the
+// mapping, so final admission can prove it is still the exact verified publication.
+func (db *Database) MatchManagedInboundVersion(ctx context.Context, id string) (*InboundWebhook, uint64, error) {
+	if !validIAMUUID(id) {
+		return nil, 0, nil
 	}
+	var version uint64
 	var w InboundWebhook
 	var created int64
 	var digest string
-	err := db.read.QueryRowContext(ctx, `SELECT w.id,w.function_id,w.name,w.secret,w.signature_header,w.signature_format,w.active,w.created_at,p.secret_digest
+	err := db.read.QueryRowContext(ctx, `SELECT w.id,w.function_id,w.name,w.secret,w.signature_header,w.signature_format,w.active,w.created_at,p.secret_digest,v.version
  FROM inbound_webhooks AS w
  JOIN workload_exposure_versions AS v ON v.kind='inbound' AND v.key=w.id
  JOIN workload_inbound_publications AS p ON p.id=w.id AND p.version=v.version AND p.function_id=w.function_id
   AND p.signature_format=w.signature_format AND p.signature_header=w.signature_header AND p.active=w.active
- WHERE w.id=?`, id).Scan(&w.ID, &w.FunctionID, &w.Name, &w.Secret, &w.SignatureHeader, &w.SignatureFormat, &w.Active, &created, &digest)
+ WHERE w.id=?`, id).Scan(&w.ID, &w.FunctionID, &w.Name, &w.Secret, &w.SignatureHeader, &w.SignatureFormat, &w.Active, &created, &digest, &version)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, ErrExposureUnavailable
+		return nil, 0, ErrExposureUnavailable
 	}
 	if subtle.ConstantTimeCompare([]byte(digest), []byte(InboundSecretDigest(w.Secret))) != 1 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	w.CreatedAt = time.UnixMilli(created).UTC()
-	return &w, nil
+	return &w, version, nil
 }
 
 // quarantineManagedInboundTx preserves mappings and version high-water marks but

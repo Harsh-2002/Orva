@@ -14,7 +14,6 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
-	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 func HTTPError(w http.ResponseWriter, err error) {
@@ -127,7 +126,7 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 		q, err := managedRouteQuery(r, "kind", "key", "function_id")
 		owner, kind := q.Get("function_id"), q.Get("kind")
 		validKind := (kind == "route" && q.Get("key") != "") || (kind == "inbound" && owner != "")
-		if err != nil || !validKind || (owner != "" && !ids.IsUUID(owner)) || (kind == "inbound" && q.Get("key") != "" && !ids.IsUUID(q.Get("key"))) {
+		if err != nil || !validKind || (owner != "" && !database.ValidExposureUUID(owner)) || (kind == "inbound" && q.Get("key") != "" && !database.ValidExposureUUID(q.Get("key"))) {
 			HTTPError(w, database.ErrExposureInvalid)
 			return
 		}
@@ -185,7 +184,7 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 			return false
 		}
 		for _, k := range keys {
-			if !ids.IsUUID(r.PathValue(k)) {
+			if !database.ValidExposureUUID(r.PathValue(k)) {
 				return false
 			}
 		}

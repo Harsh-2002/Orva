@@ -108,6 +108,28 @@ func TestManagedInboundWebhookHTTP(t *testing.T) {
 	}
 	secret := created.Secret
 
+	// Selectors are canonical lowercase UUIDs only; every other spelling is a 400.
+	upper := strings.ToUpper(owner)
+	noDash := strings.ReplaceAll(owner, "-", "")
+	for _, bad := range []string{upper, noDash, "{" + owner + "}", "urn:uuid:" + owner} {
+		base := "/api/v1/functions/" + bad + "/inbound-webhooks"
+		call("GET", base, read, "", nil, 400)
+		call("POST", base, write, create, nil, 400)
+		call("GET", base+"/"+id, read, "", nil, 400)
+		call("PUT", base+"/"+id, write, `{"version":"1","expected":`+expect+`}`, nil, 400)
+		call("DELETE", base+"/"+id, write, `{"confirm":true,"version":"1","expected":`+expect+`}`, nil, 400)
+		call("GET", "/api/v1/exposures?kind=inbound&function_id="+bad, read, "", nil, 400)
+		call("GET", "/api/v1/exposures?kind=route&key=/x&function_id="+bad, read, "", nil, 400)
+	}
+	for _, bad := range []string{strings.ToUpper(id), strings.ReplaceAll(id, "-", "")} {
+		call("GET", collection+"/"+bad, read, "", nil, 400)
+		call("PUT", collection+"/"+bad, write, `{"version":"1","expected":`+expect+`}`, nil, 400)
+		call("DELETE", collection+"/"+bad, write, `{"confirm":true,"version":"1","expected":`+expect+`}`, nil, 400)
+		call("GET", "/api/v1/exposures?kind=inbound&function_id="+owner+"&key="+bad, read, "", nil, 400)
+	}
+	upperExpect := fmt.Sprintf(`{"%s":{"policy_revision":"1","authority_epoch":"1"}}`, upper)
+	call("POST", collection, write, `{"name":"x","version":"0","expected":`+upperExpect+`}`, nil, 400)
+
 	// Reads never return the secret and report publication.
 	for _, path := range []string{collection, collection + "/" + id, "/api/v1/exposures?kind=inbound&key=" + id + "&function_id=" + owner} {
 		w = call("GET", path, read, "", nil, 200)

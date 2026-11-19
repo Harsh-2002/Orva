@@ -68,6 +68,10 @@ type ExposurePlan struct {
 	after   *InboundWebhook
 }
 
+// ValidExposureUUID is the single selector validator for owners and triggers:
+// canonical lowercase RFC 4122 form only, matching the stored identifiers.
+func ValidExposureUUID(id string) bool { return validIAMUUID(id) }
+
 func exposureKind(op string) string {
 	if strings.HasPrefix(op, "route_") {
 		return "route"

@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -63,6 +64,26 @@ type InboundTriggerHandler struct {
 	PublishEvent func(eventType string, data any)
 }
 
+// InboundFinalAdmissionTestHook is a test-only seam run between managed lookup
+// and the final publication recheck. Production leaves it nil.
+var InboundFinalAdmissionTestHook func(hookID string)
+
+// finalAdmission re-reads the managed publication and requires it to equal the
+// snapshot whose signature was verified: same exposure version, owner, format,
+// header, active flag and secret. It returns a zero status when still admitted.
+func (h *InboundTriggerHandler) finalAdmission(ctx context.Context, verified *database.InboundWebhook, version uint64) (int, string, string) {
+	current, currentVersion, err := h.DB.MatchManagedInboundVersion(ctx, verified.ID)
+	if err != nil {
+		return http.StatusServiceUnavailable, "UNAVAILABLE", "inbound webhook lookup unavailable"
+	}
+	if current == nil || currentVersion != version || current.FunctionID != verified.FunctionID ||
+		current.SignatureFormat != verified.SignatureFormat || current.SignatureHeader != verified.SignatureHeader ||
+		current.Active != verified.Active || subtle.ConstantTimeCompare([]byte(current.Secret), []byte(verified.Secret)) != 1 {
+		return http.StatusNotFound, "NOT_FOUND", "inbound webhook not found"
+	}
+	return 0, "", ""
+}
+
 // ServeHTTP routes /webhook/{id} → function. The path is fixed:
 // /webhook/iwh_xxxxxxxxxxxx with no sub-paths.
 func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -82,9 +103,10 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	var hook *database.InboundWebhook
+	var publishedVersion uint64
 	var err error
 	if h.Managed {
-		hook, err = h.DB.MatchManagedInbound(r.Context(), id)
+		hook, publishedVersion, err = h.DB.MatchManagedInboundVersion(r.Context(), id)
 		if errors.Is(err, database.ErrExposureUnavailable) {
 			respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "inbound webhook lookup unavailable", reqID)
 			return
@@ -228,6 +250,19 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt, 0)
 	defer releaseExecution()
 	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, 0, startedAt))
+	if h.Managed {
+		// The publication that verified this signature must still be the exact
+		// one at final admission; a disable, delete, raw edit or restore that
+		// committed after lookup must not run user code. The worker is released
+		// unused. A commit after this read is concurrent with dispatch itself.
+		if InboundFinalAdmissionTestHook != nil {
+			InboundFinalAdmissionTestHook(hook.ID)
+		}
+		if status, code, msg := h.finalAdmission(ctx, hook, publishedVersion); status != 0 {
+			respond.Error(w, status, code, msg, reqID)
+			return
+		}
+	}
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(startedAt).Milliseconds()
 	stderr = executionlogs.Process(h.DB, stderr, fn.ID, execID, traceID, spanID)

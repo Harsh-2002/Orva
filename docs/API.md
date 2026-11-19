@@ -1227,7 +1227,8 @@ live READ. Normal serving is unchanged. Managed MCP/Chat route and webhook
 tools are not part of this slice.
 
 Inbound webhooks use `/api/v1/functions/{fn_id}/inbound-webhooks` with exact
-owner and trigger UUIDs (names are rejected with `400 VALIDATION`):
+canonical lowercase owner and trigger UUIDs (names and any other UUID spelling,
+such as uppercase, braces or no hyphens, are rejected with `400 VALIDATION`):
 `GET` lists one owner's triggers plus its `expected` tokens (secret-free, each
 with `version` and `published`); `GET .../{id}` returns `inbound_webhook`,
 `published`, `version` and `expected`; `POST`, `PUT` and `DELETE` use the staged
@@ -1243,7 +1244,11 @@ restored rows return `404 NOT_FOUND`; a published but disabled trigger returns
 `hmac_sha256_base64`, `github`, `stripe`, `slack`); a mismatch is
 `401 SIGNATURE_INVALID` and no function runs. A verified request runs only on the
 current managed Factory generation (the same pool, SDK policy and function
-status checks as `/fn/`), and never reaches a legacy fallback. `405` for
+status checks as `/fn/`), and never reaches a legacy fallback. After the worker
+is acquired and immediately before dispatch the exact publication that verified
+the signature (version, owner, format, header, active flag, secret) is read again;
+if it changed the worker is released unused and the request returns `404`. A
+commit landing after that read is concurrent with dispatch itself. `405` for
 non-POST. Secrets appear only in the create response.
 
 Custom invocation resolves one published mapping: exact path, then longest

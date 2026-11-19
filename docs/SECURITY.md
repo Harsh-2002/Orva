@@ -1148,7 +1148,10 @@ dispatches only a row whose publication matches its exposure version, owner,
 signature format and header, active flag and the SHA-256 of its stored secret;
 triggers on any non-managed write (insert or update) delete the publication, so
 legacy, raw-edited and restored rows return 404 until a managed `PUT` republishes
-them. Signature failure runs no code and logs only the failure reason. Secrets are
+them. Signature failure runs no code and logs only the failure reason. The verified
+publication is re-read after worker acquisition and just before dispatch; a
+disable, delete, raw edit or restore that committed in between refuses the request
+with 404 and releases the worker unused. Secrets are
 returned once on create and never logged.
 Managed restore removes route and webhook publications in the durable quarantine
 transaction before admission opens; a backed-up grant is not a fresh decision

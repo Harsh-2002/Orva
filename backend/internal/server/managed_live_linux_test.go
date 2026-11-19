@@ -28,6 +28,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	"github.com/Harsh-2002/Orva/backend/internal/testutil/iamruntime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadrecovery"
@@ -400,6 +401,45 @@ func TestManagedServingLive(t *testing.T) {
 		}
 		if current := inspectHook(t, hookID); !current.Published || current.Version != "1" {
 			t.Fatal("published webhook not observed through inspection")
+		}
+	})
+	t.Run("inbound-webhook-final-admission", func(t *testing.T) {
+		fresh := inspectHook(t, "")
+		var created struct {
+			Webhook struct {
+				ID string `json:"id"`
+			} `json:"inbound_webhook"`
+			Secret string `json:"secret"`
+		}
+		managedMust(t, json.Unmarshal(call(t, http.MethodPost, hookCollection,
+			map[string]any{"name": "final admission", "version": fresh.Version, "expected": fresh.Expected}, 201), &created))
+		id, secret := created.Webhook.ID, created.Secret
+		if got := webhookPost(t, id, `{"event":"ok"}`, secret, 200); got != "allowed:changed" {
+			t.Fatalf("control request did not run: %q", got)
+		}
+		// An unpublishing commit lands after lookup and signature verification and
+		// after the worker is acquired, but before dispatch: user code must not run.
+		handlers.InboundFinalAdmissionTestHook = func(hookID string) {
+			if hookID == id {
+				_, err := db.WriteDB().Exec(`UPDATE inbound_webhooks SET active=0 WHERE id=?`, id)
+				managedMust(t, err)
+			}
+		}
+		t.Cleanup(func() { handlers.InboundFinalAdmissionTestHook = nil })
+		if got := webhookPost(t, id, `{"event":"raced"}`, secret, 404); strings.Contains(got, "allowed") {
+			t.Fatalf("raced webhook executed: %q", got)
+		}
+		handlers.InboundFinalAdmissionTestHook = nil
+		// The released worker and execution slot are reusable; the mapping stays unpublished.
+		webhookPost(t, id, `{"event":"after"}`, secret, 404)
+		state := inspectHook(t, id)
+		if state.Published || state.Version != "1" {
+			t.Fatal("raw edit did not leave an unpublished mapping at its CAS version")
+		}
+		call(t, http.MethodDelete, hookCollection+"/"+id,
+			map[string]any{"confirm": true, "version": state.Version, "expected": state.Expected}, 200)
+		if got := webhookPost(t, hookID, `{"event":"still"}`, hookSecret, 200); got != "allowed:changed" {
+			t.Fatalf("unrelated published webhook stopped serving: %q", got)
 		}
 	})
 	if !t.Run("restore-archive", func(t *testing.T) {

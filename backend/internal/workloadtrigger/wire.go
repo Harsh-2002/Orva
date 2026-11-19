@@ -9,7 +9,6 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
-	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
 const MaxRequestBytes = 32 << 10
@@ -65,7 +64,7 @@ func decodeInspect(raw []byte) (kind, key, owner string, err error) {
 			return
 		}
 	}
-	if (kind != "route" && kind != "inbound") || (owner != "" && !ids.IsUUID(owner)) || (kind == "inbound" && owner == "") {
+	if (kind != "route" && kind != "inbound") || (owner != "" && !database.ValidExposureUUID(owner)) || (kind == "inbound" && owner == "") {
 		err = database.ErrExposureInvalid
 	}
 	return
@@ -111,7 +110,7 @@ func Decode(op string, raw []byte) (database.ExposureMutation, error) {
 	c.Expected = map[string]database.ExposureOwnerExpected{}
 	for id, raw := range owners {
 		f, e := object(raw)
-		if e != nil || !ids.IsUUID(id) || !fields(f, "policy_revision authority_epoch", "") {
+		if e != nil || !database.ValidExposureUUID(id) || !fields(f, "policy_revision authority_epoch", "") {
 			return c, database.ErrExposureInvalid
 		}
 		r, e := decimal(f["policy_revision"], false)

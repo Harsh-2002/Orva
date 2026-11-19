@@ -282,3 +282,24 @@ func TestExposureServiceConcurrentReentry(t *testing.T) {
 		t.Fatal("reentrant mutation absent", err)
 	}
 }
+
+func TestSelectorsRequireCanonicalUUIDs(t *testing.T) {
+	owner := ids.New()
+	upper := strings.ToUpper(owner)
+	for _, raw := range []string{
+		`{"kind":"inbound","function_id":"` + upper + `"}`,
+		`{"kind":"inbound","function_id":"` + strings.ReplaceAll(owner, "-", "") + `"}`,
+		`{"kind":"route","key":"/x","function_id":"` + upper + `"}`,
+	} {
+		if _, _, _, err := decodeInspect([]byte(raw)); !errors.Is(err, database.ErrExposureInvalid) {
+			t.Fatalf("%s: non-canonical selector accepted: %v", raw, err)
+		}
+	}
+	if _, _, _, err := decodeInspect([]byte(`{"kind":"inbound","function_id":"` + owner + `"}`)); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"n","function_id":"` + owner + `","version":"0","expected":{"` + upper + `":{"policy_revision":"1","authority_epoch":"1"}}}`
+	if _, err := Decode("inbound_create", []byte(body)); !errors.Is(err, database.ErrExposureInvalid) {
+		t.Fatalf("non-canonical expected owner accepted: %v", err)
+	}
+}
