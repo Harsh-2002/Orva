@@ -396,6 +396,25 @@ describe('FunctionPermissions draft and save', () => {
     expect(w.emitted('save')).toBeUndefined()
   })
 
+  it('each action row is one full-row target that reports its selected state', async () => {
+    const w = make({ snapshot: emptySnap() })
+    await click(w, 'Create policy')
+    await pick(w, 'Storage')
+    await nextStep(w)
+    const row = w.findAll('label').find((l) => l.text().includes('Compare and set'))
+    expect(row.element.tagName).toBe('LABEL')
+    const box = row.find('input[type="checkbox"]')
+    expect(box.attributes('aria-label')).toBe('Compare and set')
+    expect(row.classes()).not.toContain('border-primary')
+    await box.setValue(true)
+    expect(box.element.checked).toBe(true)
+    expect(row.classes()).toContain('border-primary')
+    // The whole row is the click target, not just the box.
+    await row.trigger('click')
+    expect(box.element.checked).toBe(false)
+    expect(row.classes()).not.toContain('border-primary')
+  })
+
   it('an incomplete step keeps Next disabled and says what is missing, with no change', async () => {
     const w = make()
     await enterEdit(w)

@@ -90,12 +90,13 @@
         <label
           v-for="id in g.ids"
           :key="id"
-          :class="[ROW, 'border-transparent', blocked(id) ? 'opacity-60' : 'hover:bg-surface-hover']"
+          :class="[ROW, form.actions.includes(id) ? 'border-primary bg-surface-hover' : 'border-transparent', !form.actions.includes(id) && blocked(id) ? 'opacity-60' : '', !form.actions.includes(id) && !blocked(id) ? 'hover:bg-surface-hover' : '']"
         >
           <input
             type="checkbox"
             :checked="form.actions.includes(id)"
             :disabled="blocked(id)"
+            :aria-label="ACTION_LABELS[id]"
             :class="INPUT"
             @change="toggle(id)"
           >
