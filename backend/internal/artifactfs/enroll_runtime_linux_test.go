@@ -1,10 +1,54 @@
 package artifactfs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestInitialRuntimeReusesUnrecordedSeal(t *testing.T) {
+	limits := testLimits()
+	limits.Generations, limits.Staging = 1, 1
+	store, err := NewPersistent(t.TempDir(), limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	src := t.TempDir()
+	bin := filepath.Join(src, "bin")
+	if err := os.WriteFile(bin, []byte("runtime"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	check := func(path string) error {
+		if path == "" || path == src {
+			t.Fatalf("validated mutable source instead of store: %q", path)
+		}
+		return nil
+	}
+	seal := func() (Identity, error) {
+		return importInstalledRuntime(t.Context(), store, "node", src, checkInitialRuntimeEntry, check)
+	}
+	first, err := seal()
+	if err != nil || first.Generation == "" {
+		t.Fatalf("initial seal: %v, %v", first, err)
+	}
+	if again, err := seal(); err != nil || first != again {
+		t.Fatalf("retry at capacity selected %v, %v; want %v", again, err, first)
+	}
+	if err := os.WriteFile(bin, []byte("changed"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seal(); !errors.Is(err, ErrCapacity) {
+		t.Fatalf("different source reused the old seal: %v", err)
+	}
+	if err := os.Chmod(bin, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seal(); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("writable runtime accepted: %v", err)
+	}
+}
 
 func TestEnrollmentRuntimeCopy(t *testing.T) {
 	base := newStore(t, testLimits())

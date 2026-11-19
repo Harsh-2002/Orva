@@ -71,7 +71,7 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 	db, _, err := recovery.StartBound(ctx, ownerID, func(ctx context.Context, db *database.Database) error {
 		return db.InitManagedServingSchemas(ctx)
 	}, func(ctx context.Context, db *database.Database) error {
-		runtimes, err := managedRuntimeSelections(ctx, in, db)
+		runtimes, err := managedRuntimeSelections(ctx, in, db, initialRuntimeSealer(in.Artifacts))
 		if err != nil {
 			return err
 		}
@@ -103,12 +103,30 @@ func (s *ManagedInstance) Close(ctx context.Context) error {
 	return errors.Join(err, s.coordinator.Close())
 }
 
-func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *database.Database) (map[sandbox.Language]string, error) {
+type runtimeSealer func(context.Context, sandbox.Language, string) (string, error)
+
+func initialRuntimeSealer(owner *artifactfs.Owner) runtimeSealer {
+	var store *artifactfs.Store
+	return func(ctx context.Context, lang sandbox.Language, tree string) (string, error) {
+		if store == nil {
+			bindings, err := owner.Bindings(ctx)
+			if err != nil {
+				return "", err
+			}
+			store = bindings.Runtime
+		}
+		id, err := artifactfs.SealInitialRuntime(ctx, store, string(lang), tree, func(root string) error {
+			return sandbox.CheckManagedRuntime(root, lang)
+		})
+		return id.Generation, err
+	}
+}
+
+func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *database.Database, seal runtimeSealer) (map[sandbox.Language]string, error) {
 	recorded, err := db.LegacyEnrollmentRuntimes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var store *artifactfs.Store
 	sealed := make(map[string]string, 2)
 	for _, lang := range []sandbox.Language{sandbox.Node, sandbox.Python} {
 		if in.RootfsDir == "" || recorded[string(lang)] != "" || in.RuntimeGenerations[lang] != "" {
@@ -123,20 +141,11 @@ func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *databa
 		} else if err != nil {
 			return nil, err
 		}
-		if store == nil {
-			bindings, err := in.Artifacts.Bindings(ctx)
-			if err != nil {
-				return nil, err
-			}
-			store = bindings.Runtime
-		}
-		id, err := artifactfs.SealInitialRuntime(ctx, store, string(lang), tree, func(root string) error {
-			return sandbox.CheckManagedRuntime(root, lang)
-		})
+		generation, err := seal(ctx, lang, tree)
 		if err != nil {
 			return nil, fmt.Errorf("seal installed %s runtime: %w", lang, err)
 		}
-		sealed[string(lang)] = id.Generation
+		sealed[string(lang)] = generation
 	}
 	if len(sealed) != 0 {
 		if err := db.RecordManagedRuntimeGenerations(ctx, sealed); err != nil {
