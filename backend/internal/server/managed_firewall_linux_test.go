@@ -3,15 +3,159 @@
 package server
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
+	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/secrets"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadspawn"
+	"github.com/Harsh-2002/Orva/internal/ids"
 )
+
+func TestManagedFirewallPublicationPreservesInstalledFactories(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	ctx := t.Context()
+	limits := artifactfs.Limits{Generations: 4, Leases: 8, Staging: 1, Entries: 8,
+		PathBytes: 256, LinkBytes: 256, Bytes: 8192, FileBytes: 1024, ManifestBytes: 8192}
+	store, err := artifactfs.New(t.TempDir(), limits)
+	managedMust(t, err)
+	t.Cleanup(func() { managedMust(t, store.Close()) })
+	runtime := sealFirewallFixture(t, store, limits, artifactfs.KindRuntime, "node", "runtime")
+	fw := firewall.NewManager(f.db, t.TempDir())
+	r := managedRuntime{hub: f.runtime.hub, pool: pool.NewManager(
+		pool.ManagerConfig{ManagedAuthority: f.authority},
+		pool.SandboxTemplate{ManagedSpawnReady: func() bool { return false }, EgressPolicy: fw.EgressPolicy}, f.db, f.reg, nil)}
+	defer func() { managedMust(t, r.pool.Shutdown(context.Background())) }()
+	factories := make(map[string]*workloadspawn.Factory)
+	for _, mode := range []string{"none", "egress"} {
+		owner := ids.New()
+		code := sealFirewallFixture(t, store, limits, artifactfs.KindCode, owner, "handler.js")
+		factory, err := workloadspawn.NewFactory(ctx, &secrets.PreparedArtifactSnapshot{
+			Function: &database.Function{ID: owner, Name: mode, Runtime: "node", Entrypoint: "handler.js",
+				NetworkMode: mode, Version: 1, Status: "active", CodeHash: strings.Repeat("a", 64),
+				MemoryMB: 64, CPUs: 1, TimeoutMS: 1000, AuthMode: "none", ConcurrencyPolicy: "queue"},
+			Artifact: database.WorkloadArtifactRecord{OwnerID: owner, Generation: ids.New(), Revision: 1, Epoch: 1},
+		}, store, code, store, runtime, workloadspawn.FactoryLimits{
+			MaxPreparedPlans: 1, MaxPreparedBytes: 1 << 20, MaxSnapshotBytes: 1 << 20,
+		})
+		managedMust(t, err)
+		t.Cleanup(factory.Close)
+		managedMust(t, r.pool.InstallFactory(ctx, factory))
+		factories[mode] = factory
+	}
+	assertInstalled := func() {
+		t.Helper()
+		for mode, factory := range factories {
+			owner := factory.Owner()
+			if r.pool.CurrentFactory(owner) != factory || factory.Retired() ||
+				r.pool.CurrentArtifact(owner) != factory.ArtifactRevision() {
+				t.Fatalf("firewall publication changed the installed %s Factory", mode)
+			}
+		}
+	}
+
+	r.startFirewall(ctx, fw)
+	defer func() { managedMust(t, fw.Stop(context.Background())) }()
+	_, initial, err := fw.EgressPolicy()
+	managedMust(t, err)
+	assertInstalled()
+
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	rec := &firewallEventRecorder{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{}, 2)}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.runtime.hub.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(requestCtx, http.MethodGet, "/api/v1/events", nil))
+	}()
+	defer func() { cancel(); <-done }()
+	for f.runtime.hub.SubscriberCount() == 0 {
+		select {
+		case <-requestCtx.Done():
+			t.Fatal("event subscriber did not start")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	_, err = f.db.InsertCustomBlocklistRule("cidr", "192.0.2.77/32", "fixture", true)
+	managedMust(t, err)
+	managedMust(t, fw.ForceRefresh())
+	_, updated, err := fw.EgressPolicy()
+	managedMust(t, err)
+	if initial == "" || updated == "" || updated == initial {
+		t.Fatalf("expected a new compiled generation, got %q → %q", initial, updated)
+	}
+	assertInstalled()
+	for range 2 {
+		select {
+		case <-rec.flushed:
+		case <-requestCtx.Done():
+			t.Fatal("expected firewall.policy_applied event")
+		}
+	}
+	cancel()
+	<-done
+	want := fmt.Sprintf("event: firewall.policy_applied\ndata: {\"generation\":%q,\"retired_pools\":1}\n\n", updated)
+	if !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("expected one egress rotation and no offline rotation, got %q", rec.Body.String())
+	}
+}
+
+type firewallEventRecorder struct {
+	*httptest.ResponseRecorder
+	flushed chan struct{}
+}
+
+func (r *firewallEventRecorder) Flush() {
+	r.ResponseRecorder.Flush()
+	select {
+	case r.flushed <- struct{}{}:
+	default:
+	}
+}
+
+func sealFirewallFixture(t *testing.T, store *artifactfs.Store, limits artifactfs.Limits, kind artifactfs.Kind, owner, filename string) string {
+	t.Helper()
+	stage, err := store.Begin(t.Context(), 1024)
+	managedMust(t, err)
+	var generation string
+	t.Cleanup(func() {
+		if generation == "" {
+			managedMust(t, stage.Abort())
+			return
+		}
+		managedMust(t, store.Retire(generation))
+		managedMust(t, store.Reclaim(generation))
+	})
+	root, err := stage.Path()
+	managedMust(t, err)
+	body := []byte("fixture only")
+	managedMust(t, os.Chmod(root, 0700))
+	managedMust(t, os.WriteFile(filepath.Join(root, filename), body, 0600))
+	uid, gid := uint32(os.Geteuid()), uint32(os.Getegid())
+	manifest := artifactfs.Manifest{Version: 1, Entries: []artifactfs.Entry{
+		{Path: ".", Type: artifactfs.TypeDirectory, Mode: 0700, UID: uid, GID: gid},
+		{Path: filename, Type: artifactfs.TypeFile, Mode: 0600, UID: uid, GID: gid,
+			Size: int64(len(body)), SHA256: fmt.Sprintf("%x", sha256.Sum256(body))},
+	}}
+	digest, err := artifactfs.Digest(manifest, limits)
+	managedMust(t, err)
+	generation, err = stage.Seal(t.Context(), kind, owner, manifest, digest)
+	managedMust(t, err)
+	return generation
+}
 
 // newManagedFirewallFixture rebuilds the fixture's router over the same
 // database with a real egress manager wired in. newManagedOpsFixture's tune

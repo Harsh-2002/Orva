@@ -31,9 +31,9 @@ unreleased range, and the sections below as the record for everything before it.
 ### Fixed
 
 - Managed mode now applies the egress policy to function workers; egress
-  functions previously could not start. Rule changes publish a new generation
-  and retire warm egress pools, and the dashboard's Egress page is mounted
-  (admin) instead of returning 404.
+  functions previously could not start. Policy changes rotate warm egress
+  workers without uninstalling the function or changing its IAM state.
+  The dashboard's Egress page is available to administrators.
 
 ### Managed operator parity
 

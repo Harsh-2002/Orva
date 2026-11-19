@@ -81,8 +81,7 @@ type SandboxTemplate struct {
 	// aborts the spawn: NSTUN allows anything no rule matches, so a worker
 	// started without a policy would be entirely unfiltered.
 	//
-	// nil means no policy layer is wired (unit tests), in which case egress
-	// spawns proceed without a policy exactly as they did before this existed.
+	// Managed egress requires a non-nil accessor.
 	EgressPolicy func() (path, gen string, err error)
 
 	// Metrics, when non-nil, receives sandbox spawn-duration samples on
@@ -250,23 +249,13 @@ func (m *Manager) SetEgressPolicy(fn func() (string, string, error)) {
 // generation is published.
 //
 // NSTUN loads its rules once at worker start, so an already-warm worker keeps
-// the policy it was spawned with. That makes a policy change exactly the class
-// of change retirePool exists for — the same one a network_mode flip uses —
-// so this reuses that single primitive rather than adding a second
-// worker-lifecycle mechanism with its own lock ordering.
+// the policy it was spawned with. Managed worker pools rotate without
+// retiring their installed Factories.
 func (m *Manager) RetireEgressPools() int {
-	var fnIDs []string
 	if m.managed != nil {
-		for id, g := range m.managed.current.Load().generations {
-			if g.factory.Resources().NetworkMode == "egress" {
-				fnIDs = append(fnIDs, id)
-			}
-		}
-		for _, id := range fnIDs {
-			m.retirePool(id)
-		}
-		return len(fnIDs)
+		return m.rotateManagedEgressPools()
 	}
+	var fnIDs []string
 	m.pools.Range(func(k, _ any) bool {
 		id, ok := k.(string)
 		if !ok {
@@ -807,7 +796,7 @@ func (m *Manager) PrewarmAll(ctx context.Context) {
 func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	if m.managed != nil {
 		if g := m.managed.current.Load().generations[fnID]; g != nil && g.active.Load() && !m.closing.Load() {
-			return g.pool, nil
+			return g.pool.Load(), nil
 		}
 		return nil, ErrNoFunction
 	}
@@ -943,10 +932,11 @@ func (m *Manager) makePool(fn *database.Function, generation *managedGeneration)
 		spawnErrorCh: make(chan struct{}),
 		concSem:      concSem,
 		concPolicy:   concPolicy,
-		spawnFn: func(ctx context.Context) (*sandbox.Worker, error) {
-			if generation != nil {
-				return m.spawnManaged(ctx, generation)
-			}
+	}
+	if generation != nil {
+		p.spawnFn = func(ctx context.Context) (*sandbox.Worker, error) { return m.spawnManaged(ctx, p) }
+	} else {
+		p.spawnFn = func(ctx context.Context) (*sandbox.Worker, error) {
 			// Merge env at spawn time: function config + decrypted secrets.
 			// We read the lookup off m (not the local tmpl copy) so that
 			// SetSecretsLookup is visible to existing pools too. Secrets
@@ -1032,7 +1022,7 @@ func (m *Manager) makePool(fn *database.Function, generation *managedGeneration)
 				m.tmpl.Metrics.RecordSpawnDuration(time.Since(start))
 			}
 			return w, nil
-		},
+		}
 	}
 	p.dynamicMax.Store(int64(initialMax))
 	if m.scaler != nil {

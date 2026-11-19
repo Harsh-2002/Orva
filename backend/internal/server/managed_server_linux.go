@@ -139,9 +139,10 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	// Operators replay captured requests; without this the capture toggle is never read.
 	proxy.LoadCaptureConfig(db)
 	spawnReady := &atomic.Bool{}
+	fw := firewall.NewManager(db, in.dataDir)
 	runtime := newManagedRuntime(db, reg, authority, sm, pool.SandboxTemplate{
 		DataDir: in.dataDir, NsjailBin: in.nsjail, DefaultSeccomp: "default", ManagedDomain: assets.Domain,
-		ManagedSpawnReady: spawnReady.Load,
+		ManagedSpawnReady: spawnReady.Load, EgressPolicy: fw.EgressPolicy,
 	}, sandbox.NewLimiter(8))
 	defer func() {
 		if err != nil {
@@ -193,22 +194,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	}))
 	b.NsjailBin, b.DataDir = in.nsjail, in.dataDir
 	b.DB = db
-	fw := firewall.NewManager(db, in.dataDir)
 	b.SetEgressPolicy(fw.EgressPolicy)
-	// Every managed egress spawn resolves its policy from this same manager.
-	// Without this source the pool refuses each egress spawn with
-	// ErrEgressPolicyMissing, so the operator's rules would never be in force.
-	runtime.pool.SetEgressPolicy(fw.EgressPolicy)
-	// NSTUN loads its rules once at worker start, so a new generation only
-	// reaches warm managed workers when their egress pools are retired.
-	fw.SetOnPolicyChange(func(gen string) {
-		retired := runtime.pool.RetireEgressPools()
-		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
-		runtime.hub.Publish("firewall.policy_applied", map[string]any{
-			"generation":    gen,
-			"retired_pools": retired,
-		})
-	})
 	publication, err := builder.NewPublicationQueue(b, db, reg, authority, runtime.pool, sm, assets.Code, assets.Runtime)
 	if err != nil {
 		return nil, err
@@ -257,6 +243,10 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	done := make(chan error, 1)
 	buildServicesDone := make(chan struct{})
 	ready := make(chan struct{})
+	runtime.startFirewall(runCtx, fw)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	spawnReady.Store(true)
 	go func() { done <- runtime.scheduler.RunManagedReady(runCtx, ready); close(done) }()
 	select {
@@ -267,7 +257,6 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 		return nil, err
 	case <-ready:
-		fw.Start(runCtx)
 		gc := builder.NewBuildCacheGC(in.dataDir, db)
 		gc.FnLock = runtime.pool.FunctionLock
 		go func() {
@@ -278,6 +267,19 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	}
 	return &managedServer{handler: handler, runtime: runtime, publication: publication, output: output,
 		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat, firewall: fw, buildServicesDone: buildServicesDone}, nil
+}
+
+func (r *managedRuntime) startFirewall(ctx context.Context, fw *firewall.Manager) {
+	// No workers can start yet, so the first compile needs no rotation.
+	fw.Start(ctx)
+	fw.SetOnPolicyChange(func(gen string) {
+		retired := r.pool.RetireEgressPools()
+		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
+		r.hub.Publish("firewall.policy_applied", map[string]any{
+			"generation":    gen,
+			"retired_pools": retired,
+		})
+	})
 }
 
 func (s *managedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
