@@ -94,7 +94,9 @@ digest can substitute for a lease. Acquisition is **not** atomic across the two
 stores and does not prove current function/artifact generation or IAM approval.
 Future publication must revalidate its own authoritative generation under its
 ordered locks. Run preparation and cleanup outside IAM/pool locks. The package
-starts no goroutines, timers, retries or background processes.
+starts no goroutines, timers, retries or background processes through these store
+APIs. The separate lifecycle owner synchronously invokes workloadfence's bounded
+drain polling; it installs no background recovery or retry loop.
 
 `PreparedPaths.Transfer()` atomically consumes a pair and all copied handles,
 returning a new owner. Old handles expose empty paths/identities, cannot transfer
@@ -229,6 +231,10 @@ No real-sandbox, full-suite, release or live-IAM acceptance follows from these
 checks.
 
 ## Explicit persistent foundation (not serving recovery)
+
+The separate internal [one-instance owner](OWNER.md) binds both persistent stores
+and enables narrowly proof-gated same-boot committed-asset recovery. It does not
+change these unbound constructors or make their inspection records authoritative.
 
 `NewPersistent(root, limits)` initializes **only an empty root**, under the same
 private-directory/exclusive-writer contract and nonblocking exclusive `flock`.

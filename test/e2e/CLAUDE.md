@@ -91,7 +91,8 @@ a capability is missing (e.g. nsjail unavailable → deploy/invoke can't run).
 
 ## Validating results
 
-- **Exit code:** `run.py` returns non-zero if any module FAILed.
+- **Exit code:** `run.py` returns non-zero if any module FAILed. With
+  `ORVA_REQUIRE_SANDBOX=1`, a whole-module skip also fails the run.
 - **`CHECKLIST.md`:** per-module ✅/❌/⚠️ + check counts + the target it ran against.
 - A module is **PASS** only if every `check()` in it passed.
 

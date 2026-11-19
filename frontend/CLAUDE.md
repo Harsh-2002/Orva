@@ -38,6 +38,7 @@ change.
 | `src/api/client.js` | Axios instance; injects `X-Orva-API-Key`, and dispatches an `orva:unauthorized` window event on any 401 — `App.vue` listens and redirects to sign-in, because an expired session used to leave every list silently blank |
 | `src/api/endpoints.js` | Every API helper function (one per endpoint) |
 | `src/router/` | Vue Router route table |
+| `src/components/layout/Sidebar.vue` | Same flat, task-ordered navigation on desktop and mobile; managed Policies follows Functions. The mobile drawer scrolls, closes on selection, and is excluded from keyboard navigation while closed. |
 | `src/stores/auth.js` | Auth state + login/logout |
 | `src/stores/confirm.js` | Global confirmation modal store |
 | `src/stores/events.js` | Persistent SSE connection to `/api/v1/events` |
@@ -45,6 +46,11 @@ change.
 | `src/views/AI.vue` + `src/components/ai/*` | Native Vue agentic chat UI; talks to `/api/v1/ai/*`. Components: `ConversationRail`, `ChatHeader`, `EmptyState` (greeting + click-to-fill starter prompts), `Composer` (textarea + `ReasoningMenu` + `ModelMenu` + Send/Stop), `MessageList`, `Message`, `MessagePart` (markdown-it + fenced → `CodeBlock`, thinking → `ThinkingBlock`), `ToolCallCard`, `TypingIndicator`, `ScrollToBottom`, `ErrorCard`, `AISettingsPanel`. AI **configuration** (providers, keys, defaults) is centralized on the Settings page via `AISettingsPanel` (rendered in `Settings.vue`'s "AI assistant" card, anchor `#ai`); the chat's gear + no-provider banner deep-link there (`router.push({name:'settings', hash:'#ai'})`). Settings and the chat composer share the active provider/model selection, persisted server-side via `PUT /api/v1/ai/selection`; reasoning remains available in the composer. |
 | `src/stores/system.js` | System info (version, runtime stats) |
 | `src/views/Editor.vue` | Function editor + a one-line result strip (Run, status, duration, one log line, suggest-fix, link to the workbench). Builds are headless: Deploy carries its own progress, the strip shows the newest build line plus `View log`, and the build-log Modal is raised only by a failure or on demand |
+| `src/views/FunctionPermissions.vue` + `src/components/permissions/*` | Staged dedicated permissions page: current access first, explicit Edit/Create, guided service/actions/resources/review, then final changes review before Save. JSON is read-only under Advanced. Owns an independent draft; no route or production API wiring yet. Preview never widens capabilities or applies permissions. |
+| `src/utils/permissionsModel.js` | Advisory policy validation and owned view-model adapter. Host metadata is separate from authorable policy; revisions stay decimal strings. Server authorization remains authoritative. |
+| `src/composables/usePermissions.js` + `src/api/permissions.js` | Real request controller and strict UI-to-wire adapter, exercised by live scratch pooled KV and buffered-call workflows. Correlates owner-scoped responses and preserves acknowledgement/error ordering; production routing remains unregistered. |
+| `src/views/IAMPolicies.vue`, `IAMPolicyDetail.vue`, `FunctionPermissionSources.vue` | Managed-only named-policy management and source-aware function permissions. Effective access precedes separate inline editing; versions stay pinned until reviewed rollout. Conflicts invalidate authority freshness without discarding the draft. The dashboard links and routes require authenticated `/api/v1/iam/capabilities` with `managed: true`; disabled or absent responses deny navigation. |
+| `src/components/permissions/EffectiveAccess.vue` + `src/composables/useIAMResource.js` | Human-readable effective/stored/stale authority and owner-correlated request lanes. Source invalidation never aborts its own mutation; only an authoritative current response restores freshness. The inline-only presentation is explicitly scoped and never receives the effective union as its draft. |
 | `src/utils/rowNav.js` | Whole-row navigation for lists: `rowNav(router, to)` / `rowAction(fn)` run on a row click unless it starts in a control (decided from `composedPath()`, not `target.closest`, because a control that re-renders on click - the copy button swaps its icon - is already detached when the event reaches the row), a text selection exists, or it is not the primary button. The name stays a real `<router-link>`/`<button>` so keyboard users have a target. Functions, Channels, CronJobs use it; Deployments/KV/Activity/Invocations already had the pattern |
 | `src/views/Editor.vue` (View / Edit) | An existing function opens in **view** (read-only editor; Reset, Deploy, Rollback and the Config items Settings/Env/Deps/Secrets hidden; Cmd/Ctrl-S, `deployFunction`, `resetForm` and `rollbackToVersion` are guarded by `viewMode`). **Edit** is an explicit `SegmentedControl` (`components/common/SegmentedControl.vue`, radiogroup, "Mode") next to the name; `/functions/new` is always edit and has no switch. The mode is mirrored in `?mode=edit` and reaches the Editor as the `mode` **route prop** (`editorProps` in `router/index.js`), never `useRoute()`, because the view is keep-alived; a different function resets to view. Edit → View with unsaved code/deps/form/env asks "Discard changes?" (confirm store) and Discard restores the baseline taken after load/deploy/rollback. A route test must mount the Editor with the same `editorProps` and `?mode=edit` to reach Deploy. |
 | `src/components/common/CodeEditor.vue` | `readOnly` is reactive: held in a `Compartment` and reconfigured in place, so a View/Edit switch keeps buffer, scroll and selection. It uses `EditorState.readOnly`, not `editable`, so the content stays focusable, selectable and copyable |
@@ -103,6 +109,7 @@ re-declaring tokens flips the app without touching markup.
 | `components/common/RuntimeTag.vue` | The one place a runtime is drawn. Renders the mark **icon-only** with the word in the accessible name and tooltip: in a dense list the glyph resolves faster than the text, and the set is two items wide, stable, and has marks operators already know. Pass `withLabel` where the operator is *choosing* a runtime rather than recognising one. Icon-only is deliberately **not** applied to status, which keeps its word. |
 | `components/layout/BrandLockup.vue` | One logo + wordmark lockup, used by both the mobile top bar and the drawer header so the two cannot drift apart. |
 | `composables/useMenuFocus.js` | Shared focus handling for menu-style popovers. |
+| `components/common/Popover.vue` | Keyboard activation enters the first enabled desktop menu control; Escape from trigger or panel restores trigger focus. Pointer-outside dismissal preserves destination focus. Mobile focus belongs to Drawer. |
 | `components/common/FilterSelect.vue` | The **only** picker. There are no native `<select>`s left and `test/responsive.test.js` fails the build if one comes back: a `<select>` opens the OS wheel on a phone while everything beside it opens a sheet. Three shapes — a filter chip (default), `wide` for a form field, `bare` for a dense inline bar. An option with `header: true` is a group heading. |
 | `components/common/Button.vue` | `variant` covers primary / secondary / danger / ghost / chip. The `danger` fill uses `--color-danger-solid`, which is darker than `--color-danger`: white on the lighter red measures 3.76:1 and misses AA. Use the lighter red for text, borders and tints; the solid one only behind white text. |
 
@@ -115,6 +122,43 @@ the same legibility floor from opposite sides. Use the token; do not re-derive
 which violet is correct.
 
 ## Non-obvious
+
+- Cron descriptions are advisory: `cronDescription.js` spells out known aliases
+  and exact whole-second `@every` intervals. Complex durations/time-zone prefixes
+  retain literal copy pending server validation; the backend remains authoritative.
+
+- CronJobs keeps authority separate from Enabled. Staged management requires the
+  server's advisory admin capability plus a current snapshot and inspected string
+  revisions, but server commit-time checks remain authoritative. A 409 or failed
+  refresh retains errors and marks the snapshot stale; no automatic CAS retry or
+  implicit resume occurs. Request ownership ends on deactivation/unmount.
+
+- `HistoryInspector` is opt-in through the Jobs/Cron `historyEnabled` prop and
+  `history-controls.html`, never production routing. Reads have abortable
+  sequence/lifetime ownership; serialized mutations have an independent lane
+  and remain pending across deactivation without publishing late acknowledgments.
+  Failed changes retain drafts per exact archive kind/UUID and invalidate both
+  inspection and capacity. Only a correlated refresh restores freshness; new
+  confirmation is still required. ADMIN capability is advisory. No old payload,
+  executable archive, automatic name binding or permission grant is introduced.
+
+- **The staged Permissions page is not its future request controller.** Preserve
+  owner-scoped response ordering; never publish a stale response as a save
+  acknowledgement. Set `saving` false before supplying a fresh successful
+  snapshot, and deliver a terminal error before any subsequent refresh result.
+  Matching snapshots received in flight retain the draft and original CAS
+  expectations. The page keeps an owner-lifetime revision high-water mark,
+  including across Discard; older responses deny Save and Review. The future
+  controller must correlate results and reject stale successes and failures.
+  Builder scope/context changes never silently broaden resources or drop
+  selected actions. Blank Prefix is not Every key; unsupported foreign cron
+  callers/targets remain inspectable but cannot be newly authored by the wizard.
+
+- **Touch expansion is not row spacing.** Compact standalone controls use a
+  centered 44px pseudo-element target; its absolute positioning is relative to
+  the padding box, so adding negative insets to the border box overcounts.
+  Stacked picker/navigation rows use `touch-expand-row` and actual 44px coarse
+  height, never outward extensions that intercept a neighboring row.
 
 - **SDK access is an explicit function setting**, separate from `network_mode`.
   Editor Settings defaults `sdk` to false, preserves it through dirty/discard,
@@ -130,4 +174,5 @@ which violet is correct.
 - `stores/testbench.js` invokes the function directly at `/fn/<id>` via `invokeFunctionFull` (the `fnClient` in `src/api/client.js`, baseURL `/fn`) so method/path/headers/body round-trip exactly. `fnClient`'s request interceptor still injects the `X-Orva-API-Key` header, and all `/fn/` traffic passes through the backend proxy, so auth + execution capture still apply. (Note `/fn/` is NOT under `/api/v1`, so it needs the separate client.)
 - **Function logs reach the dashboard only through the execution id.** The store reads `X-Orva-Execution-ID` off the invoke response and then fetches `/executions/{id}/logs`; skip that header and there is no other path to the output. The response carries two streams and they are different things: `stderr` is `console.log`/`print` (the adapters reroute stdout because stdout carries the framed protocol response), and `log_entries` is `orva.log.*`, which the proxy parses out of stderr server-side into structured rows. Render both or half the output vanishes.
 - **AI streaming reactivity (load-bearing):** `stores/ai.js` tracks the streaming assistant message by **index** (`curIdx`) and writes every delta back through the reactive array via `patchAssistant()` (rebuilds `parts` immutably, then `timeline.value[curIdx] = next`). Never hold a raw object reference and mutate `parts[i].text +=` — Vue 3 tracks the array proxy, not the raw ref, so per-token mutations silently fail to re-render. The same index-write rule applies to `tool_result` frames.
+- **One-time credentials in Chat are memory-only:** the server stores a placeholder; `stores/ai.js` keeps the live `tool_result` value (frame flag `one_time`) in an in-memory map keyed by conversation + tool call, merges it back in `refreshActive` (the post-turn refresh would otherwise replace it), and drops it on reload, conversation switch (synchronously, before the destination loads), leaving the view (`setChatVisible(false)` from `onDeactivated`/`onUnmounted`) or `dismissOneTime`. A `one_time` frame that arrives while Chat is hidden or from a superseded stream (`stop()` bumps the stream generation) is stored as the placeholder and never enters the map. Never persist it to `localStorage`/`sessionStorage`.
 - **AI markdown rendering:** `MessagePart.vue` splits markdown into ordered segments so top-level fenced code becomes a real `<CodeBlock>` while prose stays HTML; parsing is throttled to ~12/s (leading + trailing edge) during streaming. Tables inherit the body font size (no shrink) so tabular output matches prose; the system prompt steers the model toward prose/bullets and reserves tables for genuinely tabular data.

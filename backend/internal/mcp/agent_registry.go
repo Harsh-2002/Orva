@@ -52,6 +52,10 @@ type AgentTool struct {
 	ReadOnly    bool            `json:"read_only"`
 	Destructive bool            `json:"destructive"`
 	Schema      json.RawMessage `json:"schema"` // JSON Schema for arguments
+	// Sensitive lists dot-separated paths of one-time credentials in the result
+	// (e.g. "secret"). Chat shows them live once and never stores or re-sends them;
+	// the external MCP client still receives them.
+	Sensitive []string `json:"sensitive,omitempty"`
 
 	invoke func(ctx context.Context, args json.RawMessage) (any, error)
 }
@@ -60,7 +64,7 @@ type AgentTool struct {
 // ever contains tools that principal's permissions allow — the same guarantee
 // the MCP server gives.
 type Registry struct {
-	order []string
+	order  []string
 	byName map[string]*AgentTool
 }
 
@@ -99,6 +103,17 @@ func (r *Registry) Dispatch(ctx context.Context, name string, args json.RawMessa
 	return t.invoke(ctx, args)
 }
 
+type regOptions struct{ sensitive []string }
+
+// regOption adjusts one regAddTool declaration.
+type regOption func(*regOptions)
+
+// withOneTimeResult marks result fields (dot-separated JSON paths) that carry a
+// credential shown only once. Every tool that mints one must declare it.
+func withOneTimeResult(paths ...string) regOption {
+	return func(o *regOptions) { o.sensitive = append(o.sensitive, paths...) }
+}
+
 // regAddTool declares one tool. It is generic over the input/output types so
 // the JSON schema is inferred from In and the handler is type-checked, exactly
 // like mcpsdk.AddTool. Pass the existing handler closure verbatim — no need to
@@ -108,20 +123,51 @@ func regAddTool[In, Out any](
 	perm string,
 	def *mcpsdk.Tool,
 	h mcpsdk.ToolHandlerFor[In, Out],
+	opts ...regOption,
 ) {
+	var o regOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if !rc.perms.Has(perm) {
 		return // permission-gated: invisible to this principal on both fronts
 	}
 
 	// External MCP server path — byte-for-byte the old behaviour.
 	if rc.srv != nil {
-		mcpsdk.AddTool(rc.srv, def, h)
+		var probe In
+		if _, strict := any(&probe).(interface{ UseStrictRawJSON() }); strict {
+			// IAM must see the original Arguments bytes, before generic schema
+			// decoding can normalize duplicate properties or host claims.
+			rc.srv.AddTool(def, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				var in In
+				if err := json.Unmarshal(req.Params.Arguments, &in); err != nil {
+					return &mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "Invalid IAM arguments"}}}, nil
+				}
+				result, out, err := h(ctx, req, in)
+				if err != nil {
+					return &mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: err.Error()}}}, nil
+				}
+				if result != nil {
+					return result, nil
+				}
+				raw, err := json.Marshal(out)
+				if err != nil {
+					return nil, err
+				}
+				return &mcpsdk.CallToolResult{StructuredContent: out, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(raw)}}}, nil
+			})
+		} else {
+			mcpsdk.AddTool(rc.srv, def, h)
+		}
 	}
 
 	// In-process agent registry path.
 	if rc.reg != nil {
 		var schemaJSON json.RawMessage
-		if s, err := jsonschema.For[In](nil); err == nil && s != nil {
+		if def.InputSchema != nil {
+			schemaJSON, _ = json.Marshal(def.InputSchema)
+		} else if s, err := jsonschema.For[In](nil); err == nil && s != nil {
 			if b, err := json.Marshal(s); err == nil {
 				schemaJSON = b
 			}
@@ -137,6 +183,7 @@ func regAddTool[In, Out any](
 			ReadOnly:    readOnly,
 			Destructive: destructive,
 			Schema:      schemaJSON,
+			Sensitive:   o.sensitive,
 			invoke: func(ctx context.Context, args json.RawMessage) (any, error) {
 				var in In
 				if len(args) > 0 {
@@ -163,6 +210,10 @@ func regAddTool[In, Out any](
 func BuildAgentRegistry(deps Deps, perms permSet) *Registry {
 	reg := newRegistry()
 	rc := &regCtx{deps: deps, perms: perms, reg: reg}
+	if deps.ManagedServer {
+		registerManagedServerTools(rc)
+		return reg
+	}
 
 	// Every operator-tool family, gated to this principal's perms inside
 	// regAddTool. This mirrors the external MCP server's registration in
@@ -184,6 +235,10 @@ func BuildAgentRegistry(deps Deps, perms permSet) *Registry {
 	registerInboundWebhookTools(rc)
 	registerFixtureTools(rc)
 	registerTraceTools(rc)
+	registerIAMTools(rc)
+	registerConfigurationTools(rc)
+	registerWorkloadLifecycleTools(rc)
+	registerHistoryTools(rc)
 
 	return reg
 }

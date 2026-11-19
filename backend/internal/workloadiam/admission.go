@@ -23,11 +23,14 @@ const MaxHandoffBytes = 256 << 10
 // No callback may activate source. Host state must be fresh and host-owned;
 // callers must serialize its invalidation with the same publication boundary.
 type Authority struct {
-	gate           sync.RWMutex
-	policies       map[string]*Evaluator
-	registrationMu sync.Mutex
-	registrations  map[*Admission]struct{}
-	maxRegistered  int
+	gate               sync.RWMutex
+	policies           map[string]*Evaluator
+	retired            map[string]bool
+	deactivated        map[string]bool
+	registrationMu     sync.Mutex
+	registrations      map[*Admission]struct{}
+	asyncRegistrations map[*AsyncAdmission]struct{}
+	maxRegistered      int
 }
 
 // NewAuthority copies and validates compiled snapshots. maxRegistered bounds
@@ -56,6 +59,9 @@ func NewAuthority(maxRegistered int, initial []*Evaluator) (*Authority, error) {
 func copyEvaluator(e *Evaluator) (*Evaluator, error) {
 	if e == nil || !e.valid {
 		return nil, ErrInvalid
+	}
+	if e.deny {
+		return CompileDeny(e.metadata)
 	}
 	frozen, err := Compile(e.metadata, e.policy)
 	if err != nil {
@@ -92,20 +98,54 @@ func (a *Authority) DoObserved(observe func() Context, r Request, effect func() 
 	return effect()
 }
 
+// SpanDecision is immutable emission provenance, not authority to emit again.
+// Its zero value explicitly means no IAM decision (legacy telemetry).
+type SpanDecision struct {
+	ownerID  string
+	revision uint64
+}
+
+func (d SpanDecision) OwnerID() string  { return d.ownerID }
+func (d SpanDecision) Revision() uint64 { return d.revision }
+
+// EmitSpanObserved binds provenance from the deciding evaluator under the same
+// gate as admission and handoff; the callback follows DoObserved's contract.
+func (a *Authority) EmitSpanObserved(observe func() Context, r Request, effect func(SpanDecision) error) error {
+	if a == nil || observe == nil || effect == nil || r.Operation != OpSpansEmit {
+		return ErrDenied
+	}
+	a.gate.RLock()
+	defer a.gate.RUnlock()
+	c := observe()
+	if !a.allows(c, r) {
+		return ErrDenied
+	}
+	m := a.policies[c.Principal.FunctionID].metadata
+	return effect(SpanDecision{ownerID: m.OwnerID, revision: m.Revision})
+}
+
 // allows requires the gate, and never loads from storage on a cache miss.
 func (a *Authority) allows(c Context, r Request) bool {
-	caller := a.policies[c.Principal.FunctionID]
+	caller := a.admissionPolicy(c.Principal.FunctionID)
 	if !caller.Allows(c, r) {
 		return false
 	}
 	switch r.Operation {
 	case OpInvoke, OpStreamOpen, OpStreamNext, OpJobsEnqueue:
-		return AllowsEdge(caller, a.policies[r.Resource.Function.ID], c, r)
+		return AllowsEdge(caller, a.admissionPolicy(r.Resource.Function.ID), c, r)
 	case OpCronsUpsert:
-		return AllowsEdge(caller, a.policies[r.Resource.OwnCron.TargetID], c, r)
+		return AllowsEdge(caller, a.admissionPolicy(r.Resource.OwnCron.TargetID), c, r)
 	default:
 		return true
 	}
+}
+
+func (a *Authority) admissionPolicy(owner string) *Evaluator {
+	e := a.policies[owner]
+	if a.deactivated[owner] || (e != nil && e.deny) {
+		return nil
+	}
+	return e
 }
 
 // TargetState describes an acquired worker, never SDK-supplied claims.
@@ -154,7 +194,7 @@ func (a *Authority) BeginCallObserved(parent context.Context, observe func() Con
 	r.Resource = Resource{Function: &FunctionResource{ID: r.Resource.Function.ID}}
 	a.registrationMu.Lock()
 	defer a.registrationMu.Unlock()
-	if a.maxRegistered <= 0 || len(a.registrations) >= a.maxRegistered {
+	if a.maxRegistered <= 0 || len(a.registrations)+len(a.asyncRegistrations) >= a.maxRegistered {
 		return nil, ErrCapacity
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -175,7 +215,7 @@ func (call *Admission) Context() context.Context {
 }
 
 func (a *Authority) validTarget(id string, target TargetState) bool {
-	e := a.policies[id]
+	e := a.admissionPolicy(id)
 	return target.Active && e != nil && e.valid && target.Principal.FunctionID == id &&
 		validHostID(target.Principal.WorkerID) && target.Principal.ArtifactRevision == e.metadata.ApprovedArtifact
 }
@@ -271,6 +311,10 @@ func (a *Authority) Publish(expected uint64, candidate *Evaluator, persist func(
 		return ErrConflict
 	}
 	a.gate.Lock()
+	if a.retired[frozen.metadata.OwnerID] {
+		a.gate.Unlock()
+		return ErrDenied
+	}
 	current := a.policies[frozen.metadata.OwnerID].Metadata().Revision
 	if a.policies == nil || current != expected {
 		a.gate.Unlock()
@@ -285,6 +329,12 @@ func (a *Authority) Publish(expected uint64, candidate *Evaluator, persist func(
 	var cancelled []context.CancelFunc
 	for call := range a.registrations {
 		if call.caller.Principal.FunctionID == frozen.metadata.OwnerID || call.targetID == frozen.metadata.OwnerID {
+			call.revoked = true
+			cancelled = append(cancelled, call.cancel)
+		}
+	}
+	for call := range a.asyncRegistrations {
+		if call.origin.CreatorID == frozen.metadata.OwnerID || call.origin.TargetID == frozen.metadata.OwnerID {
 			call.revoked = true
 			cancelled = append(cancelled, call.cancel)
 		}

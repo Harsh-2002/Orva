@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -87,7 +89,46 @@ func init() {
 	deploymentsListCmd.Flags().Int("limit", 50, "max number of deployments to return (1-500)")
 	deploymentsLogsCmd.Flags().BoolP("follow", "f", false, "stream the build log live until the build finishes")
 
-	deploymentsCmd.AddCommand(deploymentsListCmd, deploymentsGetCmd, deploymentsLogsCmd)
+	deploymentsCmd.AddCommand(deploymentsListCmd, deploymentsGetCmd, deploymentsLogsCmd, deploymentsInstallCmd)
+}
+
+var deploymentsInstallCmd = &cobra.Command{
+	Use:   "install <deployment-uuid>",
+	Short: "Install an exact managed deployment without approving permissions",
+	Long: `Install a published deployment by exact UUID on an opted-in managed server.
+This never approves Function IAM policy or restarts suspended jobs or cron work.
+Use an explicit permissions review after inspecting the installed artifact.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := uuid.Parse(args[0])
+		if err != nil || id.String() != args[0] || id.Variant() != uuid.RFC4122 || id.Version() != 7 {
+			return fmt.Errorf("exact deployment UUIDv7 required")
+		}
+		if err := confirm(cmd, "Install the exact deployment? This does not approve IAM permissions."); err != nil {
+			return err
+		}
+		c, err := getClient(cmd)
+		if err != nil {
+			return err
+		}
+		c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		resp, err := c.Send(cli.Request{Method: http.MethodPost, Path: "/api/v1/deployments/" + id.String() + "/install", Ctx: cmd.Context()})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := checkResponse(resp); err != nil {
+			return err
+		}
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 16385))
+		if err != nil {
+			return err
+		}
+		if len(raw) > 16384 || !json.Valid(raw) {
+			return fmt.Errorf("invalid managed installation response")
+		}
+		return emitRaw(raw)
+	},
 }
 
 func runDeploymentsList(cmd *cobra.Command, args []string) error {

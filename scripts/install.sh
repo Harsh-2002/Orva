@@ -55,6 +55,7 @@ MODE=""                 # "", docker, bare-metal, cli
 ASSUME_YES=0            # --yes / -y
 WANT_START=""           # "", 1 (force start), 0 (skip)
 WANT_CLI_SHORTCUT=1     # install `orva` onto PATH after a bare-metal install
+MANAGED_WITNESS=/etc/orva/host-witness/witness
 DO_UNINSTALL=0
 PURGE=0
 INTERACTIVE=0           # decided in decide_interactive()
@@ -145,7 +146,8 @@ OPTIONS:
   --no-cli            do not add the 'orva' CLI shortcut to PATH (bare-metal)
   --no-pkg            skip system package installation                [ORVA_NO_PKG]
   --dry-run           detect + print plan, change nothing             [ORVA_INSTALL_DRYRUN]
-  --uninstall [--purge]  remove Orva (--purge also deletes data + user)
+  --uninstall [--purge]  remove Orva and its host witness; sealed stores become unrecoverable on this host
+                        (--purge also deletes data + user)
   -h, --help          show this help
 
 Examples:
@@ -953,6 +955,7 @@ Restart=on-failure
 # Restart=on-failure. Listed explicitly so the intent survives a future
 # change to the Restart= policy.
 RestartForceExitStatus=70
+RestartPreventExitStatus=78
 RestartSec=5s
 TimeoutStopSec=30s
 KillSignal=SIGTERM
@@ -981,7 +984,6 @@ Environment=ORVA_PORT=${PORT}
 [Install]
 WantedBy=multi-user.target
 EOF
-
     cat > "$PREFIX/share/orva/scripts/orva.openrc" <<EOF
 #!/sbin/openrc-run
 description="Orva self-hosted serverless platform"
@@ -1296,6 +1298,16 @@ if have systemctl && [ -f /etc/systemd/system/orva.service ]; then
     systemctl disable --now orva 2>/dev/null || true
     rm -f /etc/systemd/system/orva.service; systemctl daemon-reload 2>/dev/null || true
 fi
+if have systemctl && [ -f /etc/systemd/system/orva-workloads.slice ]; then
+    systemctl disable --now orva-workloads.slice 2>/dev/null || true
+    rm -f /etc/systemd/system/orva-workloads.slice
+    systemctl daemon-reload 2>/dev/null || true
+fi
+if [ -e "${MANAGED_WITNESS}" ] || [ -L "${MANAGED_WITNESS}" ]; then
+    echo "Deleting the Orva host witness. The sealed stores will be unrecoverable on this host." >&2
+    rm -f "${MANAGED_WITNESS}"
+    rmdir "${MANAGED_WITNESS%/*}" 2>/dev/null || true
+fi
 if [ -f /etc/init.d/orva ]; then
     openrc_pid=""
     [ -s /run/orva.pid ] && openrc_pid=\$(cat /run/orva.pid 2>/dev/null || true)
@@ -1344,6 +1356,12 @@ run_uninstall() {
     log "uninstalling Orva"
     un_done=0
     if have docker && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^orva$'; then
+        un_witness=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/orva-host"}}{{if eq .Type "volume"}}{{.Name}}{{end}}{{end}}{{end}}' orva)
+        # Only remove the dedicated managed witness volume, not arbitrary mounts.
+        [ "$un_witness" = "orva-host-witness" ] || un_witness=""
+        if [ -n "$un_witness" ]; then
+            warn "Deleting the Orva host witness volume. The sealed stores will be unrecoverable on this host."
+        fi
         log "removing Docker stack"
         if [ -f "$COMPOSE_DIR/docker-compose.yml" ] && [ -n "${COMPOSE_CMD:-}" ]; then
             if [ "$PURGE" = "1" ]; then
@@ -1358,6 +1376,9 @@ run_uninstall() {
             if [ "$PURGE" = "1" ]; then
                 docker volume rm orva-data 2>/dev/null || true
             fi
+        fi
+        if [ -n "$un_witness" ] && docker volume inspect "$un_witness" >/dev/null 2>&1; then
+            docker volume rm "$un_witness"
         fi
         un_done=1
     fi

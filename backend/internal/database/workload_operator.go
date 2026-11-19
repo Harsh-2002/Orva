@@ -8,18 +8,15 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 )
 
 var ErrOperatorDenied = errors.New("operator publication denied")
 
 // OperatorCredentialReference is host-resolved submission provenance, not authentication by ID.
 // Never construct it from function-author input; capture it only after trusted authentication.
-type OperatorCredentialReference struct {
-	Kind string
-	ID   string
-	// ExpectedResource is the host-validated initial OAuth audience, not a request-supplied override.
-	ExpectedResource string
-}
+type OperatorCredentialReference = auth.OperatorReference
 
 const maxOperatorMetadataBytes = 4096
 
@@ -54,6 +51,10 @@ func validOperatorMetadata(s string) bool {
 }
 
 func operatorAdminPermissions(s string, oauth bool) bool {
+	return operatorPermissions(s, oauth, "admin")
+}
+
+func operatorPermissions(s string, oauth bool, required string) bool {
 	if !validOperatorMetadata(s) {
 		return false
 	}
@@ -89,10 +90,14 @@ func operatorAdminPermissions(s string, oauth bool) bool {
 		}
 		seen[permission] = true
 	}
-	return seen["admin"]
+	return seen[required]
 }
 
 func authorizeOperatorTx(ctx context.Context, tx *sql.Tx, ref OperatorCredentialReference) (IAMActorReference, time.Time, error) {
+	return authorizeOperatorPermissionTx(ctx, tx, ref, "admin")
+}
+
+func authorizeOperatorPermissionTx(ctx context.Context, tx *sql.Tx, ref OperatorCredentialReference, required string) (IAMActorReference, time.Time, error) {
 	actor, ok := operatorReferenceActor(ref)
 	if !ok {
 		return IAMActorReference{}, time.Time{}, operatorDenied(ctx)
@@ -105,7 +110,7 @@ func authorizeOperatorTx(ctx context.Context, tx *sql.Tx, ref OperatorCredential
 		err = tx.QueryRowContext(ctx, `SELECT
 			CASE WHEN typeof(permissions)='text' AND length(CAST(permissions AS BLOB)) BETWEEN 1 AND 4096
 				THEN permissions END, expires_at FROM api_keys WHERE id=?`, ref.ID).Scan(&permissions, &expiry)
-		if err == nil && !operatorAdminPermissions(permissions, false) {
+		if err == nil && !operatorPermissions(permissions, false, required) {
 			err = ErrOperatorDenied
 		}
 	case "session":
@@ -131,7 +136,7 @@ func authorizeOperatorTx(ctx context.Context, tx *sql.Tx, ref OperatorCredential
 			WHERE t.id=? AND t.revoked_at IS NULL AND c.revoked_at IS NULL AND u.id>0`, ref.ID).
 			Scan(&scope, &expiry, &resource, &clientScope)
 		if err == nil && (!expiry.Valid || resource != ref.ExpectedResource ||
-			!operatorAdminPermissions(scope, true) || !operatorAdminPermissions(clientScope, true)) {
+			!operatorPermissions(scope, true, required) || !operatorPermissions(clientScope, true, required)) {
 			err = ErrOperatorDenied
 		}
 	}

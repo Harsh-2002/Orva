@@ -313,6 +313,17 @@ func TestSDKNonReadingClientIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Pin kernel buffering: hosts tuned with large net.core defaults (1 MiB seen)
+	// otherwise absorb hundreds of replies before the writer stalls.
+	for _, c := range []net.Conn{host, client} {
+		u := c.(*net.UnixConn)
+		if err := u.SetWriteBuffer(64 << 10); err != nil {
+			t.Fatal(err)
+		}
+		if err := u.SetReadBuffer(64 << 10); err != nil {
+			t.Fatal(err)
+		}
+	}
 	killed := make(chan struct{}, 1)
 	big := strings.Repeat("x", 4_000) // small enough to marshal fast, large enough that the socket buffer fills after ~50 replies
 	srv := &sdkServer{

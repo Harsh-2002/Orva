@@ -18,7 +18,9 @@ import (
 const (
 	// IAMUnboundArtifact is not a worker artifact; it can bind only an empty policy.
 	IAMUnboundArtifact = "iam:unbound"
-	IAMAuditRetention  = 32
+	// IAMRestoredUnapprovedArtifact is a reserved CAS value, never worker approval.
+	IAMRestoredUnapprovedArtifact = "0000000000000000000000000000000000000000000000000000000000000000"
+	IAMAuditRetention             = 32
 )
 
 var (
@@ -56,13 +58,12 @@ func (r *IAMPolicyRecord) AdmissionEvaluator() (*workloadiam.Evaluator, error) {
 	if err != nil || canonical != r.PolicyJSON {
 		return nil, ErrIAMInvalidPolicy
 	}
+	if r.ReviewRequired || r.Quarantined || r.ApprovedArtifact == IAMRestoredUnapprovedArtifact {
+		return workloadiam.CompileDeny(r.Metadata)
+	}
 	p, err := workloadiam.Decode([]byte(canonical))
 	if err != nil {
 		return nil, ErrIAMInvalidPolicy
-	}
-	if r.ReviewRequired || r.Quarantined {
-		p.Allow = []workloadiam.Statement{}
-		p.Inbound = []workloadiam.Acceptance{}
 	}
 	return workloadiam.Compile(r.Metadata, p)
 }
@@ -228,18 +229,8 @@ func (db *Database) GetIAMPolicy(ctx context.Context, ownerID string) (*IAMPolic
 // SaveIAMPolicy is synchronous persistence only. A future service must check
 // live reviewed artifact/config and admin authority under the ordered host gates.
 func (db *Database) SaveIAMPolicy(ctx context.Context, c IAMPolicyChange) (*IAMPolicyRecord, error) {
-	if c.ExpectedRevision == 0 || c.ExpectedRevision > math.MaxInt64 {
-		return nil, ErrIAMInvalidPolicy
-	}
-	if c.ExpectedRevision == math.MaxInt64 {
-		return nil, ErrIAMRevisionExhausted
-	}
-	// Validate the caller's complete document/metadata before reserving SQLite.
-	canonical, err := canonicalIAMPolicy(workloadiam.Metadata{OwnerID: c.OwnerID, Revision: c.ExpectedRevision + 1, ApprovedArtifact: c.ApprovedArtifact}, c.PolicyJSON)
+	canonical, err := prepareIAMPolicyChange(c)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateIAMActor(c.Actor); err != nil {
 		return nil, err
 	}
 	db.lifecycleMu.RLock()
@@ -249,6 +240,35 @@ func (db *Database) SaveIAMPolicy(ctx context.Context, c IAMPolicyChange) (*IAMP
 		return nil, fmt.Errorf("save IAM policy: %w", err)
 	}
 	defer tx.Rollback()
+	r, err := saveIAMPolicyTx(ctx, tx, c, canonical)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("save IAM policy: %w", err)
+	}
+	return r, nil
+}
+
+func prepareIAMPolicyChange(c IAMPolicyChange) (string, error) {
+	if c.ExpectedRevision == 0 || c.ExpectedRevision > math.MaxInt64 {
+		return "", ErrIAMInvalidPolicy
+	}
+	if c.ExpectedRevision == math.MaxInt64 {
+		return "", ErrIAMRevisionExhausted
+	}
+	// Validate the caller's complete document/metadata before reserving SQLite.
+	canonical, err := canonicalIAMPolicy(workloadiam.Metadata{OwnerID: c.OwnerID, Revision: c.ExpectedRevision + 1, ApprovedArtifact: c.ApprovedArtifact}, c.PolicyJSON)
+	if err != nil {
+		return "", err
+	}
+	if err := validateIAMActor(c.Actor); err != nil {
+		return "", err
+	}
+	return canonical, nil
+}
+
+func saveIAMPolicyTx(ctx context.Context, tx *sql.Tx, c IAMPolicyChange, canonical string) (*IAMPolicyRecord, error) {
 	if err := iamFunctionExists(ctx, tx, c.OwnerID); err != nil {
 		return nil, err
 	}
@@ -279,9 +299,6 @@ func (db *Database) SaveIAMPolicy(ctx context.Context, c IAMPolicyChange) (*IAMP
 	}
 	if err := appendIAMAudit(ctx, tx, r, c.Actor); err != nil {
 		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("save IAM policy: %w", err)
 	}
 	return r, nil
 }

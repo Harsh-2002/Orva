@@ -125,6 +125,7 @@ func init() {
 	functionsCreateCmd.Flags().Int("timeout-ms", 0, "invocation timeout in ms (0 = server default)")
 	functionsCreateCmd.Flags().String("network-mode", "", "network mode: none | egress (empty = server default)")
 	functionsCreateCmd.Flags().Bool("sdk", false, "allow Orva SDK access (independent of outbound network access)")
+	functionsCreateCmd.Flags().Bool("managed", false, "create an unbound function on an opted-in managed server")
 	functionsCreateCmd.MarkFlagRequired("name")
 	functionsCreateCmd.MarkFlagRequired("runtime")
 
@@ -236,6 +237,17 @@ func runFunctionsCreate(cmd *cobra.Command, args []string) error {
 		"runtime": runtime,
 		"sdk":     sdk,
 	}
+	path := "/api/v1/functions"
+	if managed, _ := cmd.Flags().GetBool("managed"); managed {
+		for _, legacy := range []string{"sdk", "memory-mb", "timeout-ms", "network-mode"} {
+			if cmd.Flags().Changed(legacy) {
+				return fmt.Errorf("--managed cannot be combined with --%s", legacy)
+			}
+		}
+		delete(body, "sdk")
+		path = "/api/v1/iam/functions"
+		client.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	if memoryMB > 0 {
 		body["memory_mb"] = memoryMB
 	}
@@ -246,7 +258,7 @@ func runFunctionsCreate(cmd *cobra.Command, args []string) error {
 		body["network_mode"] = networkMode
 	}
 
-	resp, err := client.Post("/api/v1/functions", body)
+	resp, err := client.Post(path, body)
 	if err != nil {
 		return err
 	}

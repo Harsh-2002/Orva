@@ -80,6 +80,7 @@
           @delete="onDelete"
           @retry="store.retry"
           @dismiss="store.dismissError"
+          @dismiss-one-time="store.dismissOneTime"
         />
         <Composer
           :streaming="store.streaming"
@@ -94,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
@@ -157,6 +158,7 @@ onMounted(bootstrap)
 // keep-alive re-entry: refresh conversations + provider/settings state, so
 // changes made over in Settings -> AI are reflected when returning to the chat.
 onActivated(() => {
+  store.setChatVisible(true)
   store.loadConversations()
   store.loadSettings()
   store.loadProviders()
@@ -171,4 +173,9 @@ function onKeydown(e) {
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+
+// Leaving the view (keep-alive deactivates rather than unmounts) drops any live
+// one-time credential; coming back shows the stored placeholder.
+onDeactivated(() => store.setChatVisible(false))
+onUnmounted(() => store.setChatVisible(false))
 </script>

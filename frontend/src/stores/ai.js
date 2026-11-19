@@ -74,18 +74,69 @@ export const useAIStore = defineStore('ai', () => {
     timeline.value = timeline.value.filter((it) => it.kind !== 'error')
   }
 
+  // One-time credentials: the server stores only a placeholder, so the live
+  // value from the tool_result frame is kept here, in memory only (never in
+  // localStorage/sessionStorage), keyed by conversation + tool call. It survives
+  // the post-turn refresh and is dropped on reload, conversation switch, leaving
+  // the Chat view or explicit dismissal.
+  const ONE_TIME_PLACEHOLDER = '[redacted: shown once to the operator]'
+  const oneTimeResults = new Map()
+  const oneTimeKey = (convId, toolId) => `${convId}:${toolId}`
+
+  function mergeOneTime(convId, items) {
+    const seen = new Set()
+    const merged = items.map((it) => {
+      if (it.kind !== 'tool') return it
+      const key = oneTimeKey(convId, it.id)
+      seen.add(key)
+      return oneTimeResults.has(key) ? { ...it, result: oneTimeResults.get(key), oneTime: true } : it
+    })
+    // A regenerate/edit may have removed the call; drop its value with it.
+    for (const key of [...oneTimeResults.keys()]) {
+      if (key.startsWith(`${convId}:`) && !seen.has(key)) oneTimeResults.delete(key)
+    }
+    return merged
+  }
+
+  // A live value may only be rendered while Chat is on screen and the frame
+  // belongs to the current stream. streamGen moves on every stop()/switch;
+  // frameGen is the generation of the stream delivering the frame in hand.
+  let chatVisible = true
+  let streamGen = 0
+  let frameGen = 0
+  const liveAllowed = () => chatVisible && frameGen === streamGen
+
+  // Called by the Chat view: hiding it drops every live value, and frames that
+  // arrive while it is hidden are stored as the placeholder.
+  function setChatVisible(visible) {
+    chatVisible = visible
+    if (!visible) dismissOneTime()
+  }
+
+  // Replace live values by the placeholder, for one tool call or all of them.
+  function dismissOneTime(toolId) {
+    for (const key of [...oneTimeResults.keys()]) {
+      if (toolId === undefined || key === oneTimeKey(activeId.value, toolId)) oneTimeResults.delete(key)
+    }
+    timeline.value = timeline.value.map((it) =>
+      it.kind === 'tool' && it.oneTime && (toolId === undefined || it.id === toolId)
+        ? { ...it, oneTime: false, result: ONE_TIME_PLACEHOLDER }
+        : it)
+  }
+
   // Re-fetch the active conversation from the server, replacing the optimistic
   // timeline with server truth (correct ids + created_at + token_usage). Run
   // after a turn so regenerate/edit re-sync ids and metadata appears.
   async function refreshActive() {
     if (!activeId.value) return
+    const convId = activeId.value
     try {
-      const { data } = await apiClient.get(`/ai/conversations/${activeId.value}`)
+      const { data } = await apiClient.get(`/ai/conversations/${convId}`)
       // Error items live only in the optimistic timeline (the server has no
       // notion of them) — carry them across the rebuild or the ErrorCard for
       // a just-failed turn vanishes the moment the post-turn refresh lands.
       const errors = timeline.value.filter((it) => it.kind === 'error')
-      timeline.value = [...buildTimeline(data), ...errors]
+      timeline.value = [...mergeOneTime(convId, buildTimeline(data)), ...errors]
     } catch { /* keep the optimistic timeline on a refresh failure */ }
   }
 
@@ -175,7 +226,15 @@ export const useAIStore = defineStore('ai', () => {
         for (let i = timeline.value.length - 1; i >= 0; i--) {
           const t = timeline.value[i]
           if (t.kind === 'tool' && t.id === data.id) {
-            timeline.value[i] = { ...t, status: data.status, result: data.result }
+            // one_time: the live result carries a credential the server never stores.
+            const oneTime = data.one_time === true
+            if (oneTime && !liveAllowed()) {
+              // Chat is hidden or the stream was superseded: never render or keep it.
+              timeline.value[i] = { ...t, status: data.status, result: ONE_TIME_PLACEHOLDER, oneTime: false }
+              break
+            }
+            if (oneTime) oneTimeResults.set(oneTimeKey(activeId.value, t.id), data.result)
+            timeline.value[i] = { ...t, status: data.status, result: data.result, oneTime }
             break
           }
         }
@@ -234,6 +293,7 @@ export const useAIStore = defineStore('ai', () => {
     if (!res.ok || !res.body) {
       throw new Error(`chat request failed (${res.status})`)
     }
+    const gen = streamGen
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = ''
@@ -247,6 +307,7 @@ export const useAIStore = defineStore('ai', () => {
         buf = buf.slice(idx + 2)
         if (frame.trim()) {
           const { event, data } = parseFrame(frame)
+          frameGen = gen
           handleFrame(event, data)
         }
       }
@@ -365,6 +426,7 @@ export const useAIStore = defineStore('ai', () => {
 
   // stop aborts the in-flight stream (the composer's Stop button).
   function stop() {
+    streamGen++
     if (abort) abort.abort()
     streaming.value = false
   }
@@ -436,6 +498,9 @@ export const useAIStore = defineStore('ai', () => {
     // and replacing the timeline below would leave it patching the wrong thread.
     stop()
     curIdx = -1
+    // Synchronously, before the request resolves: the old thread stays on screen
+    // until then and must not keep showing a live credential.
+    dismissOneTime()
     const { data } = await apiClient.get(`/ai/conversations/${id}`)
     activeId.value = id
     timeline.value = buildTimeline(data)
@@ -446,6 +511,7 @@ export const useAIStore = defineStore('ai', () => {
   function newConversation() {
     stop()
     curIdx = -1
+    dismissOneTime()
     activeId.value = null
     timeline.value = []
     awaitingApproval.value = false
@@ -462,6 +528,7 @@ export const useAIStore = defineStore('ai', () => {
     // Stop local streaming before asking the server to clear history. The
     // server still rejects the delete if another tab has a turn in flight.
     stop()
+    dismissOneTime()
     const { data } = await apiClient.delete('/ai/conversations')
     conversations.value = []
     newConversation()
@@ -624,7 +691,7 @@ export const useAIStore = defineStore('ai', () => {
     settings, providers, providersLoaded,
     selectedProviderId, selectedProvider, selectedModel, thinking, models, modelsError, modelsLoading,
     sendMessage, approveTool, rejectTool, stop,
-    regenerate, editAndResend, deleteMessageFrom, retry, dismissError,
+    regenerate, editAndResend, deleteMessageFrom, retry, dismissError, dismissOneTime, setChatVisible,
     loadConversations, openConversation, newConversation, deleteConversation, clearConversations, renameConversation, exportActive,
     loadSettings, saveSettings, loadProviders, saveProvider, deleteProvider,
     selectProvider, selectModel, setThinking, loadProviderModels,

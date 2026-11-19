@@ -33,7 +33,7 @@
 // copies pages to a fresh single-file database, and produces a
 // checkpoint-clean snapshot with no WAL sidecar to ship.
 //
-// Format
+// # Format
 //
 // Every archive carries a `manifest.json` at the root listing format_version,
 // the producing Orva binary's version, created_at (RFC3339 UTC), and a
@@ -46,7 +46,7 @@
 //
 //	SnapshotDB(srcDB, outPath)        — VACUUM INTO outPath
 //	ArchiveTo(w, dataDir, snapshot)   — gzip-tar to w with manifest
-//	RestoreFrom(r, dataDir)           — extract + verify + activate atomic
+//	RestoreFrom(r, dataDir)           — extract + verify + install
 package backup
 
 import (
@@ -192,8 +192,8 @@ func ArchiveTo(w io.Writer, dataDir, snapshotPath string) error {
 // archiveItem is one entry in the archive plan. Directories ride along
 // for `tar t` readability; the actual extraction does MkdirAll regardless.
 type archiveItem struct {
-	srcPath     string    // absolute path on disk
-	archivePath string    // tar-relative path (no leading slash, forward slashes)
+	srcPath     string // absolute path on disk
+	archivePath string // tar-relative path (no leading slash, forward slashes)
 	isDir       bool
 	modTime     time.Time
 }
@@ -435,7 +435,7 @@ func addFileToTar(tw *tar.Writer, srcPath, archivePath string) error {
 }
 
 // RestoreFrom extracts a tarball produced by ArchiveTo into dataDir and
-// activates it atomically:
+// installs it. The multi-file install is not atomic:
 //
 //  1. Extract the archive into a staging dir under dataDir.
 //  2. Parse + validate manifest.json: format compatibility, every file's
@@ -449,13 +449,37 @@ func addFileToTar(tw *tar.Writer, srcPath, archivePath string) error {
 //
 // On any failure before step 4, no live state has changed; the staging
 // dir is removed and the original error is returned. After step 4 a
-// failure rolls back by moving the .before-restore file back into place.
+// failure attempts to restore the old DB file only; keys/function trees already
+// replaced are not rolled back. The guarded coordinator retains a deny marker
+// until an explicitly completed install and durable quarantine.
 //
 // IMPORTANT: the caller must have closed (or be ready to close + reopen)
 // any *sql.DB handles to the live orva.db before invoking this. The
 // HTTP handler returns success and asks the client to reload the page;
 // the operator restarts the process to pick up the new file.
 func RestoreFrom(r io.Reader, dataDir string) error {
+	return restoreFrom(r, dataDir, nil, false)
+}
+
+// RestoreFromGuarded validates staging before the required promotion barrier.
+// The caller owns quiescence, its external marker, and post-install durability.
+func RestoreFromGuarded(r io.Reader, dataDir string, beforeInstall func() error) error {
+	if beforeInstall == nil {
+		return fmt.Errorf("restore: missing promotion barrier")
+	}
+	return restoreFrom(r, dataDir, func(string) error { return beforeInstall() }, false)
+}
+
+// RestoreSealedFromGuardedDB restores only the database and keys. Sealed stores
+// stay in place. The promotion barrier inspects the staged database read-only.
+func RestoreSealedFromGuardedDB(r io.Reader, dataDir string, beforeInstall func(stagedDB string) error) error {
+	if beforeInstall == nil {
+		return fmt.Errorf("restore: missing promotion barrier")
+	}
+	return restoreFrom(r, dataDir, beforeInstall, true)
+}
+
+func restoreFrom(r io.Reader, dataDir string, beforeInstall func(string) error, sealed bool) error {
 	if dataDir == "" {
 		return fmt.Errorf("restore: empty data dir")
 	}
@@ -471,31 +495,44 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 	// promote the staged tree the dir is already empty.
 	defer os.RemoveAll(stage)
 
-	if err := extractTarGz(r, stage); err != nil {
-		return fmt.Errorf("restore: extract: %w", err)
-	}
-
-	manifest, err := readAndVerifyManifest(stage)
-	if err != nil {
-		return err
-	}
-
-	// Heal before any live state moves, so a failure here still rolls back
-	// to "nothing happened".
-	if err := healReadyMarkers(filepath.Join(stage, "functions")); err != nil {
-		return fmt.Errorf("restore: heal readiness markers: %w", err)
-	}
-
+	stagedFns := filepath.Join(stage, "functions")
 	stagedDB := filepath.Join(stage, "orva.db")
-	if _, err := os.Stat(stagedDB); err != nil {
-		return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
+	portable := false
+	if sealed {
+		r, portable, err = stageIfPortable(r, stage)
+		if err != nil {
+			return err
+		}
 	}
-	// Validate by opening + integrity-check. If the file is corrupted
-	// or wasn't actually SQLite this fails loudly here, before we touch
-	// the live DB. Validation failures point at the supplied file, not
-	// the server, so flag them as bad-archive too.
-	if err := validateStagedDB(stagedDB); err != nil {
-		return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
+	if !portable {
+		if err := extractTarGzChecked(r, stage, beforeInstall != nil); err != nil {
+			return fmt.Errorf("restore: extract: %w", err)
+		}
+		if _, err := readAndVerifyManifest(stage, beforeInstall != nil); err != nil {
+			return err
+		}
+		if sealed {
+			entries, err := os.ReadDir(stagedFns)
+			if (err != nil && !os.IsNotExist(err)) || len(entries) != 0 {
+				return fmt.Errorf("%w: sealed restore cannot include a mutable functions tree", ErrBadArchive)
+			}
+		} else if err := healReadyMarkers(stagedFns); err != nil {
+			return fmt.Errorf("restore: heal readiness markers: %w", err)
+		}
+		if _, err := os.Stat(stagedDB); err != nil {
+			return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
+		}
+		if err := validateStagedDB(stagedDB); err != nil {
+			return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
+		}
+	}
+	if beforeInstall != nil {
+		if err := validateRecoveryStage(stage, dataDir, portable); err != nil {
+			return err
+		}
+		if err := beforeInstall(stagedDB); err != nil {
+			return fmt.Errorf("restore: promotion barrier: %w", err)
+		}
 	}
 
 	livePath := filepath.Join(dataDir, "orva.db")
@@ -550,10 +587,13 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 		}
 	}
 
+	if sealed {
+		return nil
+	}
+
 	// Move staged functions tree into place. We do per-function
 	// renames so unrelated functions in the live tree (i.e. ones not
 	// shipped in the backup) survive.
-	stagedFns := filepath.Join(stage, "functions")
 	liveFns := filepath.Join(dataDir, "functions")
 	if _, err := os.Stat(stagedFns); err == nil {
 		if err := os.MkdirAll(liveFns, 0o755); err != nil {
@@ -586,7 +626,6 @@ func RestoreFrom(r io.Reader, dataDir string) error {
 		return fmt.Errorf("restore: rebuild symlinks (data installed; symlinks broken): %w", err)
 	}
 
-	_ = manifest // keep available in case we surface stats later
 	return nil
 }
 
@@ -671,7 +710,7 @@ func isVersionHash(s string) bool {
 // before manifests existed. The cost is no checksum verification on
 // those old archives — but they were the only contract at the time, so
 // rejecting them outright would break operators mid-upgrade.
-func readAndVerifyManifest(stage string) (*Manifest, error) {
+func readAndVerifyManifest(stage string, guarded bool) (*Manifest, error) {
 	manifestPath := filepath.Join(stage, "manifest.json")
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -694,6 +733,9 @@ func readAndVerifyManifest(stage string) (*Manifest, error) {
 	// manifest are tolerated (forward-compat: a future format might
 	// add files the older binary doesn't know about).
 	for archivePath, want := range m.Files {
+		if guarded && !recoveryPathAllowed(archivePath) {
+			return nil, fmt.Errorf("%w: reserved or unsafe manifest path", ErrBadArchive)
+		}
 		stagedFile := filepath.Join(stage, filepath.FromSlash(archivePath))
 		st, err := os.Stat(stagedFile)
 		if err != nil {
@@ -720,6 +762,10 @@ func readAndVerifyManifest(stage string) (*Manifest, error) {
 // extracting an attacker-supplied symlink would let a malicious tarball
 // rewrite files outside destDir.
 func extractTarGz(r io.Reader, destDir string) error {
+	return extractTarGzChecked(r, destDir, false)
+}
+
+func extractTarGzChecked(r io.Reader, destDir string, guarded bool) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		// Wrap the gzip error so the HTTP layer can map it to 400
@@ -738,6 +784,10 @@ func extractTarGz(r io.Reader, destDir string) error {
 		}
 		// Reject absolute paths and traversal.
 		clean := filepath.Clean(hdr.Name)
+		if guarded && (!recoveryPathAllowed(strings.TrimSuffix(hdr.Name, "/")) ||
+			(hdr.Typeflag != tar.TypeDir && hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA)) {
+			return fmt.Errorf("%w: unsupported recovery archive entry", ErrBadArchive)
+		}
 		if filepath.IsAbs(clean) || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
 			return fmt.Errorf("%w: unsafe path in archive: %s", ErrBadArchive, hdr.Name)
 		}

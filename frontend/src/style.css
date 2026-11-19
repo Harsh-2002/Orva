@@ -593,13 +593,12 @@ select::-ms-expand {
     position: absolute;
     left: 0;
     right: 0;
+    top: calc(50% - 22px);
+    height: 44px;
   }
 
-  /* box + 2 x inset = 44 in every tier. */
-  .touch-expand-xs::after      { top: -6px; bottom: -6px; }
-  .touch-expand-sm::after      { top: -4px; bottom: -4px; }
-  .touch-expand-md::after      { top: -2px; bottom: -2px; }
-  .touch-expand-iconbtn::after { top: -2px; bottom: -2px; left: -2px; right: -2px; }
+  /* Percentages use the padding box: fixed targets also cover bordered controls. */
+  .touch-expand-iconbtn::after { left: calc(50% - 22px); right: auto; width: 44px; }
 }
 
 /* ============================================================

@@ -1,5 +1,12 @@
 # Orva CLI
 
+On the internal managed server only, `orva functions create --managed --name
+NAME --runtime node|python` creates a fresh unbound function. Do not combine
+`--managed` with legacy SDK or resource flags. `orva deployments install
+DEPLOYMENT_UUID` installs the exact published generation without approving
+policy, releasing standing work, or changing deployment history. There is no
+legacy fallback for either command.
+
 The `orva` CLI is a slim HTTP client for any Orva server. Same Cobra command
 surface as the daemon binary's CLI side, but ~70 % smaller because it doesn't
 carry the server (no SQLite driver, nsjail, MCP server, OAuth, embedded UI,
@@ -10,6 +17,27 @@ Released for **Linux + macOS + Windows × amd64 + arm64** on every Orva tag.
 ---
 
 ## Install
+
+The Linux server binary additionally provides `orva setup --managed-witness
+PATH` (create a witness only, refusing replacement) and `orva setup
+--managed-layout provision|publish` (explicit fresh-instance layout steps).
+Neither flag enrolls legacy workloads. See the [supervised provisioning
+procedure](OPERATIONS.md#fresh-managed-provisioning).
+
+### Offline legacy enrollment (Linux server binary only)
+
+```sh
+orva managed enroll --dry-run --plan /safe/path/orva-enrollment.json
+orva managed enroll --apply --plan /safe/path/orva-enrollment.json --confirm
+```
+
+`--dry-run` is the default. The command locks the stopped instance selected
+by `--data-dir` (default `ORVA_DATA_DIR`), prints a canonical JSON plan, and
+optionally creates a new `--plan` file outside that instance. Applying
+requires an unchanged plan and explicit confirmation. Repeat `--exclude
+FUNCTION_UUID` for each unsupported function you elect to leave inactive.
+See the [offline procedure](OPERATIONS.md#offline-legacy-enrollment) before
+making changes. This command is not part of the shared slim CLI command tree.
 
 ### Linux + macOS
 
@@ -375,6 +403,81 @@ Secrets ride along with the function as `process.env.STRIPE_KEY` /
 
 ### Schedules + background jobs
 
+#### Managed workload pause and resume (optional server composition)
+
+`orva functions pause <function-uuid> --request FILE` and
+`orva functions resume <function-uuid> --request FILE` require the opt-in
+server routes. Names are not accepted. Review the exact UUID `generation` and
+decimal-string `policy_revision` and `authority_epoch` from the separately
+enabled configuration inspection first. Put those values and `confirm: true`
+in the request file (or use `--request -` for stdin). The CLI forwards the
+original JSON and prints a JSON acknowledgement. It does not read or refresh
+CAS values, retry, follow redirects, or fall back to legacy status changes. `--yes` skips the
+CLI prompt in unattended use; it does not supply `confirm: true`.
+
+Pause records durable intent. Resume requires live ADMIN and only publishes
+an inactive review-required generation: execution and standing work have not
+resumed. Fresh Factory installation and explicit source-aware review remain
+separate. See [the API contract](API.md#managed-workload-pause-and-resume-opt-in-only).
+
+#### Deleted-work history (optional server composition)
+
+`orva history list|get|capacity|purge|reissue` delegates to the same strict
+history HTTP service as optional MCP tools and history controls. Normal servers
+do not register that service: an unavailable-route error is expected, not an
+invitation to resume archived work through the live jobs API.
+
+```sh
+orva history list                           # first 100 metadata entries
+orva history capacity                       # decimal-string use/reservations/caps
+orva history get --request selector.json
+orva history list --request page.json       # target_id / after:{kind,id} / limit
+orva history reissue --request fresh.json --yes
+orva history purge --request purge.json --yes
+orva history get --request - < selector.json
+```
+
+All output is JSON on stdout, including the default output mode. Status is on
+stderr; `--quiet` silences it. `--request` is an original UTF-8 JSON file, or `-`
+for stdin, bounded to 1 MiB + 8 KiB. Get, purge and reissue require it; list and
+capacity default to `{"limit":100}` and `{}`. Filename completion suggests JSON
+files, never resolves a historical name into a new UUID. Duplicate/unknown
+fields still reach the strict server validator unchanged. No automatic retry
+or reconstruction from archived metadata occurs.
+
+READ permits inspection. Purge/reissue require live ADMIN plus interactive
+confirmation or `--yes`; that CLI confirmation does not insert or override the
+request's mandatory `confirm:true` or `reviewed:true`. A job reissue request
+contains `source:{kind:"job",id}`, an exact NEW `target_id`, fresh `payload`,
+`scheduled_at` and `max_attempts`. Cron requires fresh `name`, `expression`,
+`timezone` and explicit `enabled` instead. The service creates a NEW
+OPERATOR-origin work ID with old-to-new audit, never resumes/adopts an archive.
+Purge selects exact kind/UUIDs with `confirm:true`; 90 days is eligibility, not
+TTL. Reservations cannot purge. See `docs/API.md` for the request contract.
+
+The opt-in IAM cron fixture adds `orva cron resume <id> --fn <owner-uuid>
+--config-revision <decimal> --authority-generation <decimal>`. It requires current
+admin and resumes the original authority at the next future fire, without
+catch-up or adoption. Providing owner UUID and exact revisions lets an admin-only
+credential mutate without requiring read; omitting `--fn` performs a read-authorized
+owner lookup. Inspection remains read-gated.
+A function name in `--fn` also requires read for name resolution; only the UUID
+fast path skips that lookup.
+
+`cron update` and `cron delete` accept the same revision flags, required by the
+explicit IAM fixture. They never replace the supplied CAS with a fresh lookup.
+Delete retains the normal `--yes`/interactive confirmation convention and sends
+`confirm=true` to the staged endpoint. Use `cron list -o json` to inspect authority,
+source and revisions without rounding. Normal-serving resume is still a 404:
+these routes are fixture-only until coordinated cut-over.
+
+The CLI also has `orva jobs resume <id>` for the explicit IAM jobs fixture only.
+It requires live admin authority and revalidates the job's original creator and
+target; it never adopts function work or reopens terminal/quarantined jobs.
+Normal serving has no resume route yet (404 is expected). The fixture also
+requires admin for enqueue/retry/delete; this is not yet a normal API gate change.
+Use `jobs get/list -o json` to inspect authority state, reason and source metadata.
+
 ```bash
 # Cron: fire greeter at 09:00 IST every day.
 orva cron create --fn greeter --expr "0 9 * * *" --tz Asia/Kolkata \
@@ -404,6 +507,14 @@ orva backup download -f /backups/orva-$(date +%F).tar.gz
 # Restore. --yes is mandatory; the bare command refuses with a prompt.
 orva backup restore /backups/orva-2026-05-15.tar.gz --yes
 ```
+
+`backup download` also works against a managed instance with admin authority
+and writes a managed v2 archive. The online `backup restore` command is legacy
+only. With the **server binary** on a stopped destination, run
+`orva managed restore --archive FILE [--data-dir DIR]` for a dry run and add
+`--confirm` to rebuild into a fresh local Owner. Add `--same-owner` only when
+replaying on the original instance with its sealed stores intact. See the
+[managed backup and restore runbook](OPERATIONS.md#managed-mode-portable-recovery).
 
 After a successful restore the server exits with status **70** so its supervisor
 (systemd / OpenRC / `docker restart: unless-stopped`) reopens
@@ -479,8 +590,6 @@ orva routes delete /webhooks/stripe
 ```bash
 # Long-lived bearer for CI / a script / an AI agent.
 orva keys create --name ci-deploy --permissions invoke,write
-# Full instance operator key for `orva chat` (keep separate from CI keys).
-orva keys create --name terminal-ai --permissions read,write,invoke,admin
 # Auto-expiring key (0 = never).
 orva keys create --name temp-agent --permissions invoke --expires-in-days 30
 orva keys list
@@ -549,6 +658,12 @@ orva rollback greeter
 orva rollback greeter 019df210-…-deadbeef0001
 orva rollback greeter --code-hash 9f8e7d…
 ```
+
+With the optional managed-deployment fixture, pass an exact deployment UUID,
+not `--code-hash`. An unqualified CLI rollback can still select a concrete UUID
+client-side. Managed promotion keeps current configuration and stays inactive
+until a separate host installation and policy review; the CLI reports that
+state rather than implying the function is ready.
 
 ### Fixtures (saved request presets)
 
@@ -656,47 +771,11 @@ orva webhooks deliveries <subscription-uuid> -o json    # delivery history for a
 orva webhooks retry <delivery-uuid>                 # retry a failed delivery
 ```
 
-### AI assistant (`orva chat`)
+### AI access
 
-The same AI assistant as the dashboard's **AI** sidebar, in the terminal. It can
-operate your instance end-to-end (list/deploy functions, read logs, manage
-secrets, …). Providers, API keys, the default model, and the approval policy are
-configured in the web UI under **Settings → AI**; the CLI uses that saved
-selection. Chat is an operator surface: it needs an API key carrying all four
-permissions (`read,write,invoke,admin`) so its tool catalog can match the
-dashboard. A valid invoke-only deployment key is intentionally rejected. The
-dashboard works with your admin web session; that browser session is not shared
-with the CLI.
-
-```bash
-# Interactive streaming REPL (banner shows the active provider/model).
-orva chat
-#   slash commands: /help /model /thinking /new /clear /yolo /exit
-#   Ctrl-C aborts the current turn; Ctrl-D exits.
-
-# One-shot — prints the reply to stdout and exits (pipe-friendly).
-orva chat -p "list my functions and their status"
-echo "what failed today?" | orva chat -p @-
-
-# Per-session overrides (don't change the saved default):
-orva chat --model gpt-4o --thinking deep -p "summarize recent errors"
-```
-
-In **Dashboard → API keys**, choose **New key**, name a separate terminal/agent
-credential, and select **read**, **write**, **invoke**, and **admin**. Do not
-reuse a deployment key. An administrator already authenticated through the CLI
-can create the equivalent key with the command below. Pass the newly shown secret
-to `login` over stdin (not on the command line):
-
-```bash
-orva keys create --name terminal-ai --permissions read,write,invoke,admin
-printf %s "$ORVA_KEY" | orva login --endpoint https://orva.example.com --api-key - --test
-```
-
-Write/destructive tools pause for a `[y/N]` approval per the server's policy;
-reads and invokes run freely. In non-interactive use (piped), a tool that needs
-approval **fails closed** unless you pass `--auto-approve`. On a terminal the
-reply is rendered as markdown; piped, it's plain text (`--raw` forces plain).
+The in-product AI assistant remains available in the dashboard under **AI**.
+External AI agents can use Orva through the MCP endpoint; the CLI does not
+provide a chat client.
 
 ### Reference docs (`orva docs`)
 
@@ -743,7 +822,6 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva diff <name> [--from --to] [-o json] [--no-color]` | Git-style unified diff between two past deployments |
 | `orva activity [--follow \| --source X]` | Audit log: every API call, CLI command, MCP invoke |
 | `orva system health / metrics / db-stats / storage / vacuum` | Diagnostics + maintenance |
-| `orva chat [-p MSG]` | Chat with the Orva AI assistant — interactive REPL, or one-shot with `-p` |
 | `orva docs [--raw]` | Render the Orva reference documentation in the terminal |
 | `orva upgrade [--check] [--force] [--data-dir DIR]` | Self-update from the latest GitHub release |
 | `orva completion <shell>` | Emit a completion script (see below) |
@@ -972,7 +1050,7 @@ a fully clean slate.
 
 The `orva` you install via `install-cli.sh` / `install-cli.ps1` is the
 **slim CLI build** — it can talk to any remote orvad, but it doesn't
-have `orva serve` or `orva setup`. Those live in the
+have `orva serve`, `orva setup`, or `orva managed enroll`. Those live in the
 server binary at `/opt/orva/bin/orva` after a `scripts/install.sh`
 deployment.
 
@@ -984,7 +1062,7 @@ precedence between them.
 
 That matters only for the server-only subcommands: both binaries expose the
 same surface for talking to a remote server, so day-to-day behaviour is
-identical, but `serve` and `setup` exist only on the full server binary. Run
+identical, but `serve`, `setup` and `managed enroll` are server-only. Run
 `orva --help` if you are unsure which one you have — the slim CLI does not list
 them. The slim build is just smaller.
 
@@ -995,6 +1073,7 @@ them. The slim build is just smaller.
 | Windows | ✅ (amd64, arm64) | ❌ |
 | Size | ~20 MB | ~55 MB |
 | `orva serve` | ❌ | ✅ |
+| `orva managed enroll` | ❌ | ✅ |
 | `orva setup` | ❌ | ✅ |
 | All other subcommands | ✅ | ✅ |
 
@@ -1020,3 +1099,12 @@ Planned path when triggered:
 
 Until then, the documented xattr / `Unblock-File` workflow is the
 supported path.
+# Staged `orva iam` commands
+
+`orva iam policies` provides list/get/create/update/impact/attach/detach/revoke/
+delete; `orva iam permissions` provides get/put/review. The commands require an
+explicitly activated compatible scratch endpoint; normal serving routes remain
+off. Mutations read bounded exact JSON from `--request @file` or `@-`, never inline
+argv. Destructive operations require normal confirmation plus `confirm:true`.
+All payloads use JSON stdout. See [IAM_MANAGEMENT.md](IAM_MANAGEMENT.md) for exact
+request shapes, decimal counters, pinned versions and source-aware inspection.

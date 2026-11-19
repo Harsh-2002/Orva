@@ -60,6 +60,57 @@ def threads():
     return {"res": {str(k): v for k, v in out.items()}}
 
 
+def concurrent_initialization():
+    import queue
+
+    entered = threading.Event()
+    release = threading.Event()
+    observations = queue.Queue()
+    original_chan = orva._Chan
+    original_lock = orva._chan_lock
+
+    def paused_chan(fd):
+        entered.set()
+        if not release.wait(5):
+            raise RuntimeError("initialization barrier timed out")
+        return original_chan(fd)
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread().name == "second":
+                observations.put("lock")
+            original_lock.acquire()
+
+        def __exit__(self, *_):
+            original_lock.release()
+
+    orva._Chan = paused_chan
+    orva._chan_lock = ObservedLock()
+    results = {}
+
+    def work(name):
+        results[name] = attempt(lambda: kv.incr(name))
+        if name == "second":
+            observations.put("returned")
+
+    first = threading.Thread(target=work, args=("first",), name="first")
+    second = threading.Thread(target=work, args=("second",), name="second")
+    first.start()
+    try:
+        if not entered.wait(5):
+            raise RuntimeError("initializer did not enter")
+        second.start()
+        observed = observations.get(timeout=5)
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    if first.is_alive() or second.is_alive():
+        raise RuntimeError("initialization callers did not finish")
+    return {"observed": observed, "results": results}
+
+
 def eof():
     return {"first": attempt(lambda: kv.get("x")), "second": attempt(lambda: kv.get("y"))}
 

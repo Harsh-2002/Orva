@@ -146,6 +146,7 @@ func registerKeyTools(rc *regCtx) {
 				ExpiresAt: expiresAt, CreatedAt: time.Now().UTC(),
 			}, nil
 		},
+		withOneTimeResult("key"),
 	)
 
 	regAddTool(rc, permAdmin,

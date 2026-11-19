@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,21 @@ import (
 var sdkProtoMarker = []byte("orva-sdk-proto:1")
 
 const sdkMarkerWindow = 4 << 10
+
+// CheckManagedRuntime validates the endpoints required by a managed worker
+// without executing or importing any runtime code.
+func CheckManagedRuntime(root string, lang Language) error {
+	if !filepath.IsAbs(root) {
+		return fmt.Errorf("managed runtime root must be absolute")
+	}
+	if _, _, err := resolveRuntime(ExecConfig{Language: lang, runtimeRootfs: root}); err != nil {
+		return err
+	}
+	if !adapterSupportsSDK(root, lang) {
+		return fmt.Errorf("installed %s runtime adapter does not support the managed SDK channel", lang)
+	}
+	return nil
+}
 
 // adapterPathFor returns the installed adapter for a language inside rootfs
 // (the runtime directory, i.e. <RootfsDir>/<language>), mirroring resolveRuntime.

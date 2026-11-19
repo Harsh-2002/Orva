@@ -13,6 +13,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
 const (
@@ -113,10 +114,19 @@ func (h *Host) invoke(ctx context.Context, caller sandbox.SDKCaller, args json.R
 type chStream struct {
 	s     *handlers.F2FStream
 	lease string
+	iam   *iamStream
 
 	mu      sync.Mutex
 	pending []byte
 	ended   bool
+}
+
+func (cs *chStream) finish(err error) {
+	if cs.iam != nil {
+		cs.iam.stopCancel()
+		cs.iam.call.Finish()
+	}
+	cs.s.Finish(err)
 }
 
 // streamTable is the per-channel stream state held in the SDKSession.
@@ -124,6 +134,7 @@ type streamTable struct {
 	mu      sync.Mutex
 	closed  bool
 	opening int
+	waiting map[*workloadiam.Admission]string
 	m       map[string]*chStream
 	// tomb remembers closed handles (handle -> lease) so close stays idempotent
 	// while a handle from another lease is still NOT_FOUND.
@@ -137,6 +148,13 @@ func newStreamTable() sandbox.SDKSessionState {
 func (t *streamTable) LeaseRevoked(lease string) {
 	t.mu.Lock()
 	var gone []*chStream
+	var waiting []*workloadiam.Admission
+	for call, l := range t.waiting {
+		if l == lease {
+			waiting = append(waiting, call)
+			delete(t.waiting, call)
+		}
+	}
 	for k, cs := range t.m {
 		if cs.lease == lease {
 			gone = append(gone, cs)
@@ -149,8 +167,11 @@ func (t *streamTable) LeaseRevoked(lease string) {
 		}
 	}
 	t.mu.Unlock()
+	for _, call := range waiting {
+		call.Finish()
+	}
 	for _, cs := range gone {
-		cs.s.Finish(context.Canceled)
+		cs.finish(context.Canceled)
 	}
 }
 
@@ -158,11 +179,16 @@ func (t *streamTable) Closed() {
 	t.mu.Lock()
 	t.closed = true
 	gone := t.m
+	waiting := t.waiting
+	t.waiting = nil
 	t.m = map[string]*chStream{}
 	t.tomb = map[string]string{}
 	t.mu.Unlock()
+	for call := range waiting {
+		call.Finish()
+	}
 	for _, cs := range gone {
-		cs.s.Finish(context.Canceled)
+		cs.finish(context.Canceled)
 	}
 }
 
@@ -329,7 +355,7 @@ func (h *Host) streamClose(ctx context.Context, caller sandbox.SDKCaller, args j
 	}
 	if cs := t.lookup(a.Handle, caller.Exec.Lease); cs != nil {
 		t.retire(a.Handle)
-		cs.s.Finish(context.Canceled)
+		cs.finish(context.Canceled)
 		return struct{}{}, nil
 	}
 	t.mu.Lock()

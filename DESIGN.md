@@ -466,7 +466,7 @@ component is what keeps that from recurring.
 - **Width:** `w-64` mobile drawer, `lg:w-52` (208px) desktop inline.
 - **Background:** `bg-background border-r border-border`. Same as page; only the right border separates it.
 - **Brand block:** `h-16`, rendering `BrandLockup` — the same component the mobile top bar uses, so the mark cannot be one size in the bar and another in the drawer. Wordmark in `font-mono` (yes, mono — the brand wears its operator's clothes).
-- **Items:** Overview, Chat, and Functions stay visible. Lower-frequency routes are grouped under collapsible Automation, Observe, and Connect disclosures; Settings and Docs remain direct links. Rows use `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium` with distinct icons by silhouette.
+- **Items:** one flat list, ordered by operator task: Overview, Functions, Policies (managed IAM only), Schedules, Jobs, Webhooks, Invocations, Traces, Activity, Keys, Channels, Egress, Chat, Settings and Docs. No collapsible groups, group headings or indented child rows. The navigation scrolls on short screens; a closed mobile drawer is not keyboard reachable.
 - **Active:** `bg-primary text-white shadow-lg shadow-purple-900/20`. Hover: `text-white bg-surface-hover`.
 - **Mobile:** the desktop sidebar transforms into an off-canvas drawer toggled from a `lg:hidden` top bar with a hamburger icon. The bar pads its **outer** element with `pt-safe` and puts the 56px row on an inner div, so the status-bar inset adds to the bar instead of eating it; page content clears it with `pt-topbar`, which is the same sum.
 
@@ -652,3 +652,22 @@ number in this section was measured that way, across the shipped route set at
 375/390/430/768/820/1280/1920 with `pointer: coarse` emulated on the phone widths. It is there because every rule above was already true in
 at least one view and false in another; a convention nothing checks is a
 convention that decays.
+
+### Function permissions (staged)
+
+The dedicated permissions page starts with current stored access, grouped by
+service, and one Edit/Create action. The owner rejected the original authority
+sheet as confusing and chose an AWS-style guided builder: service, actions,
+resources, permission review, then review the complete policy draft before Save.
+Inbound callers are edited separately within that same draft. Phone and desktop
+retain the same choices and actions.
+
+Permission drafts are separate from source/deployment edits. Save appears only
+on the final changes screen; adding a permission does not save it. Step changes
+focus and scroll the task into view rather than repeating page context. Unknown capabilities deny
+editing; preview labels do not grant authority. Retained grants awaiting review
+are described as not in force, not faded into illegibility. Technical digests
+and audit details, plus read-only canonical JSON, use Advanced disclosures.
+Scope or context changes never silently broaden resources or remove selected
+actions; access to every key requires an explicit choice in the builder.
+This page remains unrouted and API-unwired.

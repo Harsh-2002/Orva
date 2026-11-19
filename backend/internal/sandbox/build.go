@@ -27,6 +27,7 @@ package sandbox
 //   - the limits are an order of magnitude above an invoke's
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
 // Paths inside a build jail. Callers compose argv from these: the code
@@ -78,7 +82,13 @@ const (
 
 // BuildConfig describes one build step to run inside nsjail.
 type BuildConfig struct {
-	Language Language
+	// Runtime selects a concrete store generation. Non-nil never uses RootfsDir.
+	// RunBuild acquires its own lease; callers retain no release alias.
+	Runtime *BuildRuntime
+	// Domain is optional host-owned epoch placement, never an author setting.
+	Domain     *workloadfence.Domain
+	jailParent *workloadfence.JailParent
+	Language   Language
 
 	// CodeDir is the host directory bind-mounted READ-WRITE at BuildCodeDir.
 	// This is the version scratch dir; the step is expected to mutate it.
@@ -139,6 +149,12 @@ type BuildConfig struct {
 	RootfsDir string
 }
 
+// BuildRuntime is trusted lifetime metadata, not runtime approval or a path.
+type BuildRuntime struct {
+	Store      *artifactfs.Store
+	Generation string
+}
+
 // ErrBuildTimedOut means the step hit its own deadline (not the caller's).
 var ErrBuildTimedOut = errors.New("build step timed out")
 
@@ -149,14 +165,42 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 	if len(cfg.Argv) == 0 {
 		return nil, errors.New("build step has no command")
 	}
+	if cfg.Domain != nil && (cfg.MemoryMB < 0 || cfg.MaxPids < 0) {
+		return nil, errors.New("sandbox epoch build limits cannot be negative")
+	}
 	if cfg.MemoryMB <= 0 {
 		cfg.MemoryMB = defaultBuildMemoryMB
 	}
 	if cfg.MaxPids <= 0 {
 		cfg.MaxPids = defaultBuildMaxPids
 	}
+	if err := validateDomainLimits(cfg.Domain, cfg.MemoryMB, cfg.MaxPids, 0); err != nil {
+		return nil, err
+	}
 
-	rootfs, err := resolveBuildRuntime(cfg)
+	var runtimeLease *artifactfs.Lease
+	if cfg.Runtime != nil {
+		binding := *cfg.Runtime
+		if binding.Store == nil || binding.Generation == "" {
+			return nil, fmt.Errorf("build runtime binding: %w", artifactfs.ErrInvalid)
+		}
+		var err error
+		runtimeLease, err = binding.Store.Acquire(binding.Generation)
+		if err != nil {
+			return nil, fmt.Errorf("acquire build runtime: %w", err)
+		}
+		defer runtimeLease.Release()
+		id := runtimeLease.Identity()
+		if id.Kind != artifactfs.KindRuntime || id.Owner != string(cfg.Language) ||
+			(cfg.Language != Node && cfg.Language != Python) {
+			return nil, fmt.Errorf("build runtime language/kind: %w", artifactfs.ErrInvalid)
+		}
+	}
+	rootfs, err := resolveBuildRuntimeLease(cfg, runtimeLease)
+	if err != nil {
+		return nil, err
+	}
+	cfg.jailParent, err = prepareDomain(ctx, cfg.Domain)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +264,20 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 		"network_mode", cfg.NetworkMode,
 		"egress_policy_gen", cfg.EgressPolicyGen)
 
-	out, runErr := exec.CommandContext(ctx, cfg.NsjailBin, args...).CombinedOutput()
+	var out []byte
+	var runErr error
+	if cfg.Domain == nil {
+		out, runErr = exec.CommandContext(ctx, cfg.NsjailBin, args...).CombinedOutput()
+	} else {
+		cmd := exec.CommandContext(ctx, cfg.NsjailBin, args...)
+		var combined bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &combined, &combined
+		runErr = cfg.Domain.Start(ctx, cmd, cfg.jailParent)
+		if runErr == nil {
+			runErr = cmd.Wait()
+		}
+		out = combined.Bytes()
+	}
 	if ctx.Err() == context.DeadlineExceeded {
 		return out, fmt.Errorf("%w after %s", ErrBuildTimedOut, cfg.Timeout)
 	}
@@ -250,12 +307,22 @@ func prepareCacheDirs(cacheDir string) error {
 // it. Without this check a missing toolchain surfaces as nsjail exit 255 with
 // no explanation of what was missing.
 func resolveBuildRuntime(cfg BuildConfig) (string, error) {
+	return resolveBuildRuntimeLease(cfg, nil)
+}
+
+func resolveBuildRuntimeLease(cfg BuildConfig, lease *artifactfs.Lease) (string, error) {
 	switch cfg.Language {
 	case Node, Python:
 	default:
 		return "", fmt.Errorf("unsupported language: %s", cfg.Language)
 	}
 	rootfs := filepath.Join(cfg.RootfsDir, string(cfg.Language))
+	if cfg.Runtime != nil {
+		if lease == nil {
+			return "", fmt.Errorf("build runtime requires owned lease: %w", artifactfs.ErrInvalid)
+		}
+		rootfs = lease.Path()
+	}
 	info, err := os.Stat(rootfs)
 	if err != nil {
 		return "", fmt.Errorf("rootfs not found at %s: %w", rootfs, err)
@@ -268,6 +335,12 @@ func resolveBuildRuntime(cfg BuildConfig) (string, error) {
 		return "", fmt.Errorf("build command must be an absolute in-jail path, got %q", bin)
 	}
 	binPath := filepath.Join(rootfs, filepath.FromSlash(strings.TrimPrefix(bin, "/")))
+	if cfg.Runtime != nil {
+		binPath, err = resolveVerifiedEndpoint(rootfs, strings.TrimPrefix(bin, "/"))
+		if err != nil {
+			return "", fmt.Errorf("build runtime endpoint: %w", err)
+		}
+	}
 	binInfo, err := os.Stat(binPath)
 	if err != nil || binInfo.IsDir() || binInfo.Mode()&0o111 == 0 {
 		return "", fmt.Errorf("build tool is missing or not executable at %s", binPath)
@@ -320,7 +393,11 @@ func buildJailArgs(cfg BuildConfig, rootfs, scratch string) ([]string, error) {
 
 	args = append(args, egressNetArgs(cfg.NetworkMode, cfg.ResolvConfPath, cfg.HostsPath)...)
 
-	if mount := cgroupv2Delegate(); mount != "" {
+	mount, err := domainCgroupMount(cfg.Domain, cfg.jailParent)
+	if err != nil {
+		return nil, err
+	}
+	if mount != "" {
 		memMaxBytes := int64(cfg.MemoryMB) * 1024 * 1024 * 3 / 2
 		args = append(args,
 			"--use_cgroupv2",

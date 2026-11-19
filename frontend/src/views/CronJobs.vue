@@ -9,11 +9,37 @@
           Run functions on a cron schedule.
         </p>
       </div>
-      <Button @click="showCreateModal = true">
-        <PlusCircle class="w-4 h-4" />
-        New schedule
-      </Button>
+      <div class="flex gap-2">
+        <Button
+          v-if="historyEnabled"
+          variant="secondary"
+          @click="historyOpen = !historyOpen"
+        >
+          History
+        </Button>
+        <Button
+          v-if="canManage"
+          :disabled="blocked"
+          @click="openCreate"
+        >
+          <PlusCircle class="w-4 h-4" />
+          New schedule
+        </Button>
+        <Button
+          ref="refreshControl"
+          variant="secondary"
+          :disabled="refreshing || saving"
+          @click="loadJobs"
+        >
+          Refresh
+        </Button>
+      </div>
     </div>
+    <HistoryInspector
+      v-if="historyEnabled"
+      v-show="historyOpen"
+      :active="historyOpen"
+    />
 
     <LoadError
       v-if="loadError"
@@ -22,6 +48,26 @@
       :on-retry="loadJobs"
       class="mb-3"
     />
+    <p
+      v-if="mutationError"
+      role="alert"
+      class="text-sm text-danger break-words"
+    >
+      {{ mutationError }}
+    </p>
+    <p
+      v-if="stale"
+      role="status"
+      class="text-sm text-foreground-muted"
+    >
+      Snapshot is stale. Refresh and review current authority before changing schedules.
+    </p>
+    <p
+      v-else-if="loaded && !canManage"
+      class="text-sm text-foreground-muted"
+    >
+      Read-only. Schedule management requires current admin authority.
+    </p>
 
     <div class="bg-background border border-border rounded-lg overflow-x-auto scrollable">
       <!-- Mobile (<sm) stacked-row list. -->
@@ -29,6 +75,7 @@
         <li
           v-for="job in jobs"
           :key="job.id"
+          :data-schedule-id="job.id"
           class="px-4 py-3 cursor-pointer"
           @click="rowAction(() => editSchedule(job))($event)"
         >
@@ -43,7 +90,7 @@
                   {{ job.function_name }}
                 </button>
                 <span
-                  v-if="job.name"
+                  v-if="job.name && !managed"
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-surface-subtle text-foreground-muted border-border"
                   :title="`Declared by the function itself as &quot;${job.name}&quot;, not created here`"
                 >
@@ -58,9 +105,18 @@
                     class="h-3 w-3 shrink-0"
                     aria-hidden="true"
                   />
-                  {{ job.enabled ? 'Active' : 'Paused' }}
+                  {{ job.enabled ? (managed ? 'Enabled' : 'Active') : (managed ? 'Disabled' : 'Paused') }}
                 </span>
               </div>
+              <JobAuthority
+                v-if="managed"
+                :job="job"
+                kind="schedule"
+                :can-manage="canManage && !blocked"
+                :stale="stale"
+                :busy="saving"
+                @resume="resumeSchedule"
+              />
               <div class="mt-1 text-[11px] text-foreground font-mono break-all">
                 {{ job.cron_expression }}
               </div>
@@ -73,18 +129,26 @@
                 <span>next {{ job.next_run_at ? formatDate(job.next_run_at) : EMPTY }}</span>
               </div>
             </div>
-            <div class="flex items-center gap-1 shrink-0">
+            <div
+              v-if="canManage"
+              class="flex items-center gap-1 shrink-0"
+            >
               <IconButton
+                v-if="!managed || job.authority_state === 'active'"
+                :disabled="blocked"
                 :icon="job.enabled ? Pause : Play"
-                :title="job.enabled ? 'Pause' : 'Resume'"
+                :title="job.enabled ? 'Disable schedule' : 'Enable schedule'"
                 @click="toggleSchedule(job)"
               />
               <IconButton
+                v-if="!managed || job.authority_state === 'active'"
+                :disabled="blocked"
                 :icon="Edit"
                 title="Edit"
                 @click="editSchedule(job)"
               />
               <IconButton
+                :disabled="blocked"
                 :icon="Trash2"
                 variant="danger"
                 title="Delete"
@@ -133,6 +197,7 @@
           <tr
             v-for="job in jobs"
             :key="job.id"
+            :data-schedule-id="job.id"
             class="hover:bg-surface-hover transition-colors cursor-pointer"
             @click="rowAction(() => editSchedule(job))($event)"
           >
@@ -149,13 +214,22 @@
                      code; the dashboard cannot set one. That is what makes an
                      unexpected entry here visible as one. -->
                 <span
-                  v-if="job.name"
+                  v-if="job.name && !managed"
                   class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-surface-subtle text-foreground-muted border-border shrink-0"
                   :title="`Declared by the function itself as &quot;${job.name}&quot;, not created here`"
                 >
                   SDK
                 </span>
               </div>
+              <JobAuthority
+                v-if="managed"
+                :job="job"
+                kind="schedule"
+                :can-manage="canManage && !blocked"
+                :stale="stale"
+                :busy="saving"
+                @resume="resumeSchedule"
+              />
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-col gap-1">
@@ -176,7 +250,7 @@
                   class="h-3 w-3 shrink-0"
                   aria-hidden="true"
                 />
-                {{ job.enabled ? 'Active' : 'Paused' }}
+                {{ job.enabled ? (managed ? 'Enabled' : 'Active') : (managed ? 'Disabled' : 'Paused') }}
               </span>
             </td>
             <td class="px-6 py-4 text-foreground-muted text-xs hidden md:table-cell">
@@ -186,18 +260,26 @@
               {{ job.next_run_at ? formatDate(job.next_run_at) : EMPTY }}
             </td>
             <td class="px-6 py-4 text-right">
-              <div class="inline-flex items-center gap-1">
+              <div
+                v-if="canManage"
+                class="inline-flex items-center gap-1"
+              >
                 <IconButton
+                  v-if="!managed || job.authority_state === 'active'"
+                  :disabled="blocked"
                   :icon="job.enabled ? Pause : Play"
-                  :title="job.enabled ? 'Pause' : 'Resume'"
+                  :title="job.enabled ? 'Disable schedule' : 'Enable schedule'"
                   @click="toggleSchedule(job)"
                 />
                 <IconButton
+                  v-if="!managed || job.authority_state === 'active'"
+                  :disabled="blocked"
                   :icon="Edit"
                   title="Edit"
                   @click="editSchedule(job)"
                 />
                 <IconButton
+                  :disabled="blocked"
                   :icon="Trash2"
                   variant="danger"
                   title="Delete"
@@ -456,7 +538,7 @@
           Cancel
         </Button>
         <Button
-          :disabled="!form.function_name || !form.cron"
+          :disabled="blocked || !canManage || !form.function_name || !form.cron"
           @click="saveSchedule"
         >
           {{ editingJob ? 'Update' : 'Create' }} schedule
@@ -467,8 +549,12 @@
 </template>
 
 <script setup>
+defineProps({ historyEnabled: { type: Boolean, default: false } })
+import HistoryInspector from '@/components/history/HistoryInspector.vue'
+const historyOpen = ref(false)
+import { humanizeCron } from '@/utils/cronDescription'
 import { EMPTY } from '@/utils/format'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
 import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
@@ -476,7 +562,8 @@ import IconButton from '@/components/common/IconButton.vue'
 import { rowAction } from '@/utils/rowNav'
 import Modal from '@/components/common/Modal.vue'
 import LoadError from '@/components/common/LoadError.vue'
-import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
+import { listCronSchedules, createCronSchedule, updateCronSchedule, deleteCronSchedule, resumeCronSchedule, listFunctions, browserTimezone } from '@/api/endpoints'
+import JobAuthority from '@/components/jobs/JobAuthority.vue'
 import { useConfirmStore } from '@/stores/confirm'
 import { runtimeLabel } from '@/utils/runtime'
 
@@ -509,6 +596,17 @@ const confirmStore = useConfirmStore()
 const jobs = ref([])
 const loadError = ref('')
 const loaded = ref(false)
+const canManage = ref(false)
+const managed = ref(false)
+const stale = ref(true)
+const refreshing = ref(false)
+const saving = ref(false)
+const mutationError = ref('')
+const blocked = computed(() => stale.value || refreshing.value || saving.value)
+let active = false
+let generation = 0
+let functionGeneration = 0
+const refreshControl = ref(null)
 const functions = ref([])
 const fnOptions = computed(() => [
   { value: '', label: 'Select a function' },
@@ -546,22 +644,35 @@ const simpleSchedule = ref({
 })
 
 const loadJobs = async () => {
+  if (!active || saving.value) return
+  const request = ++generation
+  refreshing.value = true
   try {
     const res = await listCronSchedules()
-    jobs.value = res.data.schedules || []
+    if (!active || request !== generation) return
+    if (!Array.isArray(res.data.schedules)) throw new Error('Invalid schedule response')
+    jobs.value = res.data.schedules
+    managed.value = res.data.cron_controls === true || jobs.value.some(row => row.authority_state)
+    canManage.value = managed.value ? res.data.cron_controls === true && res.data.can_manage === true : true
+    stale.value = false
     loadError.value = ''
   } catch (e) {
+    if (!active || request !== generation) return
+    stale.value = true
     loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
   } finally {
-    loaded.value = true
+    if (active && request === generation) { loaded.value = true; refreshing.value = false }
   }
 }
 
 const loadFunctions = async () => {
+  const request = ++functionGeneration
   try {
     const res = await listFunctions()
+    if (!active || request !== functionGeneration) return
     functions.value = res.data.functions || []
   } catch (e) {
+    if (!active || request !== functionGeneration) return
     confirmStore.notify({
       title: 'Could not load functions',
       message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
@@ -592,46 +703,6 @@ const updateCronFromSimple = () => {
   }
 }
 
-// A cron field is only describable in words when it is a single in-range
-// integer. Ranges, lists, steps and day names ("1-5", "1,3,5", "*/2", "MON")
-// index nothing in a weekday table and pad to nonsense in a clock reading, so
-// they must fall through to the literal expression instead of being spelled
-// out. `0 9 * * 1-5` used to render "Every undefined at 09:00".
-const plainField = (field, lo, hi) => {
-  if (!/^\d{1,2}$/.test(field)) return false
-  const n = Number(field)
-  return n >= lo && n <= hi
-}
-
-const humanizeCron = (cron) => {
-  if (!cron) return 'Invalid expression'
-
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return 'Invalid format (use 5 fields)'
-
-  const [min, hour, day, month, dow] = parts
-
-  if (cron === '* * * * *') return 'Every minute'
-
-  const atTime = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
-
-  if (plainField(min, 0, 59) && hour === '*' && day === '*' && month === '*' && dow === '*') {
-    return `Every hour at minute ${min}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && dow === '*') {
-    return `Every day at ${atTime}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && day === '*' && month === '*' && plainField(dow, 0, 6)) {
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    return `Every ${days[Number(dow)]} at ${atTime}`
-  }
-  if (plainField(min, 0, 59) && plainField(hour, 0, 23) && plainField(day, 1, 31) && month === '*' && dow === '*') {
-    return `On day ${day} of every month at ${atTime}`
-  }
-
-  return `Custom: ${cron}`
-}
-
 const formatDate = (date) => {
   return new Date(date).toLocaleString('en-US', {
     month: 'short',
@@ -642,6 +713,9 @@ const formatDate = (date) => {
 }
 
 const saveSchedule = async () => {
+  if (!canManage.value || blocked.value) return
+  saving.value = true
+  const request = ++generation
   try {
     if (editingJob.value) {
       // Edit existing — use the schedule id we tracked when opening the modal.
@@ -650,6 +724,7 @@ const saveSchedule = async () => {
         cron: form.value.cron,
         timezone: form.value.timezone,
         enabled: form.value.enabled,
+        ...expectations(editingJob.value),
       })
     } else {
       await createCronSchedule(form.value.function_name, {
@@ -658,18 +733,21 @@ const saveSchedule = async () => {
         enabled: form.value.enabled,
       })
     }
-    await loadJobs()
+    if (!active || request !== generation) return
+    saving.value = false
+    mutationError.value = ''
     closeModal()
+    await loadJobs()
+    if (active) { await nextTick(); refreshControl.value?.$el?.focus() }
   } catch (e) {
-    confirmStore.notify({
-      title: 'Failed to save schedule',
-      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
-      danger: true,
-    })
+    if (active && request === generation) mutationFailed(e)
+  } finally {
+    if (active && request === generation) saving.value = false
   }
 }
 
 const editSchedule = (job) => {
+  if (!canManage.value || blocked.value || (managed.value && job.authority_state !== 'active')) return
   editingJob.value = job
   form.value = {
     function_name: job.function_name,
@@ -686,22 +764,15 @@ const editSchedule = (job) => {
 }
 
 const toggleSchedule = async (job) => {
-  try {
-    await updateCronSchedule(job.id, {
+  await mutateSchedule(job, () => updateCronSchedule(job.id, {
       function_id: job.function_id,
       enabled: !job.enabled,
-    })
-    await loadJobs()
-  } catch (e) {
-    confirmStore.notify({
-      title: job.enabled ? 'Failed to pause schedule' : 'Failed to resume schedule',
-      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
-      danger: true,
-    })
-  }
+      ...expectations(job),
+    }))
 }
 
 const deleteSchedule = async (job) => {
+  if (!canManage.value || blocked.value) return
   const ok = await confirmStore.ask({
     title: 'Delete schedule?',
     message: `Cron schedule for "${job.function_name}" will be removed.`,
@@ -710,16 +781,43 @@ const deleteSchedule = async (job) => {
   })
   if (!ok) return
 
+  await mutateSchedule(job, () => deleteCronSchedule(job.id, job.function_id, expectations(job)))
+}
+const expectations = job => managed.value ? { expected_config_revision: job.config_revision, expected_authority_generation: job.authority_generation } : {}
+const mutationFailed = error => {
+  saving.value = false
+  stale.value = true
+  mutationError.value = error?.response?.status === 409
+    ? 'Schedule changed or is not eligible. Refresh and review before trying again.'
+    : (error?.response?.data?.error?.message || error?.message || 'Schedule change failed')
+}
+const mutateSchedule = async (job, send) => {
+  if (!active || !canManage.value || blocked.value) return
+  if (managed.value && (typeof job.config_revision !== 'string' || typeof job.authority_generation !== 'string')) { stale.value = true; return }
+  saving.value = true
+  const request = ++generation
   try {
-    await deleteCronSchedule(job.id, job.function_id)
+    await send()
+    if (!active || request !== generation) return
+    saving.value = false
+    mutationError.value = ''
     await loadJobs()
-  } catch (e) {
-    confirmStore.notify({
-      title: 'Failed to delete schedule',
-      message: e?.response?.data?.error?.message || e?.message || 'Unknown error',
-      danger: true,
-    })
+    if (active) { await nextTick(); refreshControl.value?.$el?.focus() }
+  } catch (error) {
+    if (active && request === generation) mutationFailed(error)
+  } finally {
+    if (active && request === generation) saving.value = false
   }
+}
+const resumeSchedule = async job => {
+  if (!canManage.value || blocked.value || job.authority_state !== 'suspended') return
+  const ok = await confirmStore.ask({ title: 'Resume schedule?', message: 'Revalidate its original authority and schedule the next future firing only. Missed firings will not run.', confirmLabel: 'Resume schedule' })
+  if (ok) await mutateSchedule(job, () => resumeCronSchedule(job.id, job.function_id, expectations(job)))
+}
+const openCreate = () => {
+  if (!canManage.value || blocked.value) return
+  loadFunctions()
+  showCreateModal.value = true
 }
 
 const closeModal = () => {
@@ -741,9 +839,15 @@ const closeModal = () => {
   scheduleType.value = 'simple'
 }
 
-onMounted(() => {
+const activate = () => {
+  if (active) return
+  active = true
   loadJobs()
-  loadFunctions()
   updateCronFromSimple()
-})
+}
+const deactivate = () => { active = false; generation++; functionGeneration++; saving.value = false; refreshing.value = false; stale.value = true; closeModal() }
+onMounted(activate)
+onActivated(activate)
+onDeactivated(deactivate)
+onBeforeUnmount(deactivate)
 </script>

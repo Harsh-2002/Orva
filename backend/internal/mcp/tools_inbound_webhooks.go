@@ -105,6 +105,10 @@ func registerInboundWebhookTools(rc *regCtx) {
 		},
 	)
 
+	if deps.Triggers != nil {
+		registerExposureTools(rc, false)
+		return
+	}
 	regAddTool(rc, permAdmin,
 		&mcpsdk.Tool{
 			Name:        "create_inbound_webhook",
@@ -151,6 +155,7 @@ func registerInboundWebhookTools(rc *regCtx) {
 				Secret:         secret,
 			}, nil
 		},
+		withOneTimeResult("secret"),
 	)
 
 	regAddTool(rc, permAdmin,

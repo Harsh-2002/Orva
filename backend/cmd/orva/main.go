@@ -25,7 +25,7 @@ func main() {
 	// told the operator to run `orva serve --config orva.yaml`, a flag that
 	// does not exist. docs/CONFIG.md has always documented configuration as
 	// environment variables only.
-	root.AddCommand(newServeCmd(), newSetupCmd())
+	root.AddCommand(newServeCmd(), newSetupCmd(), newManagedCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

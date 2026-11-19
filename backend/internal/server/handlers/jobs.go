@@ -8,16 +8,23 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 )
 
 // JobsHandler exposes the operator-authenticated background-job queue.
 type JobsHandler struct {
-	DB       *database.Database
-	Registry *registry.Registry
+	DB           *database.Database
+	Registry     *registry.Registry
+	AsyncEnabled bool
+	AsyncIAM     *workloadasync.Service
 }
 
 // Enqueue handles POST /api/v1/jobs.
 func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
+	if h.AsyncEnabled {
+		h.asyncEnqueue(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 
 	body, err := readBoundedBody(r.Body, MaxEnqueueBody)
@@ -43,6 +50,10 @@ func (h *JobsHandler) Enqueue(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /api/v1/jobs?status=...&function_id=...&limit=...
 func (h *JobsHandler) List(w http.ResponseWriter, r *http.Request) {
+	if h.AsyncEnabled {
+		h.asyncList(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	status := r.URL.Query().Get("status")
 	fnID := r.URL.Query().Get("function_id")
@@ -65,6 +76,10 @@ func (h *JobsHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/jobs/{id}.
 func (h *JobsHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if h.AsyncEnabled {
+		h.asyncGet(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	job, err := h.DB.GetJob(id)
@@ -78,6 +93,10 @@ func (h *JobsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Retry handles POST /api/v1/jobs/{id}/retry. Resets a terminal job back
 // to pending so the next scheduler tick picks it up.
 func (h *JobsHandler) Retry(w http.ResponseWriter, r *http.Request) {
+	if h.AsyncEnabled {
+		h.asyncMutate(w, r, "retry")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	if _, err := h.DB.GetJob(id); err != nil {
@@ -93,6 +112,10 @@ func (h *JobsHandler) Retry(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/jobs/{id}.
 func (h *JobsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if h.AsyncEnabled {
+		h.asyncMutate(w, r, "delete")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	id := r.PathValue("id")
 	if err := h.DB.DeleteJob(id); err != nil {

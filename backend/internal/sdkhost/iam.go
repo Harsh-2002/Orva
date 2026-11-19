@@ -39,6 +39,14 @@ func iamContext(ctx context.Context, caller sandbox.SDKCaller) workloadiam.Conte
 	return c
 }
 
+func (h *Host) iamContext(ctx context.Context, caller sandbox.SDKCaller) workloadiam.Context {
+	c := iamContext(ctx, caller)
+	if h.iamCurrentEnabled && (h.iamCurrent == nil || !h.iamCurrent(c.Principal.FunctionID, c.Principal.ArtifactRevision)) {
+		return workloadiam.Context{}
+	}
+	return c
+}
+
 func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op string, args json.RawMessage) (res any, serr *sandbox.SDKError) {
 	// Closing an already-owned stream is cleanup, never a fresh grant.
 	if op == "invoke.stream.close" {
@@ -46,6 +54,21 @@ func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op strin
 	}
 	if op == "invoke" {
 		return h.invokeIAM(ctx, caller, args)
+	}
+	if op == "invoke.stream.open" {
+		return h.streamOpenIAM(ctx, caller, args)
+	}
+	if op == "invoke.stream.next" {
+		return h.streamNextIAM(ctx, caller, args)
+	}
+	if op == "jobs.enqueue" {
+		return h.jobsEnqueueIAM(ctx, caller, args)
+	}
+	if op == "crons.upsert" {
+		return h.cronsUpsertIAM(ctx, caller, args)
+	}
+	if op == "spans.emit" {
+		return h.spansEmitIAM(ctx, caller, args)
 	}
 	switch op {
 	case "kv.get", "kv.put", "kv.delete", "kv.list", "kv.incr", "kv.cas", "kv.batch":
@@ -59,7 +82,7 @@ func (h *Host) handleIAM(ctx context.Context, caller sandbox.SDKCaller, op strin
 	if e != nil {
 		return nil, e
 	}
-	observe := func() workloadiam.Context { return iamContext(ctx, caller) }
+	observe := func() workloadiam.Context { return h.iamContext(ctx, caller) }
 	effect := func() error {
 		if op == "kv.list" {
 			res, serr = h.kvListMode(ctx, caller.FunctionID, args, true)

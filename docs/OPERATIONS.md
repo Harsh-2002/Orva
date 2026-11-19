@@ -1,5 +1,236 @@
 # Operations runbook
 
+The opt-in managed server binds its SQLite database to the sealed Owner
+instance. It refuses databases with existing unbound workloads before
+migration. In-place managed restores retain the sealed stores and validate
+the archive's binding before replacing the installed database. Replace
+an incompatible ready restore with a verified matching archive; do not
+remove the recovery marker to force serving.
+
+## Serving startup exits 78
+
+Read the startup log before retrying. The daemon and recovery coordinator
+take the same exclusive lock in the outer data directory. Legacy serving
+follows symlinked directory paths and allows group-writable directories.
+Managed startup and offline relocation require a service-owned outer
+directory with no symlinked components or group/world write access.
+
+Legacy `orva serve` requires no `.orva-serving-mode` entry and
+`ORVA_SERVING_MODE` unset or exactly `legacy`. A malformed mode marker causes
+refusal, not legacy fallback. Managed mode stores SQLite under `managed/orva.db` and
+keeps an empty mode-0500 directory
+at `orva.db` so older binaries cannot open the original path. Do not remove
+the tombstone, edit the marker, or point a legacy binary at `managed/`.
+Enrollment is an explicit offline server command; it is not available through
+HTTP. There is no downgrade or automated interrupted-enrollment repair.
+
+## Offline legacy enrollment
+
+1. **Back up first.** Verify an offline recovery copy of the complete legacy
+   instance, including the database, keys, runtime roots and all function
+   versions. Stop every daemon and other writer, including pre-lock releases.
+   Use the same instance path and service user for all steps. A stopped
+   modern legacy daemon leaves the lock file the command needs; if it is
+   absent, first finish a normal legacy startup and clean shutdown using the
+   current, lock-aware binary. Recover any rollback journal in legacy mode.
+2. Prepare the same [host cgroup delegation and witness](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only)
+   as for managed serving. Provision the witness once with
+   `orva setup --managed-witness PATH` if absent. Do **not** run
+   `setup --managed-layout provision` on the legacy instance. Keep
+   `ORVA_SERVING_MODE` unset, or set it to `legacy` for the enrollment commands.
+   If launching from an existing `orva.daemon` leaf, explicitly set
+   `ORVA_MANAGED_WORKLOAD_PARENT` to its sibling `orva.workers`.
+3. Run `orva managed enroll --dry-run --plan /safe/path/orva-enrollment.json`.
+   Keep the plan outside the data directory. The dry run copies SQLite and
+   its WAL, if present, and vacuums only in private scratch space. Review
+   flags, revision digests, and job/cron counts. An enrollable result means
+   the source fits the offline build profile, not that a jailed syntax
+   check or installed-runtime verification already ran.
+4. From the delegated service cgroup, run `orva managed enroll --apply
+   --plan /safe/path/orva-enrollment.json --confirm`. Supply a separate
+   `--exclude UUID` for every unsupported function you elect to leave inactive.
+   The profile supports only plain Node and Python with current successful
+   deployments and no dependency manifests, installed `node_modules`,
+   TypeScript, or legacy network egress. Installed rootfs trees must include
+   the current SDK-channel adapters and pass the sealed runtime verifier.
+   The sealed copy omits inert dangling manual-page
+   links in `/etc/alternatives` from slim Debian runtimes; the installed tree
+   stays unchanged. Drift requires a new dry run, not an edited plan.
+5. After successful publication, start `orva serve` from the same delegated
+   service layout. If `ORVA_SERVING_MODE` is set, change it to `managed`.
+   Current enrolled deployments are reconstructed from sealed artifacts;
+   policy and standing work start without imported grants. Explicitly excluded
+   functions are inactive. Reconfigure legacy exposures and review standing
+   work before depending on them.
+
+The whole original `functions/` tree remains under
+`legacy-functions.enrolled-<operation>` for offline inspection. Managed
+serving and rollback never use that tree; older deployments require an
+explicit rebuild. If apply fails after durable intent, leave the data, marker,
+tombstone, and Owner evidence intact. Both serving paths refuse incomplete
+layouts. Retain the failed tree for supervised inspection and recover from the
+verified pre-enrollment backup in a separate instance directory; do not retry
+by deleting or editing marker files.
+
+## Fresh managed provisioning
+
+Stop existing daemons and use a new data directory with no legacy workload,
+database, keys or restore residue. Prepare the [cgroup delegation and
+witness location](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
+Run these explicitly as the daemon user, with the same `ORVA_DATA_DIR` and
+managed environment that the daemon will use:
+
+1. `orva setup --managed-witness /etc/orva/host-witness/witness` creates the
+   witness once. The witness's parent directory must be private (`0700`) and
+   owned by the daemon user. If its grandparent is not writable by that user,
+   have the host administrator create the private parent first. Use the
+   configured path if different.
+2. `orva setup --managed-layout provision` publishes provisioning intent.
+3. From the prepared cgroup, run `orva serve`. In provisioning mode it creates
+   the Owner only if the three private roots are empty, then exits without
+   opening a database or listener.
+4. From either the same service's replacement cgroup or the retained
+   `orva.daemon` leaf (with explicit `ORVA_MANAGED_WORKLOAD_PARENT`), run
+   `orva setup --managed-layout publish`. It verifies and closes the exact
+   Owner before explicitly publishing managed mode. If you set
+   `ORVA_SERVING_MODE`, update it from `provisioning` to `managed` only after
+   publication; leaving it unset is simpler.
+5. Run `orva serve` again in that service layout. Without explicitly configured
+   sealed runtimes the listener can start, but new builds cannot run.
+
+SIGTERM closes and drains HTTP, then closes the managed instance (including
+its scheduler), then fences and closes its Owner. Startup or shutdown refusal
+exits 78, never the restore restart status 70. On the same boot, the daemon
+fences intact groups or proves that both the old parent and its group were
+removed. Do not delete individual stale cgroups to force a start: a missing
+group under its original parent still denies, as do missing old groups with
+no authenticated parent identity and witness mismatches. Before restarting a
+host-bound install first booted with an older binary that lacks parent
+identities, preserve exact groups until a verified cold recovery or until
+bounded same-boot retirement removes the older references. Incomplete fresh provisioning
+requires supervised inspection, not an automatic retry with new stores.
+
+Uninstall deletes the standard native witness, even when retaining data;
+the sealed stores then become **unrecoverable on that host**. For externally
+managed witnesses or volumes the operator must explicitly remove the witness
+as part of uninstall. Never copy a witness to preserve recoverability after
+uninstall.
+
+## Internal restore-quarantine fixture
+
+`workloadrecovery` is an explicit Linux scratch composition, **not** the current
+public restore handler or legacy boot path. It requires trusted stopped/drained
+admission before writing a durable external marker and replacing any DB files.
+Its startup transaction migrates empty legacy authority, quarantines all durable
+work origins and policy/inbound authority, fails abandoned builds, and removes
+the marker only after durable commit. Same-operation replay is idempotent;
+normal restart does not reset individual reviews.
+
+Managed restore also unpublishes custom routes. Stored mappings and their
+version counters remain inspectable. Use a fresh route inspection and explicitly
+republish each desired mapping through the managed CAS API; this is separate
+from installing and reviewing the target workload.
+
+There is no shipped recovery CLI or production activation flag in this change.
+For internal manual fixtures, `PrepareManual` must precede stopped-instance file
+copying and `CompleteManual` must acknowledge a verified complete install before
+startup. Direct file copying without preparation is outside the quarantine
+guarantee. The old restore's DB rollback does not roll back replaced keys/code;
+an interrupted installation must remain closed rather than claiming full rollback.
+See [the recovery state machine and limits](../backend/internal/workloadrecovery/README.md).
+
+## Internal configuration publication workflow
+
+No production upgrade or activation is required. The opt-in `workloadconfig`
+service requires initialized artifact/managed sources and enrolled concrete
+code/runtime stores; never point it at mutable current paths or infer a Factory
+from a durable generation row. An explicitly installed queued deployment in
+those stores becomes the pair used by later configuration mutations. A queued
+publication awaiting its own install cannot be installed through configuration.
+Rollback, clone/import, triggers, runtime upgrades, boot and restore are separate.
+
+In an explicit scratch composition, first inspect exact function/generation and
+policy/source expectations. Publish the environment/settings/secret mutation:
+it acknowledges **review-required DENY**, not a rebind. Old current Factories are
+invalidated before success; old busy workers lose SDK authority while possibly
+retaining injected values in memory. Next explicitly install a newly prepared
+Factory using the fresh complete expectations, then explicitly review the new
+installed artifact and current aggregate sources through the managed-policy
+service. Mutation/installation cannot clear quarantine.
+
+On conflict, inspect again and get a new deliberate decision; do not silently
+retry with refreshed revisions. A failed transaction leaves old host/cache and
+durable state unchanged. If installation fails after a successful mutation,
+remain denied and retry fresh preparation/installation; do not approve the old
+artifact or edit rows to bypass review. Interrupted in-process cleanup, reboot
+and restore recovery are separate gates, not proven by this procedure.
+For sensitive removed/changed secrets retire affected workers and rotate the
+external credential as needed; IAM does not erase old memory or exfiltrated data.
+## Internal managed queued-build recovery (not serving activation)
+
+The optional publication queue refuses legacy function directories and never
+changes a `current` link. Keep sealed stores outside legacy GC/cache/version
+namespaces. Do not enable it on normal serving construction or mix writers.
+Publication success means inactive review-required DENY; explicit fresh Factory
+Install and separate source-aware Review are still necessary. No public Install
+endpoint or boot/restore loader is added.
+
+Accepted jobs survive request cancellation. Full/stopping queues fail recorded
+work and remove private archives; normal restart abandonment remains fail-only,
+not autoresume. Fixture `AbandonWorkloadDeployments` is explicit and idempotent.
+Sealed-but-unpublished output stays bounded and non-authoritative for inspection;
+there is no automatic GC, replay or restore adoption. Retain a live service with
+pending pins after storage failure. After process loss use store inspection only,
+not fabricated leases/approval. A failed post-commit installation leaves DENY;
+retry Install from a fresh exact snapshot before reviewing the current Factory.
+See `backend/internal/builder/README.md` for the full failure ordering and limits.
+
+## Internal history fixture recovery limits
+
+Normal boot does not initialize or activate deleted-work history. In the
+explicit scratch composition, a failed capacity preflight leaves the function
+active; a committed reservation followed by interrupted cleanup leaves durable
+`deleting` progress. Retry through the same configured registry hook with fresh
+trusted admin authentication, never by editing rows or disabling history to
+fall back to legacy deletion. Each bounded archive/live-cleanup batch commits
+atomically. Child-process fault resumption is tested, not power-loss/reboot
+recovery. Ninety days is purge eligibility only: explicit confirmed/admin purge
+is audited and cannot consume reservations. Full capacity refuses new deletion;
+there is no silent eviction. Restore remains a separate gate: archives must stay
+inspection-only and live work must be quarantined, not replayed. See the
+history package README for unqualified cut-over obligations.
+
+## Internal IAM jobs fixture
+
+No production upgrade action is required for this inactive increment. Do not
+call its explicit schema initializer or wire its constructors in normal serving.
+The fixture's Jobs view distinguishes stored execution status from authority:
+suspended/quarantined work is not runnable. Regrant is not resume. An admin can
+explicitly resume one eligible pending job after revalidating its original
+creator/target; retry never adopts it as operator work.
+
+The independent cron core uses separate explicit initialization/options. Its
+separate controls fixture is not a production route/catalog activation. Explicit
+admin HTTP/CLI/MCP/shared-AI resume and the CronJobs view delegate to the service,
+require inspected decimal CAS revisions and preserve source identity. Resume revalidates
+original authority and schedules only a future cron time. Do not clear authority
+fields or infer operator origin from old names. Regrant is not resume. Preserve
+the same target-deletion/restore HOLD as jobs; cascade deletion is not retained
+suspension history.
+
+In the staged view, Enabled describes stored configuration, not permission to
+execute. A stale snapshot blocks mutation and does not display authority as
+current. On 409, refresh and review; do not retry automatically with replaced
+revisions. A failed refresh retains the prior snapshot as stale and leaves the
+mutation error visible. Read-only users can inspect source/reason/revisions but
+cannot resume, edit, disable or delete.
+
+Legacy function hints stay suspended for review; unknown origins stay
+quarantined. There is no adoption/restore procedure in this slice. Do not clear
+authority fields with SQL or edit a row to bypass review. Target-deletion history
+retention remains unresolved because the legacy FK cascades job rows; missing
+UUIDs fail closed, and recreation by name does not grant authority.
+
 What to do when something goes wrong. Each section: symptom →
 diagnosis → fix.
 
@@ -490,6 +721,67 @@ on bare metal that is what `Delegate=yes` in the unit provides, and without
 it every removal fails with `EACCES` and is skipped.
 
 ## Backup and restore
+
+### Managed mode: portable recovery
+
+`orva backup download -f /safe/path/orva-managed.tar.gz` uses the managed
+backup endpoint, which requires read and admin authority. Keep the archive private: it contains SQLite,
+available encryption/bootstrap keys, and current plain Node/Python source.
+The v2 file hashes detect corruption, not the identity of the producer;
+confirm only archives received through a trusted channel. No sealed trees,
+Owner records, cgroup epochs, runtime rootfs trees or witness are exported.
+
+On the destination, stop all Orva writers and prepare a fresh, service-owned
+instance directory with locally installed Node/Python rootfs trees, current
+adapters, nsjail, and [delegated cgroups](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
+Independently provision B's external witness. Run as the daemon user and set
+its location in the service environment if using a non-default path:
+
+```bash
+export ORVA_DATA_DIR=/srv/orva-b
+export ORVA_MANAGED_WITNESS_PATH=/private/b/witness
+orva setup --managed-witness "$ORVA_MANAGED_WITNESS_PATH"
+```
+
+Keep the archive outside the data directory and the witness outside the data
+and configured backup roots.
+You can start with an unopened provisioning marker, but not initialized Owner
+stores. Unset `ORVA_MANAGED_NODE_GENERATION` and
+`ORVA_MANAGED_PYTHON_GENERATION` so boot uses the newly sealed runtime IDs.
+
+```bash
+orva managed restore --data-dir /srv/orva-b --archive /safe/path/orva-managed.tar.gz
+orva managed restore --data-dir /srv/orva-b --archive /safe/path/orva-managed.tar.gz --confirm
+```
+
+The first command verifies the archive, destination layout, witness and local
+runtime prerequisites without changing the destination; it does not run a
+build or prove the destination can create cgroups. Run the confirmed command
+as the daemon user from its delegated cgroup. It rebuilds the exact current
+managed deployments, preserves active/inactive and pause state, reseals local
+runtimes, and records the previous Owner in the SQLite restore audit. The
+source tarballs are regenerated from verified authored files, not byte-for-byte
+copies of deployment uploads. Historical deployment rows remain for inspection,
+but their old sealed outputs are unavailable on B. Explicitly excluded
+enrollment entries remain inactive and their legacy source is not carried.
+
+Managed mode is published last. Start the daemon with `ORVA_SERVING_MODE`
+unset or set to `managed`. Direct invocation of previously active functions
+can run, but all policies require fresh review; protected SDK and standing
+work is denied, and custom routes and inbound webhooks are unpublished.
+Review policy, jobs, cron and exposures separately before re-enabling them.
+If confirmation was interrupted, preserve the archive and destination
+evidence, including the staging directory, intent or tombstone. Both boot
+paths refuse an incomplete layout with exit 78. Do not edit or remove control
+files to retry; use a separate fresh destination for a new restore attempt.
+
+To replay on A with the same witness, Owner and sealed outputs still present,
+stop the daemon and use `orva managed restore --same-owner --archive
+/safe/path/orva-managed.tar.gz --confirm`. This uses guarded same-Owner recovery
+and its existing quarantine; it does not rebuild or overwrite sealed stores.
+The legacy HTTP upload and online restart path below do not apply to managed mode.
+
+### Legacy mode
 
 `orva backup download` writes an archive containing the SQLite database,
 every deployed function version, the secrets master key, and the bootstrap

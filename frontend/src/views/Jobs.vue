@@ -11,10 +11,22 @@
         </p>
       </div>
       <div class="flex items-center gap-2 text-xs text-foreground-muted">
+        <Button
+          v-if="historyEnabled"
+          variant="secondary"
+          @click="historyOpen = !historyOpen"
+        >
+          History
+        </Button>
         Background queue · {{ totalCount }} jobs
       </div>
     </div>
 
+    <HistoryInspector
+      v-if="historyEnabled"
+      v-show="historyOpen"
+      :active="historyOpen"
+    />
     <!-- Status filter strip.
          Mobile (<sm): chips scroll horizontally inside the strip with
          scroll-snap so the active filter doesn't get lost.
@@ -45,6 +57,7 @@
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <Button
+          v-if="canManage"
           @click="openEnqueue"
         >
           <Plus class="w-3 h-3" />
@@ -129,7 +142,7 @@
           </Button>
           <Button
             size="sm"
-            :disabled="!enqueue.fnId || enqueue.saving"
+            :disabled="!canManage || !enqueue.fnId || enqueue.saving"
             :loading="enqueue.saving"
             @click="submitEnqueue"
           >
@@ -179,6 +192,12 @@
                   {{ jobStatus(job) }}
                 </span>
               </div>
+              <JobAuthority
+                :job="job"
+                :can-manage="canManage"
+                :busy="!!resuming"
+                @resume="resume"
+              />
               <p
                 v-if="job.last_error"
                 class="text-[11px] text-danger-fg mt-1 break-all"
@@ -209,13 +228,14 @@
             </div>
             <div class="flex items-center gap-1 shrink-0">
               <IconButton
-                v-if="job.status === 'failed'"
+                v-if="canManage && job.status === 'failed' && (!job.authority_state || job.authority_state === 'active')"
                 :icon="RotateCcw"
                 variant="success"
                 title="Retry"
                 @click="retry(job)"
               />
               <IconButton
+                v-if="canManage"
                 :icon="Trash2"
                 variant="danger"
                 title="Delete"
@@ -284,6 +304,12 @@
                 />
                 {{ jobStatus(job) }}
               </span>
+              <JobAuthority
+                :job="job"
+                :can-manage="canManage"
+                :busy="!!resuming"
+                @resume="resume"
+              />
               <p
                 v-if="job.last_error"
                 class="text-[11px] text-danger-fg mt-1 truncate max-w-xs"
@@ -304,13 +330,14 @@
             <td class="px-6 py-4 text-right">
               <div class="inline-flex items-center gap-1">
                 <IconButton
-                  v-if="job.status === 'failed'"
+                  v-if="canManage && job.status === 'failed' && (!job.authority_state || job.authority_state === 'active')"
                   :icon="RotateCcw"
                   variant="success"
                   title="Retry"
                   @click="retry(job)"
                 />
                 <IconButton
+                  v-if="canManage"
                   :icon="Trash2"
                   variant="danger"
                   title="Delete"
@@ -340,11 +367,12 @@
 
 <script setup>
 defineOptions({ name: 'JobsView' })
+defineProps({ historyEnabled: { type: Boolean, default: false } })
 
 import { EMPTY } from '@/utils/format'
 import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { Trash2, RotateCcw, RefreshCw, Plus, CheckCircle2, XCircle, Clock, Circle } from '@lucide/vue'
-import { listJobs, retryJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
+import { listJobs, retryJob, resumeJob, deleteJob, enqueueJob, listFunctions } from '@/api/endpoints'
 import { useConfirmStore } from '@/stores/confirm'
 import Button from '@/components/common/Button.vue'
 import IconButton from '@/components/common/IconButton.vue'
@@ -352,10 +380,15 @@ import Drawer from '@/components/common/Drawer.vue'
 import LoadError from '@/components/common/LoadError.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import { runtimeLabel } from '@/utils/runtime'
+import JobAuthority from '@/components/jobs/JobAuthority.vue'
+import HistoryInspector from '@/components/history/HistoryInspector.vue'
+const historyOpen = ref(false)
 
 const confirmStore = useConfirmStore()
 
 const jobs = ref([])
+const canManage = ref(false)
+const resuming = ref('')
 const loadError = ref('')
 const loaded = ref(false)
 const functions = ref([])
@@ -366,6 +399,7 @@ const statusFilter = ref('all')
 const countSource = ref([])
 const truncated = ref(false)
 let pollTimer = null
+let loadGeneration = 0
 
 // Enqueue drawer state. scheduleLater toggles whether the request body
 // carries scheduled_at — when off the scheduler picks the row up on
@@ -458,6 +492,7 @@ const selectStatus = async (value) => {
 }
 
 const loadJobs = async () => {
+  const generation = ++loadGeneration
   try {
     const [all, filtered] = await Promise.all([
       listJobs({ limit: PAGE }),
@@ -465,20 +500,24 @@ const loadJobs = async () => {
         ? Promise.resolve(null)
         : listJobs({ limit: PAGE, status: statusFilter.value }),
     ])
+    if (generation !== loadGeneration) return
     countSource.value = all.data.jobs || []
+    canManage.value = all.data.async_controls ? all.data.can_manage === true : true
     jobs.value = filtered ? (filtered.data.jobs || []) : countSource.value
     truncated.value = countSource.value.length === PAGE
     loadError.value = ''
   } catch (e) {
+    if (generation !== loadGeneration) return
     // A failed fetch must not fall through to "No jobs yet" -- that tells the
     // operator they have nothing when we simply do not know.
     loadError.value = e?.response?.data?.error?.message || e?.message || 'Request failed'
   } finally {
-    loaded.value = true
+    if (generation === loadGeneration) loaded.value = true
   }
 }
 
 const retry = async (job) => {
+  if (!canManage.value) return
   try {
     await retryJob(job.id)
     await loadJobs()
@@ -487,7 +526,28 @@ const retry = async (job) => {
   }
 }
 
+const resume = async (job) => {
+  if (!canManage.value || resuming.value) return
+  const ok = await confirmStore.ask({
+    title: 'Resume job?',
+    message: 'Recheck the original creator and current target permissions, then resume only this job. This does not adopt it as operator work.',
+    confirmLabel: 'Resume job',
+  })
+  if (!ok) return
+  ++loadGeneration
+  resuming.value = job.id
+  try {
+    await resumeJob(job.id)
+    await loadJobs()
+  } catch (e) {
+    confirmStore.notify({ title: 'Resume failed', message: e?.response?.data?.error?.message || e.message, danger: true })
+  } finally {
+    resuming.value = ''
+  }
+}
+
 const remove = async (job) => {
+  if (!canManage.value) return
   const ok = await confirmStore.ask({
     title: 'Delete job?',
     message: `Job ${job.id} will be removed. This cannot be undone.`,
@@ -504,6 +564,7 @@ const remove = async (job) => {
 }
 
 const openEnqueue = async () => {
+  if (!canManage.value) return
   enqueue.error = ''
   enqueue.payload = '{}'
   enqueue.scheduleLater = false
@@ -523,6 +584,7 @@ const openEnqueue = async () => {
 }
 
 const submitEnqueue = async () => {
+  if (!canManage.value) return
   enqueue.error = ''
   // Parse payload JSON up-front so a typo doesn't blow up server-side.
   let payload
@@ -583,6 +645,10 @@ onActivated(() => {
   loadJobs()
   startPoll()
 })
-onDeactivated(stopPoll)
-onUnmounted(stopPoll)
+const deactivate = () => {
+  ++loadGeneration
+  stopPoll()
+}
+onDeactivated(deactivate)
+onUnmounted(deactivate)
 </script>

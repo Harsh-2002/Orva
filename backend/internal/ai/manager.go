@@ -461,13 +461,19 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 	baseURL := baseURLFromContext(ctx)
 	if baseURL != "" {
 		deps.BaseURL = baseURL
-		cfg.System = appendInstanceContext(cfg.System, baseURL, deps.Version)
+		if !deps.ManagedServer {
+			cfg.System = appendInstanceContext(cfg.System, baseURL, deps.Version)
+		}
 	}
 	// First turn of a new conversation: inline the complete reference once so the
 	// agent starts fully grounded without a docs round-trip. Later turns rely on
 	// the discipline in the prompt to call get_orva_docs on demand — the full
 	// doc is NOT re-appended every turn (see appendFullReference).
-	if firstTurn {
+	if deps.ManagedServer {
+		cfg.System += "\n\n# Managed workload tools\nOnly the tools listed for this turn are available. " +
+			"Never substitute a legacy operation. A successful deployment or resume does not grant authority. " +
+			"Installation and explicit source-aware review are separate. Use current exact IDs and revisions."
+	} else if firstTurn {
 		cfg.System = appendFullReference(cfg.System, baseURL)
 	}
 	reg := mcp.BuildAgentRegistry(deps, perms)
@@ -479,6 +485,7 @@ func (m *Manager) buildRunner(ctx context.Context, perms auth.PermSet, cfg agent
 			Perm:        t.Perm,
 			ReadOnly:    t.ReadOnly,
 			Destructive: t.Destructive,
+			Sensitive:   t.Sensitive,
 		})
 	}
 	dispatch := func(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, error) {
@@ -537,6 +544,10 @@ func (m *Manager) checkProviderEgress(ctx context.Context, provider string) erro
 //     caching (Anthropic/OpenAI) cache it and charge a fraction after the first
 //     call (see cache hints in internal/ai/llm).
 const defaultSystemPrompt = `# Role
+If optional IAM management tools are present, use their strict operation schemas.
+Named versions are immutable and pins never auto-follow; inspect sources and
+impact before explicit rollout/removal. Never edit effective unions as inline,
+invent function UUIDs, or treat another source's overlap as revoked access.
 You are Orva's built-in operator assistant, embedded in the Orva dashboard. Orva
 is a self-hosted serverless platform (Functions-as-a-Service): users write
 JavaScript/TypeScript (Node 26) or Python (3.15) handlers; Orva builds

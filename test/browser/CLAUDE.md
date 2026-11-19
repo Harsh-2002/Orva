@@ -3,6 +3,13 @@
 Browser-driven UI verification: the checks that cannot be made by reading
 source, because they are about geometry, computed style and real interaction.
 
+`managed-iam.mjs` is driven by the Linux `TestManagedServingLive/browser`
+fixture, not the normal dashboard suite. It requires the fresh embedded UI and
+an owned loopback managed listener. The fixture's deterministic local provider
+lets the browser check that Chat cannot commit a named policy until approval.
+Copy out only the explicit scratch
+screenshots, never browser state, keys, traces or databases.
+
 ```bash
 cd test/browser
 node run.mjs --url http://127.0.0.1:8443 --api-key "$ADMIN_KEY"
@@ -107,7 +114,7 @@ laptop-only pass never measured any of it.
 ## Heuristics, and how they have been wrong
 
 Every check here is a heuristic over computed style, and a heuristic that cries
-wolf gets ignored. Five corrections have already been necessary — each one
+wolf gets ignored. Corrections have already been necessary — each one
 found by chasing a reported failure into the source and discovering the page was
 right:
 
@@ -141,6 +148,13 @@ right:
   *text* as well as translucent backgrounds, and takes its last-resort canvas
   colour from the document instead of a hardcoded near-black that belonged to
   one theme.
+- **Absolute pseudo-elements use the padding box.** Adding negative insets to
+  the border box overcounted bordered touch targets by two pixels and passed a
+  Next control whose real target was below 44px. The probe now unions resolved
+  pseudo-element geometry with the border box; `node --test
+  test/browser/touch-targets.test.mjs` retains the old false-positive witness.
+  Geometry is still not proof of unobstructed hit-testing: browser acceptance
+  must sample actual `elementFromPoint` boundaries and check nearby controls.
 
 If a check fires, read the source before changing the page. If the page is
 right, fix the check and write down why here.

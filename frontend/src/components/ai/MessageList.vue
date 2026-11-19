@@ -45,6 +45,7 @@
             :class="gap(index)"
             @approve="$emit('approve', $event)"
             @reject="$emit('reject', $event)"
+            @dismiss-one-time="$emit('dismiss-one-time', $event)"
           />
           <ErrorCard
             v-else-if="item.kind === 'error'"
@@ -81,7 +82,7 @@ const props = defineProps({
   streaming: { type: Boolean, default: false }
 })
 
-defineEmits(['approve', 'reject', 'regenerate', 'edit', 'delete', 'retry', 'dismiss'])
+defineEmits(['approve', 'reject', 'regenerate', 'edit', 'delete', 'retry', 'dismiss', 'dismiss-one-time'])
 
 // Index of the last assistant message — only it gets the Regenerate action.
 const lastAssistantIndex = computed(() => {

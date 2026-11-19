@@ -81,6 +81,12 @@ func NewPersistent(root string, limits Limits) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	return initializePersistent(s)
+}
+
+func initializePersistent(s *Store) (*Store, error) {
+	root := s.root
+	var err error
 	s.persistent = newPersistentState(root)
 	if err = os.Mkdir(s.persistent.control, 0700); err == nil {
 		err = s.syncDirectory(root)
@@ -231,6 +237,10 @@ func (st *Staging) sealPersistent(ctx context.Context, kind Kind, owner string, 
 		s.mu.Unlock()
 		return "", ErrClosed
 	}
+	if s.boundKind != "" && kind != s.boundKind {
+		s.mu.Unlock()
+		return "", ErrInvalid
+	}
 	if r.phase != staging {
 		s.mu.Unlock()
 		return "", ErrInvalid
@@ -366,7 +376,7 @@ func (s *Store) syncTree(ctx context.Context, root string, m Manifest) error {
 
 func (s *Store) retirePersistent(id string) error {
 	s.mu.Lock()
-	if s.persistent.recovered {
+	if s.persistent.recovered || s.detached {
 		s.mu.Unlock()
 		return ErrRetired
 	}
@@ -374,6 +384,10 @@ func (s *Store) retirePersistent(id string) error {
 	if r == nil {
 		s.mu.Unlock()
 		return ErrInvalid
+	}
+	if r.quarantined {
+		s.mu.Unlock()
+		return ErrRetired
 	}
 	if r.phase == deleting {
 		s.mu.Unlock()
@@ -395,7 +409,7 @@ func (s *Store) retirePersistent(id string) error {
 
 func (s *Store) removePersistent(r *record, abort bool) error {
 	s.mu.Lock()
-	if s.persistent.recovered {
+	if s.persistent.recovered || s.detached || r.quarantined {
 		s.mu.Unlock()
 		return ErrRetired
 	}
@@ -591,6 +605,10 @@ func privateMetadata(path string, directory bool, max int) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return readPrivateMetadata(f, directory, max)
+}
+
+func readPrivateMetadata(f *os.File, directory bool, max int) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, ErrIO
@@ -604,7 +622,7 @@ func privateMetadata(path string, directory bool, max int) ([]byte, error) {
 		(!directory && (!info.Mode().IsRegular() || st.Nlink != 1)) {
 		return nil, ErrIntegrity
 	}
-	if err := noXattrs(path); err != nil {
+	if err := noXattrs(f.Name()); err != nil {
 		return nil, err
 	}
 	if directory {
@@ -659,6 +677,11 @@ func OpenRecovering(ctx context.Context, root string, limits Limits) (*Store, er
 	if err != nil {
 		return nil, err
 	}
+	return recoverLockedStore(ctx, s)
+}
+
+func recoverLockedStore(ctx context.Context, s *Store) (*Store, error) {
+	root, limits := s.root, s.limits
 	ok := false
 	defer func() {
 		if !ok {

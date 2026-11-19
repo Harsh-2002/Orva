@@ -15,13 +15,14 @@ SPEC.loader.exec_module(runner)
 
 
 class RunnerResultTests(unittest.TestCase):
-    def run_script(self, source):
+    def run_script(self, source, require_sandbox=""):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "test_sample.py")
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(textwrap.dedent(source))
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
-                return runner.run_module(path, dict(os.environ))
+                return runner.run_module(
+                    path, dict(os.environ, ORVA_REQUIRE_SANDBOX=require_sandbox))
 
     def test_failed_assertion_is_classified_and_ansi_is_removed(self):
         result = self.run_script("""
@@ -53,6 +54,25 @@ class RunnerResultTests(unittest.TestCase):
         """)
         self.assertEqual(result["status"], "SKIP")
         self.assertEqual(result["fail"], 0)
+
+    def test_sandbox_required_skip_fails_suite_with_reason(self):
+        for value in ("1", "true", "yes"):
+            with self.subTest(value=value):
+                result = self.run_script("""
+                    import sys
+                    print("\\x1b[33mSKIP — private egress coverage unavailable\\x1b[0m")
+                    print("RESULT pass=12 fail=0 skip=1")
+                    sys.exit(3)
+                """, require_sandbox=value)
+                self.assertEqual(result["status"], "FAIL")
+                self.assertEqual(result["pass"], 12)
+                self.assertEqual(result["fail"], 1)
+                self.assertEqual(result["rc"], 3)
+                self.assertIn("ORVA_REQUIRE_SANDBOX forbids skips", result["detail"])
+                self.assertIn("private egress coverage unavailable", result["detail"])
+                self.assertNotIn("\x1b", result["detail"])
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner, "HERE", tmp):
+                    self.assertEqual(runner.write_checklist([result], "unit target"), 1)
 
     def test_missing_result_trailer_cannot_pass(self):
         result = self.run_script("""

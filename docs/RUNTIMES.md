@@ -190,6 +190,20 @@ Packages that are pure Python or pure JavaScript, or that use a stable ABI
 
 ## SDK operations and network mode
 
+An independent internal cron core fixture requires explicit `WithCronIAM` in both
+SDK host and scheduler. `crons.upsert` registration needs the actual live leased
+self caller, scoped own-cron grant and self cron acceptance. Host firing instead
+uses standing authority and fresh acquired-target admission, not a fabricated SDK
+lease. Regrant cannot resume suspended schedules; shared-service admin resume
+selects the next future firing only. No normal-serving activation or public
+management controls are implied.
+
+The explicit IAM jobs fixture additionally requires caller `jobs.enqueue` and
+target `job` acceptance, supplied by the host rather than SDK arguments. A later
+attempt can suspend under current rights; regrant does not replay suspended work.
+Only an admin's explicit resume revalidates the original provenance. This is an
+internal constructor opt-in, not normal serving activation or a cron/restore claim.
+
 With the function's `sdk` permission enabled, current runtime adapters carry `kv`, `invoke`/`invokeStream`, `jobs`, `crons`,
 and `trace.span` calls over a private inherited per-worker socket channel. New functions default to `sdk: false`, independently of outbound networking. The
 host derives the function ID from the channel, not SDK arguments. SDK calls require the channel; there is no HTTP fallback. SDK-enabled
@@ -213,6 +227,12 @@ submission begins still retires the worker; the pre-submission check is not
 atomic with cancellation racing the subsequent wire write.
 
 ## Trace and log correlation
+
+In the explicit staged IAM composition, emission additionally requires a live
+original execution, an execution-only `spans.emit` / `own_execution` grant and a
+current-artifact observer. Optional admission may shed rather than queue;
+accepted telemetry is not retroactively removed by revoke. No trace-read grant
+or normal-serving activation is implied.
 
 Both SDKs expose `trace.span` and `log`. Custom code spans are direct children
 of the containing execution, even when code-span calls are nested. SDK logs

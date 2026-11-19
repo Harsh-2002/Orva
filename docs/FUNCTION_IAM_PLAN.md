@@ -14,6 +14,73 @@ This is not implementation verification or rollout approval. The decisions in
 
 ## 1. Goal and current boundary
 
+An internal Linux server composition now joins the managed pool, SDK, job/cron
+admission, deployment/configuration and policy services without legacy route
+fallback. In delegated disposable VMs the managed HTTP path created and
+deployed both runtimes, installed their exact Factory, proved deny before
+review, exercised an attached named policy, and rechecked deny after revoke.
+Same-boot reopen retained durable pause and resumed into a separate inactive
+generation. Restore qualification reopened sealed assets and ran both
+interpreters without reviving quarantined authority. These are scoped
+integration checks, not the coordinated cut-over below. Ordinary reboot with
+a new kernel epoch and complete operator-surface acceptance remain separate
+gates; legacy `orva serve` does not select this composition on its own.
+
+Managed startup verifies the sealed Owner identity against SQLite before
+migration; in-place managed restore checks the same binding before archive
+promotion. The separate cut-over slice 3 portable restore accepts strict
+managed v2 source archives offline, rebuilds only current code into a new
+host-bound Owner and publishes managed mode last. Policy text remains
+inspectable, but approval is cleared; route/webhook publication and standing
+work do not resume. The same-Owner restore path is not relaxed.
+
+Slice 3 scratch acceptance: `test/managed-enrollment.py` with
+`ORVA_PORTABLE_VM_TEST=disposable-vm` passed in an offline `msb --no-net`
+Ubuntu 26.04 guest. Two service cgroups, data directories and independently
+created witnesses simulated hosts A and B. A ran both interpreters, allowed
+each function's granted KV write, and dispatched a custom route and signed webhook.
+B refused a truncated archive, rebuilt the current deployments, returned the
+same Node/Python results, denied both KV writes, retained policy text with
+quarantine/review state, and returned 404 for both exposures. A's same-Owner
+replay kept its sealed stores and applied existing restore quarantine.
+Explicit Node review on B re-enabled only the Node grant without republishing
+either exposure.
+The guest was removed. This is not a different-kernel, power-loss, or
+full-release E2E qualification.
+
+Cut-over slice 2 adds explicit Linux server-only offline enrollment. Its scope
+is current plain Node/Python deployment rebuild under the Owner, empty grants,
+SDK-enabled policy review, standing-work suspension/quarantine, and preservation
+of the legacy tree. It is not automatic activation, historical rollback, or
+cross-host restore. Fault injection covers the durable layout refusal boundary.
+An offline cgroup-v2 VM with real nsjail deployed and invoked both runtimes
+under legacy serve, confirmed dry-run and a missing exclusion left the data
+tree unchanged, enrolled and invoked the same current versions under managed
+serve, and observed legacy exit 78. An explicitly excluded draft remained
+uninvokable. The legacy Node SDK write succeeded before cut-over and returned
+`IAM_DENIED` after it; stored policies remained empty and only the SDK-enabled
+function required review. This is not approval for automatic or production
+cut-over.
+
+The real managed listener also qualifies explicit version rollout, stale
+rollout refusal and detach across REST and external MCP on jailed Node and
+Python. Chromium verifies the guided policy workflow and deterministic local
+Chat approval; the slim CLI commits through the same REST service.
+
+An unwired cold-recovery candidate passed a hard reboot on stable guest-local
+ext4: the previous cgroup was gone, the wrong witness was refused, and both
+seals reopened through the original witness. The guest overlay changed inode
+identities, so that layout is not qualified. This is not daemon recovery.
+
+The internal host-bound Owner now retires the oldest exact epoch at the
+history cap, leaving the newest predecessor in place. A witness-authenticated
+decision precedes unbinding and cleanup, and replay does not restore IAM
+policy, approvals or grants. Version 1 still denies at the cap. An offline
+disposable VM passed 12 same-boot restarts at cap 3, 13 retirement fault
+points, process-exit replay on both sides of the association rename, denial
+cases, and a synthetic prior-boot metadata fixture. This is not power-loss,
+general interrupted append recovery, or production slice provisioning evidence.
+
 SDK availability is normal runtime functionality. Authorization determines
 which actions a function identity may perform on which resources. Replace the
 coarse `sdk` switch, not the private transport or its host-owned identity.
@@ -233,6 +300,39 @@ from the appropriate generation, never expose another creator's lookup. Test
 concurrent equal keys from different creators, legacy collisions, expiry and
 transaction rollback without orphan reservations.
 
+#### Deleted-target retention refinement — coordinated core accepted, public controls pending
+
+Keep existing target foreign keys and additive migration rules. Target deletion
+must preserve metadata-only history for pending/running jobs and all schedules,
+covering the existing explicit cleanup as well as cascades. History is not an
+executable suspended row: it cannot be claimed, resumed or adopted. Preserve
+original UUIDs/provenance, state/reason and bounded timing/configuration metadata,
+but not payloads, secrets or environment data. Creator deletion with a surviving
+target still suspends live work and retains the original creator UUID.
+
+Use unique `(work kind, original work ID)` tombstones without resource foreign
+keys. Bound the archive to 100,000 rows and 64 MiB of canonical serialized
+metadata, not physical SQLite/index bytes. Ninety days is purge eligibility,
+not automatic expiry. Explicit audited admin purge is required; never silently
+evict history to make a function deletion fit.
+
+Reserve capacity before marking a function deleting, using the ordered function
+mutation lock, IAM gate and synchronous DB transaction. Capacity refusal leaves
+function/work state unchanged. Close admission at that publication boundary;
+persist reservation/progress and archive/delete each bounded batch atomically.
+Retries must match existing tombstones and cannot double-charge reservations.
+Purge must not consume reserved capacity. Callback signalling and process
+retirement remain outside IAM/owner locks.
+
+Explicit admin reissue supplies and reviews fresh payload/configuration and an
+exact current target UUID, creates a new work ID and operator origin, and audits
+the old-to-new provenance change. It never revives the archived ID, resolves a
+same-name replacement automatically, or reuses an old idempotency lookup.
+Inspection requires read; purge/reissue require live admin and confirmation.
+Restore preserves history as inspection-only and does not restore authority.
+This is a deliberate retention/privacy refinement of target-deletion suspension,
+not proof that the current async candidates implement it.
+
 For migration, a nonempty existing `enqueued_by_function_id` is evidence of
 function origin but still requires review and remains suspended. An absent
 creator is not proof of operator origin. Historic cron rows have no reliable
@@ -383,6 +483,14 @@ when a busy worker loses access. Do not promise IAM revocation recalls secrets.
 
 ## 6. Storage, API and compatibility
 
+Implementation note (2026-11-18): the internal opt-in
+[`workloadrecovery` fixture](../backend/internal/workloadrecovery/README.md)
+composes guarded backup installation, external marker and file-backed quarantine.
+Normal boot/router/restore-handler activation remains off. Its bounded process
+crash and syscall-fault tests qualify only that fixture, not power loss, real
+runtime lifecycle, kernel fencing or coordinated serving cutover. The normative
+requirements below still govern that later cutover.
+
 Additive SQLite tables: current policy/acceptance, bounded policy audit history,
 and durable async provenance fields. Do not drop the old `sdk` column. After
 cut-over it is non-authoritative; API writes to it return actionable validation
@@ -434,13 +542,27 @@ must not invent a restore or reapprove suspended work.
 
 ## 7. UX, audit and documentation
 
-Replace SDK checkbox with a Permissions section: effective summary; explicit
+Replace SDK checkbox with a link to the dedicated Permissions page: current
+stored-access summary, clearly distinguished from active authority; explicit
 actions; own-KV prefix rows; target name with stable ID; caller/trigger acceptance;
 revision and last-change actor. Missing/deleted targets remain visible as broken
 grants, never rebound by name. Save policy separately from Deploy; source dirty
 state/Reset/Discard cannot edit IAM. Non-admins see policy read-only and why code
 editing is restricted. Broadening grants shows a review diff and confirmation.
 Templates suggest a policy for review, never silently grant it.
+
+The owner rejected the initial authority-sheet UX after hands-on use and chose
+an AWS-style guided policy builder. Default to current stored access with one
+Edit/Create action; guide service → actions → resources → permission review,
+then review the complete draft before Save. Keep current policy and unsaved
+changes separate. Canonical JSON belongs under Advanced, not in the required
+first-use path. Retain Orva's design system and phone/desktop action parity.
+
+The same policy inspection, validation, update, review/revocation and history
+operations must be available through REST, CLI and MCP, backed by shared
+server-side authorization, CAS and audit behavior. The in-product Chat UI
+remains supported; the owner separately requested removing terminal `orva chat`.
+External agent workflows use MCP rather than requiring a CLI chat client.
 
 Denials: stable code, action, safe resource identity and policy revision; no keys'
 values, bodies or secrets. Audit grants/revokes and bounded/sampled denial events
@@ -458,6 +580,99 @@ deployment verification are separate; do not claim deployed docs changed merely
 because source or generated copies changed.
 
 ## 8. Staged PR and acceptance gates
+
+### Completion scope authorized 2026-11-17
+
+The owner authorized completing the integrated implementation, including reusable
+named policies and function attachments, and delegated unresolved product choices
+to independent decision review. This supersedes the earlier planning-only scope
+for reusable policies; it is not evidence that they are implemented.
+
+UI, CLI, external MCP and in-product AI must use the same authoritative service.
+Acceptance includes actual create/attach/update/detach/revoke workflows, effective
+access with source attribution, live enforcement, negative authorization/CAS
+cases and matching audit outcomes across surfaces. The approved guided UI remains
+the baseline: desktop/mobile, both themes, keyboard, loading/error/empty/read-only
+and conflict states require rendered verification, not source inspection alone.
+
+Current delivery checkpoints, not substitutes for the complete gates below:
+
+- The isolated configuration mutation candidate adds an opt-in shared service for
+  environment, execution settings and encrypted secret upsert/delete. Exact
+  source/function/generation/policy/epoch/ciphertext CAS and live operator checks
+  precede one durable deny-first commit. The old actual Factory is invalidated
+  under IAM before ACK; cancellation/retirement/event callbacks follow outside
+  owner locks. A fresh strict snapshot with the same concrete code/runtime leases
+  is separately installed, then explicitly reviewed against current aggregate
+  grants. Optional HTTP/MCP/shared-AI adapters are not normally registered.
+  The sealed Node/Python fixture covers real public invoke/private SDK,
+  failed-COMMIT host/cache preservation, corruption denial, old busy SDK denial,
+  new config/secret visibility and explicit review. Independent acceptance remains
+  pending. Queued deploy/rollback, source clone/import, trigger/other writers,
+  complete lifecycle and boot/restore/recovery remain separate cut-over gates.
+- The committed direct-Factory KV workflow has scoped independent acceptance.
+- The isolated public-pool KV candidate has independent browser, correlation,
+  HTTP-negative and package/race/vet acceptance. Three independent fresh-root
+  generation-replacement race runs now pass. The original setup collision and
+  failed third-party-bearer expectation remain recorded; the corrected probe
+  proves both platform credential stripping and intentional bearer forwarding.
+- The isolated buffered-call candidate has scoped independent acceptance for
+  both Node/Python directions. Twelve calls correlate public/SDK/target/child
+  records and policy audits: eight denied calls have no child execution rows;
+  four allowed calls have exactly one. This proves handler-dispatch denial, not
+  that acquiring a cold target cannot import module code. KV regression passes.
+  Exact verified source is integrated. Fresh UID-1001 server/UI builds,
+  canonical lint/tests, six-package race tests, frontend lint (one unchanged
+  Editor warning), 106 Node tests, 240 component tests and scratch UI build
+  passed in a disposable VM; its removal was verified. Stream acceptance followed
+  separately, as recorded below.
+- Reusable-policy semantics have independent decision review as recorded below.
+  Management parity, production lifecycle wiring, async provenance and
+  boot/restore qualification remain incomplete.
+
+No push, tag, release, production/website deployment or production testing is
+authorized by this completion request. Source-level coordinated cut-over still
+requires the complete acceptance gates; a working scratch workflow alone does
+not authorize activating a partial API.
+
+### Reusable-policy decisions — staged core and management surfaces accepted
+
+- Named definitions have immutable versions. Attachments pin a version; editing
+  creates a new version without changing existing attachments. Impact preview
+  and explicit reviewed rollout replace pins on selected functions.
+- Inline source, attachments and compiled effective authority are separate.
+  Effective authority is the allow-only union with source attribution. Removing
+  one source must expose residual grants rather than falsely claiming access
+  was revoked. The compiled union is never an editable inline draft.
+- Bound the first implementation to 25 distinct attached functions per policy
+  across all versions, eight named policies per function and 25 owners per
+  operation, in addition to existing aggregate policy limits. Over-limit input
+  rejects; no hidden partial rollout or automatic batching.
+- Multi-owner changes require sorted function mutation locks and one IAM
+  publication boundary around a single durable transaction. Recheck the entire
+  affected set, live operator, CAS and reviewed artifact expectations before
+  commit. Publish every effective snapshot together; failed commits publish
+  nothing and cancel no registrations. A loop over single-owner publication is
+  not atomic rollout.
+- Global revoke is terminal for the named policy ID and removes only its
+  contribution from every attached owner in that bounded batch. Existing inline
+  and other-policy authority remains. Reuse per-owner admission/cancellation
+  rather than add a global authority dimension. Replacement requires a new
+  policy and explicitly reviewed attachments.
+- Detach/revoke with unavailable current artifacts may only remove known
+  sources, recomputing a provable subset while preserving the prior approval.
+  This is not permission to submit an arbitrary edited policy under a
+  reduction label. If subset proof is unavailable, deny without claiming
+  successful revocation.
+- Own-storage/execution selectors resolve to each attached function. Exact
+  foreign targets retain UUID identity; prefixes explicitly cover future
+  matching resources, never future functions. No roles, nested policies,
+  arbitrary template parameters or deny language are added.
+- UI, REST, slim CLI, external MCP and in-product AI share the same service,
+  strict input decoding, live authorization, CAS and audit behavior. Actual
+  two-function workflows and negative/adversarial cases must prove equivalence.
+
+### Coordinated acceptance gates
 
 1. **Design freeze:** independent consolidated review; resolve recommendations
    in §2 and pin schemas/limits, error/state vocabulary and lock ordering.
@@ -598,6 +813,369 @@ and policy together. Serving wiring remains absent until the full proof gates.
 
 #### Verified stages and current limits
 
+- The named-policy management surfaces passed independent
+  functional REST/slim-CLI/external-MCP/private-SDK checks, including pinned
+  versions, reviewed rollout, residual-source detach/revoke and stale-owner
+  rollback. Initial source-aware UI acceptance was blocked: both runtime captures showed
+  ALLOWED through an enabled managed attachment while the empty inline card
+  claimed no platform actions were allowed. Hidden effective JSON and an
+  inline-only banner did not fix that contradictory summary. A separate
+  correction added human-readable effective authority and explicitly scoped
+  inline editing. Registry-only dispatch tests likewise did not establish
+  actual AI-turn approval/resume. Both gaps received the follow-up checks below;
+  verifier browser/services/VM cleanup was verified.
+  Follow-up verification closed the original summary contradiction, but
+  reproduced a second blocker: after concurrent revocation and a stale save
+  returning 409, the SDK denied access while the effective card still described
+  the prior grant as applying "now." Draft retention and disabled Save passed;
+  they do not make that effective snapshot current. Conflict/ambiguous-failure
+  states must explicitly invalidate authority freshness and restore current
+  claims only from an owner-correlated authoritative response.
+  Independent re-verification of the final conflict correction now closes that
+  409 blocker: real Node/Python revocation produced SDK denial and stale-save
+  409; authority became explicitly unverified immediately, then fresh GET showed
+  no grants while the unsaved draft remained and Save stayed disabled. All
+  106 unit and 269 component tests, lint and both builds passed. Final evidence
+  uses a 36-file safe allowlist; rejected raw events containing unverified
+  `generation.Token` fields were privately quarantined, not published or assumed
+  harmless. Browser/services/VM cleanup was verified.
+  The separate test-only deterministic-provider AI-turn increment now has
+  independent normal and race acceptance: actual Manager/Runner/Bifrost/shared
+  registry/service publication waits for approval, resumes exactly once, and
+  rejects replay, rejected approval, false destructive confirmation, revoked
+  pending credentials, forced read-only writes and strict-input violations.
+  Its initially interrupted race run remains recorded; a completed follow-up
+  passed and removed its disposable snapshot. This does not establish browser
+  Chat, public-provider compatibility, actual worker identity in the AI fixture
+  or production activation.
+  The accepted surfaces, both UI corrections and AI-turn test are integrated.
+  Independent merge-critical source review preserved accepted calls/session
+  behavior. Fresh UID-1001 server/UI/slim-CLI builds, canonical lint/tests,
+  policy/MCP/AI/CLI race checks, database regressions, 106 unit and 270 component
+  tests, and both scratch UI builds passed. Separate real race-enabled calls
+  and managed fixture modes passed; simultaneous flags were not qualified.
+  The combined VM was removed. Normal router/boot/catalog activation and full
+  E2E/cut-over remain off and unaccepted.
+
+- Jobs44's timezone fixture and browser/distinct-function holds are closed by
+  independent completion QA: all six timezone normal/race checks, hostile SDK
+  boundaries, real Node↔Python jobs and retained-worker replacement denial pass.
+  Thirty-one browser checks verify both real UI resumes, target SDK writes,
+  immutable function provenance and one admin audit each. The earlier database
+  race timeout remains recorded; the unfiltered rerun passed with an adequate
+  15-minute budget. Older author no-output timeouts remain cause-unproved.
+  Jobs is integrated. The verifier's test-only CLI
+  environment-auth overlay is retained instead of credential argv.
+  Cron CORE24 and final formatted CONTROL37 have scoped independent admission,
+  real firing, schema-precision and four browser/runtime-combination acceptance.
+  The cron verifier's initial wrong-cwd host launch failed isolation and was
+  excluded; isolated reruns supplied acceptance. Aggregate jobs/cron integration
+  now passes independent merge-critical source review and fresh combined checks:
+  UID-1001 server/UI/slim-CLI builds, canonical lint/tests, unfiltered affected
+  package race checks including database (611 seconds), 106 unit and 283
+  component tests, and four scratch UI builds. Race-enabled real self-target
+  and cross-runtime jobs and all four cron browser/runtime combinations passed.
+  Only the existing Editor lint warning remains; the owned VM was removed.
+  The first aggregate attempt failed the error-catalog scanner, which omitted
+  actual SDK `IAM_DENIED` emissions. Its log remains; the scanner fix includes
+  positive/negative regression cases, and the complete rerun passed.
+  A new combined managed-publication/standing-job unit regression passed normal
+  and three race runs: failed CAS cancels nothing, detach/revoke cancels before
+  ACK outside owner/IAM locks, and residual inline grants remain effective.
+  Full lifecycle, restore and coordinated production activation remain
+  unaccepted; no production activation follows from these tests.
+
+- Isolated HISTORY28 has independent scoped normal/race/vet, SQLite fault/auth
+  and real Node/Python deletion/archive/fresh-reissue acceptance. The verifier
+  rebuilt against the final source and observed new target SDK effects and
+  operator-origin audits; old IDs and same-name recreation did not resurrect
+  work. Its VM/worktree were removed and 42 safe evidence files hash-checked.
+  The subsequent managed-deletion coordination initially failed its exact-byte
+  Node lifecycle with `SQLITE_BUSY` during fixture schema staging after invocation
+  had begun asynchronous writes; Python and independent SQLite CAS/fault/
+  concurrency probes passed. The original failure is retained. A two-test-file
+  correction stages schema/source setup before invocation and applies bounded
+  per-connection SQLite pragmas. Independent re-verification passed three fresh
+  dual-runtime processes (six subtests) without weakening lifecycle assertions.
+  History, coordination and the fixture correction are integrated alongside the
+  accepted Jobs44 timezone correction and controls, not silently substituted in
+  earlier frozen-source verdicts.
+  Independent merge-critical source review passed. Fresh combined UID-1001
+  server/UI/slim-CLI builds, canonical lint/tests and full affected-package race
+  checks passed, including database (623 seconds). Race-enabled real coordinated
+  Node/Python history, distinct-function jobs and cron lifecycles passed; the
+  combined VM was removed. That core-only run did not qualify public history
+  controls; their later acceptance is recorded separately below. Restore,
+  broader lifecycle and full E2E/cut-over remain unaccepted.
+
+- History adapters/CLI/UI, the live controls fixes, advisory cron descriptions
+  and the real-stream fixture now have scoped independent acceptance and are
+  integrated. The combined 49-path snapshot passed clean locked frontend checks
+  (110 unit and 312 component tests), UID-1001 server/slim-CLI builds, canonical
+  lint/tests and eight affected-package race suites. All five scratch builds
+  passed; only the existing Editor warning remains. Real Node/Python history
+  profiles each passed 60 checks, including fresh operator-origin SDK effects,
+  current-actor purge audits, canonical/reserved ledger reconciliation, resolved
+  day/night themes, KeepAlive restoration and visible cron wording.
+  KV/calls/streams correlation verifiers passed, stream controls were enabled,
+  and no fresh handoff after revocation acknowledgement was observed. Separate
+  managed-mode execution passed. Terminal UID-1001 verification matched all
+  1,036 source hashes/modes; orchestration exited zero and cleanup was verified.
+  Own runner permission/PATH and hidden-responsive-locator failures remain
+  recorded; no candidate assertions were removed. The external purge-audit
+  probe's corrected `actor.ID` path and stronger browser regression are retained
+  in the repository. Screenshots with fixture payloads are excluded from safe
+  evidence. Real oversized stream frames remain unit-only qualification.
+  Normal serving/router/catalog/boot activation, restore, full E2E and broader
+  accessibility/resource stress are not accepted by this staged integration.
+
+- Span admission and immutable decision-revision provenance have now passed
+  independent combined qualification on the integrated SDK regression baseline.
+  Canonical lint/tests, unfiltered affected normal/race/vet, the full database
+  race suite (612 seconds), actual SQLite retry/accounting probes and sealed
+  Node/Python spans normally and under race passed. All 1,045 source entries
+  and modes matched; the owned VM was removed. Deciding owner/revision remains
+  private immutable queue metadata, not a durable span column or SDK claim.
+  The supported-Python initialization and cron-fixture contention corrections
+  also passed combined qualification and are committed separately.
+  Queued-build submitter capture, remaining writers and boot/restore are still
+  integration or cut-over gates. None of these
+  scoped results activates normal serving or establishes full IAM acceptance.
+
+- Configuration publication now has independent combined acceptance on the
+  integrated span/SDK baseline. Exact source/ciphertext/epoch CAS, live
+  source-aware operator checks, failed-COMMIT preservation, commit-to-Factory
+  invalidation and separate fresh installation/review passed. Real Node/Python
+  configuration and span workflows passed normally and under race, alongside
+  independent adversarial probes. Canonical checks, unfiltered affected suites
+  and the full database race (712 seconds) passed. Fresh locked frontend checks
+  passed 110 unit and 312 component tests, lint and production compilation.
+  All 1,056 source entries matched and owned resources were removed. Optional
+  adapters remain inactive in normal serving; queued code, other writers,
+  recovery, browser Chat and full lifecycle/cut-over remain separate gates.
+
+- Conditional browser-session UUID capture has scoped independent acceptance.
+  Once the explicit identity schema is installed, new session rows receive
+  independent UUIDs transactionally; fresh and cached browser auth and AI
+  contexts retain token-free provenance. Legacy-schema/NULL-ID behavior stays
+  unchanged and clears inherited references. Full database/server normal/race
+  and vet passed; independent focused identity/cache/revocation/commit-time
+  denial checks passed, with its verification worktree removed. An initial
+  missing ignored UI asset prevented server compilation; reusing that asset
+  enabled tests, not a fresh UI build. Normal boot initialization, public IAM
+  routing and full browser IAM acceptance remain separate gates.
+
+- The isolated reusable-policy core has scoped independent acceptance for
+  immutable versions, pinned attachments, separate inline sources, independent
+  definition/membership CAS and bounded all-or-none multi-owner publication.
+  Real SQLite probes verified 25-owner failed-COMMIT rollback, credential
+  revocation/expiry, cancellation, exact-source/membership interleavings and
+  reentrant cancellation callbacks. Full three-package normal/race/vet checks
+  passed; the owned verification worktree was removed. Source-aware management
+  surfaces, real SDK workflows, boot/restore and function-deletion integration
+  are not established by this core acceptance. The core and conditional session
+  capture are integrated; combined canonical lint/tests and focused four-package
+  race checks passed. Existing ignored UI assets were reused for Go compilation,
+  not claimed as a fresh UI build. The verification worktree was removed;
+  cleanup inventory initially failed from its deleted cwd, then directory and
+  Git-registration absence were verified from the main tree.
+
+- The first live visible KV milestone now connects the unchanged approved UI,
+  real request controller, authenticated HTTP adapter, policy transaction and
+  Authority to actual Node/Python private-SDK workers. Independent browser
+  journeys passed deny → UI grant → allow → UI revoke → deny on the same worker
+  and artifact, matching audit revisions; phone/desktop captures had no browser
+  errors or overflow and were shown in the conversation. Stale response/CAS/
+  credential and controller lifecycle tests passed. This uses direct Factory
+  dispatch in an explicitly labelled scratch shell, not serving-pool or full
+  IAM integration. Production routes, boot schemas and SDK defaults remain off.
+  The exact accepted patch is integrated. Fresh UID-1001 actual server/UI build,
+  canonical lint/tests, frontend lint/tests and separate live-entry build passed;
+  the combined-check VM was removed. This does not extend acceptance to the
+  ongoing serving-pool integration.
+
+- The internal two-store Owner now binds code/runtime roots to instance epochs
+  with one durable commit barrier. Exact same-boot fencing gates committed-asset
+  recovery; incomplete state denies and unfinished assets remain quarantined.
+  Independent normal/race, physical pipelines, crash recovery, adversarial
+  probes and final source checks passed, with the owned VM removed. The race
+  crash replay was rerun manually after its driver timeout, not counted as a
+  green original run. Canonical lint/tests passed on the exact overlay.
+  ACL validation, cold-start
+  budget capture, reboot, interrupted-transition repair, serving, restore and
+  policy/current-generation publication remain open.
+
+- Typed nested Domains now gate child creation/entry against every ancestor,
+  preserve cleanup pins and integrate with actual managed Build through the
+  mutually exclusive ParentDomain profile. Independent physical race tests,
+  real Node/Python bridges, root-fencing of active builds/workers and partial
+  construction/reclaim probes passed. The review also reproduced the old
+  UID-sensitive artifactfs test failure; the separately accepted test-only fix
+  is committed as 4902f2b without changing production behavior. Combined
+  canonical lint/tests passed on the exact combined snapshot. Boot wiring, durable store association,
+  recovery, resource stress and serving IAM remain outside this acceptance.
+
+- Managed-output work now drives actual Build through fresh private staging,
+  an exclusive build Domain and Fence/Check before inspection, Seal or Abort.
+  Unresolved cleanup retains runtime/stage ownership and bounded capacity for
+  explicit retry. Independent writer-fencing and real plain Node/Python
+  Build→Seal→Factory→worker checks passed, but raw contained `..` archive paths
+  normalized rather than rejected. The corrected producer rejects raw parent
+  components; parent race suites under both umasks and canonical lint/tests
+  pass. Corrected independent rejection/compatibility/metadata checks under both
+  umasks, normal/race suites, vet and fresh physical Node/Python pipelines also
+  pass, with original HOLD evidence retained and the owned VM removed.
+  Dependency manifests,
+  TypeScript and host build hooks deny in this limited profile. No serving,
+  durable publication, current authority or recovery activation is included.
+
+- Internal builder runtime binding now captures one concrete generation at Build
+  entry, retains a pipeline anchor and leases each command through cleanup.
+  Syntax/install/compiler steps do not reselect mutable runtimes; full identity
+  is recorded separately from ABI cache hashing and unproven managed cache hits
+  deny. Independent normal/race suites, repeated adversarial probes, vet and
+  real Node/npm/TypeScript and Python/pip pipelines passed; the VM was removed.
+  Parent canonical checks exposed a fixture-mode mismatch under umask 0077.
+  The fixture now explicitly sets the permissions declared by its manifest;
+  verifier rules are unchanged and the original failure is retained. Parent
+  race runs under both umasks and canonical lint/tests now pass. Independent
+  fixture metadata, normal/race tests, repeats and vet also pass under both
+  umasks, with exact implementation hashes unchanged and worktree removed.
+  No serving constructor enables it.
+  Captured Domain placement is not exclusive build ownership, writer fencing
+  or sealed-code/current-generation publication.
+
+- Optional sandbox Domain integration now enrolls Spawn, Execute and RunBuild
+  with verified same-epoch jail placement and required-controller denial.
+  Independent real-nsjail tests passed worker/SDK, one-shot/build descendants,
+  cancellation, FD/lease ownership and fencing. Review found CPU truncation;
+  exact millisecond conversion now rejects unrepresentable requests and real
+  readback for 1.001 CPUs is `1001000 1000000`. Independent physical race runs,
+  compatibility/vet and parent canonical lint/tests passed. One unchanged
+  historical diagnostic retains a fixture-only failure because correct rejection
+  now precedes its old unconditional no-error check; that red evidence and the
+  replacement independent denial oracle are both retained. Serving, build-output
+  writer fencing, pinned build runtimes, resource stress and recovery remain open.
+
+- A fresh UID-1001 lifecycle-candidate build combined the independently reviewed
+  factory, real-runtime harness and resource-capable fence with the accepted
+  policy/context/stream baseline. Actual UI/server build, canonical lint/tests
+  and frontend lint/tests passed; the owned VM was removed. Its frozen manifest
+  explicitly excludes ongoing sandbox Domain integration. This is not full
+  API/sandbox E2E, migration/restore or serving-IAM acceptance.
+
+- The inactive frozen-generation factory now owns bounded config/secrets and
+  concrete code/runtime anchors, issues same-generation one-use spawn plans,
+  and exposes resource facts from the same frozen inputs. Prepared count/byte
+  reservations remain charged through Spawn completion and release exactly
+  once. Independent full package race tests and quota/lease/retirement probes
+  passed, with source hashes and worktree cleanup verified. Those tests use a
+  fake jail. Independent normal/race qualification now also passed with two
+  real Node and two real Python workers, frozen inputs despite source mutation,
+  distinct worker identities, quota release, retirement, private SDK/lazy imports
+  and post-Wait leases; original runtime controls passed and the VM was removed.
+  Current
+  generation/bootstrap admission, provider budgets and pool wiring remain absent.
+
+- Fresh frozen-candidate qualification builds the actual UI/server and runs as
+  UID 1001, excluding concurrent factory and sandbox-integration work. Its first
+  build/lint passed but canonical tests failed in the minimal Node image:
+  Python-backed fake-jail fixtures had no `python3` interpreter. The original
+  failures are retained; Python was installed only inside the disposable VM.
+  The unchanged canonical `make lint`/`make test` and frontend lint/tests then
+  passed, including 228 component checks. The owned candidate VM was removed.
+  This accepts the frozen snapshot, not concurrent factory/jail-parent work,
+  E2E behavior or serving IAM.
+
+- `workloadpolicy` now joins registry mutation ordering, immutable IAM
+  publication and the live-operator policy transaction. Replacement preserves
+  quarantine/review flags; explicit review approves unchanged policy against
+  exact current-artifact expectations. Total empty-policy revocation remains
+  possible when current runtime facts are unavailable. Independent real-SQLite
+  tests passed, including stale artifact during lock wait, queued revocation,
+  cancellation and deferred COMMIT failure. Its current-artifact observer is a
+  trusted atomic host contract, not an installed or attested serving provider.
+  No public adapter or boot initializer is registered.
+
+- Internal management decoders require exact authorable fields and positive
+  signed-64-bit decimal revision strings, with nullable SHA-256 expectations.
+  They reject duplicate/unknown host fields, coercion, malformed input and
+  exceeded bounds. Shared token-free operator context captures authenticated
+  API-key identity and MCP OAuth's validated stored audience; AI request
+  contexts inherit it. Independent VM tests/probes passed for this decoder and
+  capture slice. Browser-session UUID capture, queued-build capture and
+  end-to-end management-tool wiring remain absent; cookie prefixes and
+  audience-less OAuth do not become publication credentials.
+
+- Staged streaming SDK admission now checks the acquired worker before binding
+  or dispatch, retains registration through the stream and reauthorizes bounded
+  handoffs. Independent testing found a nil-byte handoff followed by an
+  oversized dynamic error. The corrected implementation serializes the actual
+  SDKError before handoff and returns only the admitted copy; the unchanged
+  overflow probe now yields a bounded generic denial. Repeated package race
+  tests/vet and independent boundary/lease/lock probes pass. Real pooled
+  artifact binding, nested-runtime IAM and serving remain separate gates.
+
+- A scratch-only runtime producer authenticates reviewed release bases, checks
+  fourteen exact packaging-link omissions and overlays hash-pinned current SDK
+  sources. Emitted archives are imported into fresh stages and sealed against
+  original producer expectations. Node/Python real nsjail readiness, private
+  SDK, lazy imports and post-Wait lease retention were independently reproduced
+  normally and under race detection. That review found a blocking FIFO input
+  open before file-type checks; the producer now opens no-follow/nonblocking
+  and rejects nonregular files. Corrected independent verification passed the
+  unchanged FIFO witness promptly, 100 race repetitions of negative inputs and
+  fresh normal/race Node/Python execution. Emitted archives and producer records
+  matched previous hashes exactly; non-root artifactfs regressions passed and
+  the owned VM was removed.
+  This is not published runtime packaging or serving qualification.
+
+- `workloadfence` adds a package-only durable cgroup epoch and pre-exec entry
+  wrapper, serializes closure against starts, and mints opaque proof only after
+  durable close plus kernel recursive emptiness. Worker and independent
+  original suites passed real-kernel race repetitions. Independent additional
+  probes/vet passed, including copied-handle closure, fresh owner-bound proofs,
+  recovery ownership and durable-state denial; the owned VM was removed.
+  Host ownership/no-reuse and in-epoch trusted command
+  relocation remain prerequisites. Legacy nsjail's global cgroup parent is not
+  integrated; no artifact recovery consumer or reboot adoption is enabled.
+
+- The fence now has owned jail-parent capabilities and a process-local service
+  budget captured from the exact current non-root cgroup before daemon-leaf
+  relocation. Ordinary Create ancestor/sibling/root denials remain. Independent
+  current-source race repetitions and adversarial probes passed controller
+  readback, descendant fencing, copied capabilities, stale state and mount-alias
+  rejection, with mount/subtree/VM cleanup verified. This is not resource-stress,
+  real nsjail sandbox integration, boot wiring or recovery acceptance.
+
+- Completion work after the approved UI now includes an internal
+  `SaveIAMPolicyAsOperator` transaction: live credential validation, policy CAS,
+  authority-epoch advancement and derived audit actor commit together, with a
+  second credential check before commit. Existing persistence-only saves reuse
+  the same transaction helper. This is not current-artifact verification or a
+  serving management API; shared ordered publication and trusted request
+  identity capture remain required. Parent targeted database race tests and vet
+  pass. Independent targeted/compatibility race checks, vet and adversarial
+  probes passed, including deferred-FK COMMIT failure, trigger-driven credential
+  revocation, queued expiry/cancellation and stored-approval CAS. The full
+  database race suite and parent canonical `make lint`/`make test` passed.
+  The first test run exposed test-only scalar-function registration after
+  opening SQLite; registration now precedes opening the fixture, with the
+  original failing output retained.
+
+- The inert spawn fingerprint now uses the v2 domain and excludes the generic
+  function row version. Description-only edits increment that version, so it
+  could not identify execution content without violating the cosmetic-edit
+  exemption. Explicit execution fields, code/runtime store identities and
+  durable generation/revision/epoch remain fingerprinted; positive row-version
+  validation remains. Environment/secret invalidation still requires
+  authoritative transactional generation rotation. The exact wire-format oracle
+  is updated to v2, not removed; parent full package race tests and vet pass.
+  Independent fingerprint verification passed targeted race checks, 32
+  additional cases and vet, including cosmetic stability, positive-version
+  rejection and execution/store/generation input sensitivity. This accepts only
+  fingerprint construction, not authoritative current-artifact publication.
+
 - `PublishWorkloadEnvironmentAsOperator` joins live operator revalidation with
   environment/generation/policy/audit publication in one transaction. It checks
   current API-key permissions/expiry, OAuth token and client scopes/revocation/
@@ -612,6 +1190,13 @@ and policy together. Serving wiring remains absent until the full proof gates.
   the operator-denial sentinel. Mutation/commit cancellation now preserves both
   denial and context identity. A trigger-driven cancellation regression checks
   complete rollback; twenty cancellation race repetitions and vet pass.
+  Independent acceptance at `bd9fddc` passed: original full database race
+  (472.695 s), original/fixed vet, unchanged cancellation repro and fixed
+  cancellation/rollback/CAS probes. Full database race was not repeated after
+  the narrow cancellation fix. Strict OAuth whitespace/duplicate-scope parsing
+  remains a fail-closed compatibility consideration before cut-over. Original
+  verification used task-owned transient systemd isolation; those units and
+  namespaces were removed. Fixed checks used ordinary offline worktrees.
 
 - Explicit `artifactfs.NewPersistent` adds bounded canonical metadata and ordered
   fsync/intent/tree-rename/commit publication. `OpenRecovering` verifies recognized
@@ -628,6 +1213,11 @@ and policy together. Serving wiring remains absent until the full proof gates.
   interrupted Abort retains an untyped reservation/delete intent instead.
   Added a regression for failed Seal plus permission-denied cleanup; twenty
   package race repetitions and vet pass. Independent re-verification is pending.
+  Independent corrected acceptance at `8aa6146` passed the unchanged real
+  permission-error reproduction, twenty race repetitions and extra probes,
+  including 220 subprocess-exit crash cases, 800 concurrent lifecycles and
+  180 failure-stage cases. These are process/fault tests, not actual power-loss
+  durability or surviving-worker-fence acceptance. No recovery activation exists.
 
 - Stable browser-session UUID references are implemented as an inert additive
   schema/read seam. The explicit test-only initializer backfills independent
@@ -858,6 +1448,90 @@ and policy together. Serving wiring remains absent until the full proof gates.
   execution admission, stale-lease rejection and no replacement-execution
   upgrade. This is an in-process/fake-worker test, not live SDK enforcement.
 
+### Dedicated permissions UI staging (2026-11-16)
+
+`FunctionPermissions.vue` and its permission-specific components implement an
+independent policy draft over a validated internal snapshot. They are not routed
+or connected to a production API. Preview never widens capabilities, and save
+or review events carry only policy and expected revision/artifact values.
+
+Independent negative testing rejected the initial candidate despite passing
+ordinary tests: metadata bounds/actor references, ABA conflict handling, review
+retry, sparse arrays and loading/error empty-state copy needed correction.
+Regression cases now cover those failures; the original independent probes are
+retained in task evidence rather than weakened. Dirty conflicts preserve old
+expectations until explicit discard/reload. Server CAS and authorization remain
+mandatory; this advisory model is not an enforcement boundary.
+
+Parent isolated Node 26 checks passed frontend lint/tests, the app build and an
+explicit HTML entry build importing the otherwise-unreferenced page. The fixed
+candidate passed 40 synthetic render cases across both themes and
+375/390/768/1440px without horizontal overflow or browser errors, plus explicit
+save/revocation, ABA/review-retry and phone History reachability checks.
+Independent behavioral re-review first found three further ordering failures:
+clean/adopted revision rollback and a matching snapshot preceding a delayed
+conflict error. The corrected candidate passed all 30 unchanged independent
+probes and four additional ordering probes, plus 98 Node and 181 repository
+component tests in an independent disposable Node 26 VM. Parent canonical lint
+and tests, explicit page build, and browser reproductions also passed.
+Behavioral acceptance is scoped to the staged seam and its documented future
+controller ordering/correlation contract, not live IAM. Visual review found no blockers;
+effective touch regions, complete accessibility, real Layout/auth lifecycle,
+live API integration and runtime IAM acceptance are separate gates.
+
+The owner subsequently rejected the authority-sheet workflow as confusing.
+The guided replacement now starts with stored access and explicit Edit/Create,
+then service → actions → resources → permission review, followed by a separate
+whole-policy changes review and Save. Canonical JSON is read-only under Advanced.
+Fresh visual review required compact editing context, task-focused scrolling,
+accurate stored-versus-draft copy and removal of the ambiguous Done exit; the
+reviewer scored all three material findings resolved after recapture.
+
+Independent behavior review caught six builder defects despite passing baseline
+tests: implicit scope broadening, implicit all-key access, selected-action loss,
+foreign caller cron acceptance, premature Save callbacks and busy discard.
+A later check caught editing a retained foreign schedule target. All were
+corrected without silently changing stored targets or tightening Go's structural
+policy format. Unsupported retained entries are described honestly and cannot
+be reauthored through the guided wizard.
+
+Final component/model acceptance passed 67 independent checks, all 34 prior
+state guards, 22 original model checks, and 105 Node / 211 repository component
+tests. The old diagnostic witness asserting defective foreign-target behavior
+was retained and remains red as expected; it is not an acceptance requirement.
+Parent lint, production and explicit-page builds passed; 48 rendered workflow
+states across both themes and 375/768/1440px showed no horizontal overflow or
+browser errors. Additional browser negatives verified explicit scope intent,
+startup correction, Done protection and the foreign schedule-target block.
+This accepts the staged workflow, not live routes, controller correlation,
+operator authentication, CLI/MCP policy controls or runtime enforcement.
+
+The owner approved the guided appearance and requested flat sidebar navigation
+plus responsive/keyboard QA without redesign. Independent browser testing
+covered 336 state/viewport/theme checkpoints, then found picker Escape/focus,
+sub-44px effective targets and overlapping stacked picker targets. These were
+fixed in the shared controls: keyboard opening enters the menu, Escape restores
+the trigger, fixed centered hit targets retain visible size tiers, and stacked
+picker options take actual 44px row height. The touch probe now accounts for
+padding-box pseudo-element positioning instead of overcounting border widths.
+The flat drawer also closes with Escape and contains Tab/Shift-Tab focus.
+
+Final independent live retest passed 76/76 assigned checks in both themes,
+including actual edge-hit ownership. Isolated frontend validation passed lint
+(one pre-existing Editor attribute-order warning), 106 Node tests, 228 component
+tests and production build. Canonical `make lint`/`make test` and four browser
+probe regression tests passed. Parent browser checks passed 13 service/caller
+journey checks at both 390px and 1440px, plus nine Advanced/clipboard/error
+checks. Error recovery models the future controller's required error clearing;
+the synthetic save controller is not a production integration.
+
+Evidence is retained locally under `/tmp/opencode/iam-full-ui-qa/` and
+`/tmp/opencode/orva-flat-sidebar-qa/`. Prior HOLD reports and failing diagnostic
+witnesses remain in the record. This is scoped Chromium preview acceptance,
+not exhaustive WCAG, assistive-technology, Safari, production Layout/auth,
+runtime IAM or full API/sandbox E2E acceptance. No release or production
+deployment occurred.
+
 Source integration map at baseline:
 
 - `sandbox/sdkchan.go:dispatch`, `sandbox/sdkapi.go:SDKCaller/ExecInfo`: identity,
@@ -893,3 +1567,10 @@ Deferred: arbitrary cross-function KV, general delegation/token exchange, tenant
 RBAC inheritance, external policy engines, distributed enforcement, scoped
 secret fetching and information-flow tracking. Revisit with concrete use cases,
 not by weakening the initial service/identity boundary.
+
+Acceptance note (19 November 2026, inbound webhooks): the managed listener also
+serves attested, publication-gated `/webhook/{id}` and mounts inbound-webhook REST
+from the same exposure service. Unit and HTTP tests and the disposable-VM
+`TestManagedServingLive/inbound-webhook` run (real Node function, bad signature
+refused, restore unpublishes, explicit republish) passed. Managed MCP/Chat route
+and webhook tools, browser/CLI surfaces and production cut-over remain open.

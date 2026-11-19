@@ -48,6 +48,15 @@ type InvokeHandler struct {
 //   - any custom route previously registered via /api/v1/routes that maps
 //     a user-chosen path (e.g. /webhooks/stripe) to a function_id
 func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.serveHTTP(w, r, false)
+}
+
+// ServeManagedHTTP never consults the legacy custom-route table.
+func (h *InvokeHandler) ServeManagedHTTP(w http.ResponseWriter, r *http.Request) {
+	h.serveHTTP(w, r, true)
+}
+
+func (h *InvokeHandler) serveHTTP(w http.ResponseWriter, r *http.Request, managed bool) {
 	responseStart := time.Now()
 	defer func() {
 		if h.Metrics != nil {
@@ -70,29 +79,36 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// a stricter auth_mode, since auth is checked against the resolved id.
 	if strings.HasPrefix(r.URL.Path, "/fn/") {
 		fnID = extractFnID(r.URL.Path)
-	} else if route, matched, err := h.DB.MatchRoute(r.URL.Path); err == nil && route != nil {
-		if route.Methods != "*" && route.Methods != "" {
-			allowed := false
-			for _, m := range strings.Split(route.Methods, ",") {
-				if strings.EqualFold(strings.TrimSpace(m), r.Method) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				respond.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED",
-					"method not allowed for this route", reqID)
+	} else {
+		var route *database.Route
+		var matched string
+		var err error
+		if managed {
+			route, matched, err = h.DB.MatchManagedRoute(r.Context(), r.URL.Path)
+			if err != nil {
+				respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "Managed route lookup unavailable", reqID)
 				return
 			}
-		}
-		fnID = route.FunctionID
-		// For exact-match routes the function sees "/" as its path. For
-		// prefix routes it sees the sub-path after the prefix so its
-		// internal router (FastAPI/Express/etc.) can dispatch.
-		if strings.HasSuffix(route.Path, "/*") {
-			stripPrefix = matched // e.g. "/shortener/"
 		} else {
-			stripPrefix = matched // full path → function sees "/"
+			route, matched, err = h.DB.MatchRoute(r.URL.Path)
+		}
+		if err == nil && route != nil {
+			if route.Methods != "*" && route.Methods != "" {
+				allowed := false
+				for _, m := range strings.Split(route.Methods, ",") {
+					if strings.EqualFold(strings.TrimSpace(m), r.Method) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					respond.Error(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED",
+						"method not allowed for this route", reqID)
+					return
+				}
+			}
+			fnID = route.FunctionID
+			stripPrefix = matched
 		}
 	}
 
@@ -209,7 +225,7 @@ func (h *InvokeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fnID, execID, timeoutMS,
 		fn.CPUs,
 		stripPrefix,
-		true, start,
+		true, start, fn.Version,
 	)
 
 	duration := time.Since(start)

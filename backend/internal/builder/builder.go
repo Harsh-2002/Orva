@@ -20,8 +20,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
 // BuildResult holds the output of a successful build.
@@ -40,6 +42,12 @@ type BuildResult struct {
 	// queue worker persists this back onto the function row so the
 	// pool's buildEnv can publish it as ORVA_ENTRYPOINT to the sandbox.
 	Entrypoint string `json:"entrypoint"`
+	// RuntimeArtifact records what ran, not current authority or sealed output.
+	RuntimeArtifact     artifactfs.Identity `json:"-"`
+	RuntimeABI          string              `json:"-"`
+	CodeArtifact        artifactfs.Identity `json:"-"`
+	SourceArchiveSHA256 string              `json:"-"`
+	AuthoredEntrypoint  string              `json:"-"`
 }
 
 // ErrInsufficientDisk is returned by Build when the data directory has
@@ -87,13 +95,23 @@ type Builder struct {
 	// carry on": an install reaches a package registry, so running it without
 	// a policy is precisely the unfiltered egress this exists to prevent.
 	// Builds that install nothing never consult it.
-	EgressPolicy    func() (path, gen string, err error)
-	checkSyntaxHook func(context.Context, string, string, string) error
+	EgressPolicy          func() (path, gen string, err error)
+	checkSyntaxHook       func(context.Context, string, string, string) error
+	runtimeBindingEnabled bool
+	runtimeProvider       RuntimeProvider
+	buildRuntime          *sandbox.BuildRuntime
+	buildDomain           *workloadfence.Domain
+	managedOutputEnabled  bool
+	outputOwner           *OutputOwner
 }
 
 // New creates a new Builder.
-func New() *Builder {
-	return &Builder{}
+func New(options ...Option) *Builder {
+	b := &Builder{}
+	for _, option := range options {
+		option(b)
+	}
+	return b
 }
 
 // SetEgressPolicy wires the compiled-policy accessor in after construction,
@@ -114,7 +132,25 @@ func (b *Builder) SetEgressPolicy(fn func() (string, string, error)) {
 // and returns the existing path with Cached=true. This makes redeploys of
 // identical content nearly free.
 func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchivePath string) (*BuildResult, error) {
+	if b.managedOutputEnabled {
+		return b.buildManaged(ctx, fn, codeArchivePath)
+	}
 	start := time.Now()
+	var runtimeArtifact artifactfs.Identity
+	var runtimeABI string
+	if b.runtimeBindingEnabled {
+		if ctx == nil || fn == nil {
+			return nil, errors.New("managed build requires context and function")
+		}
+		job := *b
+		b, fn = &job, fn.Clone()
+		lease, abi, err := b.captureRuntime(ctx, fn)
+		if err != nil {
+			return nil, err
+		}
+		defer lease.Release()
+		runtimeArtifact, runtimeABI = lease.Identity(), abi
+	}
 
 	// Pre-flight: refuse to start an extract that won't finish.
 	if err := b.checkFreeDisk(); err != nil {
@@ -129,7 +165,11 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	if err != nil {
 		return nil, fmt.Errorf("hash archive: %w", err)
 	}
-	codeHash := versionHash(archiveHash, b.runtimeIdentity(fn.Runtime))
+	identity := runtimeABI
+	if !b.runtimeBindingEnabled {
+		identity = b.runtimeIdentity(fn.Runtime)
+	}
+	codeHash := versionHash(archiveHash, identity)
 
 	fnDir := filepath.Join(b.DataDir, "functions", fn.ID)
 	versionDir := filepath.Join(fnDir, "versions", codeHash)
@@ -145,6 +185,9 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	// already contains the compiled dist/. Re-resolve from disk so the
 	// queue worker writes the correct value back.
 	if _, err := os.Stat(filepath.Join(versionDir, ".orva-ready")); err == nil {
+		if b.runtimeBindingEnabled {
+			return nil, errors.New("managed build cannot attest legacy cached output runtime")
+		}
 		slog.Info("build cache hit", "fn", fn.ID, "hash", codeHash[:12])
 		return &BuildResult{
 			ImageTag:   imageTag,
@@ -201,6 +244,11 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 
 	// Atomic publish. If a parallel build raced us to the same hash, drop
 	// theirs — both produced identical content so this is safe.
+	if b.runtimeBindingEnabled {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	if err := os.RemoveAll(versionDir); err != nil {
 		return nil, fmt.Errorf("clear stale version dir: %w", err)
 	}
@@ -209,11 +257,13 @@ func (b *Builder) Build(ctx context.Context, fn *database.Function, codeArchiveP
 	}
 
 	return &BuildResult{
-		ImageTag:   imageTag,
-		Duration:   time.Since(start),
-		CodeHash:   codeHash,
-		VersionDir: versionDir,
-		Entrypoint: resolvedEntrypoint,
+		ImageTag:        imageTag,
+		Duration:        time.Since(start),
+		CodeHash:        codeHash,
+		VersionDir:      versionDir,
+		Entrypoint:      resolvedEntrypoint,
+		RuntimeArtifact: runtimeArtifact,
+		RuntimeABI:      runtimeABI,
 	}, nil
 }
 
@@ -630,6 +680,8 @@ func (b *Builder) runBuildStep(ctx context.Context, step buildStep) ([]byte, err
 // being built and from nothing else.
 func (b *Builder) buildConfigFor(step buildStep) sandbox.BuildConfig {
 	cfg := sandbox.BuildConfig{
+		Runtime:     b.buildRuntime,
+		Domain:      b.buildDomain,
 		Language:    step.language,
 		CodeDir:     step.codeDir,
 		Argv:        step.argv,

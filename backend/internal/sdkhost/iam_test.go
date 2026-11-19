@@ -330,10 +330,13 @@ func TestIAMTrustedWorkerKVAndLifecycle(t *testing.T) {
 	if _, err := db.KVGet(iamOwner, "config/no-partial"); err != database.ErrKVNotFound {
 		t.Fatalf("partial batch mutation: %v", err)
 	}
-	for _, op := range []string{"invoke", "invoke.stream.open", "invoke.stream.next", "jobs.enqueue", "crons.upsert", "spans.emit"} {
+	for _, op := range []string{"invoke", "invoke.stream.open", "jobs.enqueue", "crons.upsert", "spans.emit"} {
 		call(c, op, `{}`, 403)
 		call(c, op, "\xff", 403)
 	}
+	call(c, "invoke.stream.next", `{"handle":"unowned"}`, 403)
+	call(c, "invoke.stream.next", `{}`, 400)
+	call(c, "invoke.stream.next", "\xff", 400)
 	call(c, "kv.get", `{"key":"config/k","function_id":"`+iamOther+`"}`, 400)
 	wrong := c.caller
 	wrong.FunctionID = iamOther

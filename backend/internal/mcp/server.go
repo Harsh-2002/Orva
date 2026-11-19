@@ -34,6 +34,11 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -41,18 +46,32 @@ import (
 // Deps wires Orva's existing services into the MCP layer. Tool
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
-	DB         *database.Database
-	Registry   *registry.Registry
-	Builder    *builder.Builder
-	BuildQueue *builder.Queue
-	PoolMgr    *pool.Manager
-	Secrets    *secrets.Manager
-	Proxy      *proxy.Proxy
-	Firewall   *firewall.Manager
-	Metrics    *metrics.Metrics
-	EventHub   *events.Hub
-	DataDir    string
-	Version    string // Orva version string, surfaced via initialize
+	ManagedServer bool
+	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
+	IAM              *workloadpolicy.Service
+	Configuration    *workloadconfig.Service
+	Triggers         *workloadtrigger.Service
+	DB               *database.Database
+	Registry         *registry.Registry
+	Builder          *builder.Builder
+	BuildQueue       *builder.Queue
+	DeployIAM        *builder.PublicationQueue
+	RequireDeployIAM bool
+	PoolMgr          *pool.Manager
+	Secrets          *secrets.Manager
+	Proxy            *proxy.Proxy
+	Firewall         *firewall.Manager
+	Metrics          *metrics.Metrics
+	EventHub         *events.Hub
+	DataDir          string
+	Version          string // Orva version string, surfaced via initialize
+	AsyncEnabled     bool
+	AsyncIAM         *workloadasync.Service
+	CronEnabled      bool
+	CronIAM          *workloadasync.Service
+	History          *workloadhistory.Service
+
+	WorkloadLifecycle *builder.PublicationQueue // explicit scratch-only lifecycle tools
 
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
@@ -119,6 +138,10 @@ func permissionCacheKey(perms permSet) uint8 {
 }
 
 func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
+	instructions := serverInstructions
+	if deps.ManagedServer {
+		instructions = "Orva managed workloads. Only the listed operations are available. Deployment publication leaves a function inactive; installation and explicit source-aware review are separate."
+	}
 	s := mcpsdk.NewServer(
 		&mcpsdk.Implementation{
 			Name:    "orva",
@@ -126,7 +149,7 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 			Title:   "Orva — serverless platform",
 		},
 		&mcpsdk.ServerOptions{
-			Instructions: serverInstructions,
+			Instructions: instructions,
 			SchemaCache:  schemaCache,
 		},
 	)
@@ -138,6 +161,10 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	// Every operator-tool family is registered through a regCtx so the exact
 	// same definitions feed the external MCP server and in-process AI registry.
 	rc := serverRegCtx(s, deps, perms)
+	if deps.ManagedServer {
+		registerManagedServerTools(rc)
+		return s
+	}
 	registerSystemTools(rc)
 	registerFunctionTools(rc)
 	registerDeployTools(rc)
@@ -155,6 +182,10 @@ func buildOperatorServer(deps Deps, perms permSet) *mcpsdk.Server {
 	registerFixtureTools(rc)
 	registerTraceTools(rc)
 	registerDocsTools(rc)
+	registerIAMTools(rc)
+	registerConfigurationTools(rc)
+	registerWorkloadLifecycleTools(rc)
+	registerHistoryTools(rc)
 	registerResources(s, deps, perms)
 	return s
 }
@@ -266,6 +297,9 @@ func NewHandler(deps Deps) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if deps.IAM != nil {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		// Origin validation — the spec mandates it for the Streamable HTTP
 		// transport. A request with NO Origin is always allowed: that is every
 		// non-browser MCP client, which is nearly all of them. Deliberately not
@@ -287,10 +321,14 @@ func NewHandler(deps Deps) http.Handler {
 				"missing or invalid bearer token")
 			return
 		}
+		if deps.ManagedServer && principal.Kind == authpkg.KindChannel {
+			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "channel credentials unavailable on the managed tool surface")
+			return
+		}
 
 		// Hand request-varying identity and origin to the cached server through
 		// context. Neither value may be captured by a shared registration.
-		ctx := context.WithValue(r.Context(), principalCtxKey{}, principal)
+		ctx := context.WithValue(authpkg.WithOperator(r.Context(), principal), principalCtxKey{}, principal)
 		ctx = context.WithValue(ctx, baseURLCtxKey{}, urlhint.BaseURL(r))
 		mcpHandler.ServeHTTP(w, r.WithContext(ctx))
 	})

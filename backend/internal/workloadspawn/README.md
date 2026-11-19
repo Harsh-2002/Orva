@@ -9,8 +9,12 @@ The preparation struct is not opaque: accepting it does not authenticate its
 origin or prove that the database transaction actually happened.
 
 The domain-versioned SHA-256 artifact revision covers owner UUID, durable
-generation UUID/revision/epoch, function version and source code hash, both
+generation UUID/revision/epoch, source code hash, both
 store generations and manifest digests, and non-secret execution configuration.
+The v2 fingerprint excludes description and the generic function row mutation
+counter: description-only edits increment that counter without changing code.
+Execution-relevant changes still alter their explicit fields or the authoritative
+generation. Positive row-version validation remains, but it is not artifact identity.
 The source code hash and code manifest digest have different meanings and need
 not match. Environment/secret names and values are excluded entirely; their
 future authoritative invalidation depends on transactional generation rotation.

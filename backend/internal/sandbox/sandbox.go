@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
 // Language identifies a supported runtime.
@@ -47,6 +49,10 @@ func (l Language) IsPython() bool { return l == Python }
 
 // ExecConfig holds everything needed to run user code in nsjail.
 type ExecConfig struct {
+	// Domain optionally enrolls host and jail processes in an owned epoch.
+	// Nil preserves legacy placement; opt-in requires cpu/memory/pids delegation.
+	Domain     *workloadfence.Domain
+	jailParent *workloadfence.JailParent
 	// FunctionID is the host's own record of whose worker this is; SDK frames
 	// are attributed to it, never to anything the sandbox sends.
 	FunctionID string
@@ -150,6 +156,9 @@ type ExecResult struct {
 func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	start := time.Now()
 	cfg = applyExecDefaults(cfg)
+	if err := validateDomainLimits(cfg.Domain, cfg.MemoryMB, cfg.MaxPids, cfg.MaxCPUs); err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
 	paths, err := bindVerifiedPaths(&cfg)
 	if err != nil {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
@@ -157,6 +166,10 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	defer paths.Release()
 
 	rootfs, entrypoint, err := resolveRuntime(cfg)
+	if err != nil {
+		return &ExecResult{Error: err, Duration: time.Since(start)}
+	}
+	cfg.jailParent, err = prepareDomain(ctx, cfg.Domain)
 	if err != nil {
 		return &ExecResult{Error: err, Duration: time.Since(start)}
 	}
@@ -182,7 +195,14 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 		cmd.Stdin = bytes.NewReader(cfg.Stdin)
 	}
 
-	err = cmd.Run()
+	if cfg.Domain == nil {
+		err = cmd.Run()
+	} else {
+		err = cfg.Domain.Start(ctx, cmd, cfg.jailParent)
+		if err == nil {
+			err = cmd.Wait()
+		}
+	}
 
 	result := &ExecResult{
 		Stdout:   stdout.Bytes(),
@@ -202,6 +222,67 @@ func Execute(ctx context.Context, cfg ExecConfig) *ExecResult {
 	}
 
 	return result
+}
+
+func prepareDomain(ctx context.Context, domain *workloadfence.Domain) (*workloadfence.JailParent, error) {
+	if domain == nil {
+		return nil, nil
+	}
+	parent, err := domain.PrepareJails(ctx, "cpu", "memory", "pids")
+	if err != nil {
+		return nil, fmt.Errorf("prepare sandbox epoch: %w", err)
+	}
+	return parent, nil
+}
+
+func validateDomainLimits(domain *workloadfence.Domain, memoryMB, pids int, cpus float64) error {
+	if domain == nil {
+		return nil
+	}
+	if memoryMB <= 0 || int64(memoryMB) > math.MaxInt64/(3*1024*1024) || pids <= 0 {
+		return errors.New("sandbox epoch requires representable positive memory and PID limits")
+	}
+	_, err := domainCPUMilliseconds(cpus)
+	return err
+}
+
+func domainCPUMilliseconds(cpus float64) (uint32, error) {
+	if cpus == 0 {
+		return 0, nil
+	}
+	ms := math.Round(cpus * 1000)
+	if math.IsNaN(cpus) || math.IsInf(cpus, 0) || cpus < 0 ||
+		ms < 1 || ms > math.MaxUint32 || cpus != ms/1000 {
+		return 0, errors.New("sandbox epoch CPU limit is not representable by nsjail")
+	}
+	return uint32(ms), nil
+}
+
+func cpuMillisecondsArgument(cfg ExecConfig) (string, error) {
+	if cfg.Domain != nil {
+		ms, err := domainCPUMilliseconds(cfg.MaxCPUs)
+		if err != nil {
+			return "", err
+		}
+		if ms > 0 {
+			return strconv.FormatUint(uint64(ms), 10), nil
+		}
+		return "", nil
+	}
+	if ms := int(cfg.MaxCPUs * 1000); ms > 0 {
+		return strconv.Itoa(ms), nil
+	}
+	return "", nil
+}
+
+func domainCgroupMount(domain *workloadfence.Domain, parent *workloadfence.JailParent) (string, error) {
+	if domain == nil {
+		return cgroupv2Delegate(), nil
+	}
+	if parent == nil || parent.Path() == "" {
+		return "", fmt.Errorf("sandbox epoch requires an owned jail parent: %w", workloadfence.ErrInvalid)
+	}
+	return parent.Path(), nil
 }
 
 // applyExecDefaults is shared by one-shot execution and pooled workers.
@@ -388,7 +469,11 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) (args, childEnv []stri
 	// Docker image). Without delegation nsjail can't create the NSJAIL.<pid>
 	// cgroup, so rather than crashing we silently drop the memory/pid caps.
 	// The process-level rlimit_as flag above still bounds address-space.
-	if mount := cgroupv2Delegate(); mount != "" {
+	mount, err := domainCgroupMount(cfg.Domain, cfg.jailParent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if mount != "" {
 		// cgroup v2 memory.max at 1.5× the declared memory. This gives the
 		// kernel headroom to reclaim via PSI pressure before OOM-killing,
 		// and matches the 1.5× per-worker budget the autoscaler uses for
@@ -405,12 +490,16 @@ func buildArgs(cfg ExecConfig, rootfs, entrypoint string) (args, childEnv []stri
 		// subset of cores — actively harmful under concurrency because the
 		// kernel can't load-balance across the full CPU set. Bandwidth
 		// limits (microseconds per period) are what fractional CPU means.
-		if msPerSec := int(cfg.MaxCPUs * 1000); msPerSec > 0 {
+		msPerSec, err := cpuMillisecondsArgument(cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		if msPerSec != "" {
 			// nsjail --cgroup_cpu_ms_per_sec = ms of CPU per 1000 ms window.
 			// Supports fractional CPUs: 0.5 → 500, 0.25 → 250.
 			args = append(args,
 				"--cgroup_cpu_ms_per_sec",
-				fmt.Sprintf("%d", msPerSec),
+				msPerSec,
 			)
 		}
 	}
@@ -679,6 +768,42 @@ func prepareOwnedCgroup(base string) (string, error) {
 		return "", errors.New("worker cgroup cannot create a child with writable memory.max, pids.max and cpu.max")
 	}
 	return workers, nil
+}
+
+// PrepareManagedServingCgroup is called only after capturing the daemon's
+// budget. A restart may already be in the persistent daemon leaf.
+func PrepareManagedServingCgroup(parent string) error {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return err
+	}
+	current, err := selfCgroupBase("/sys/fs/cgroup", string(data))
+	if err != nil {
+		return err
+	}
+	base := filepath.Dir(parent)
+	if base == "/sys/fs/cgroup" || validateCgroupOverride("/sys/fs/cgroup", base) != nil ||
+		parent != filepath.Join(base, "orva.workers") ||
+		(current != base && current != filepath.Join(base, "orva.daemon")) {
+		return errors.New("invalid managed serving cgroup geometry")
+	}
+	for _, path := range []string{base, parent, filepath.Join(base, "orva.daemon")} {
+		st, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) && path != base && current == base {
+			continue
+		}
+		if err != nil || !st.IsDir() {
+			return fmt.Errorf("invalid managed serving cgroup %s", path)
+		}
+	}
+	got, err := prepareOwnedCgroup(base)
+	if err != nil {
+		return err
+	}
+	if got != parent {
+		return errors.New("managed serving cgroup differs from prepared parent")
+	}
+	return nil
 }
 
 func controllerSet(path string) (map[string]bool, error) {

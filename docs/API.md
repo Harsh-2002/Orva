@@ -1,5 +1,170 @@
 # HTTP API reference
 
+## Admission-closed managed server integration (internal)
+
+This separate Linux composition is not selected by normal `orva serve`. It
+mounts managed handlers without falling back to legacy mutation routes.
+Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
+on this composition.
+
+- `POST /api/v1/iam/functions` accepts `name`, `runtime` (`node` or `python`)
+  and optional `entrypoint`. It requires live read and write permissions.
+  `201` returns `id`, `name`, `runtime` and `status`. The new function has
+  an unbound empty policy and a private SDK channel, not SDK grants.
+- `POST /api/v1/deployments/{id}/install` requires an exact deployment ID
+  and live read/admin authority. It returns `200` with `artifact` and
+  `review_required:true`. Installation does not review or grant authority.
+- Function permissions, named policies, configuration, and pause/resume
+  use the managed contracts below. The opt-in MCP catalog excludes legacy
+  tools and channel credentials. Managed Chat uses that same tool registry.
+- Use MCP `tools/list` to see the tools available to the current credential.
+  The normal server exposes 73 tools to a key with all four permissions and
+  28 to a read-only key. With the managed composition above, those counts are
+  39 and 10 respectively. Normal channel credentials expose only their
+  bundled functions; managed MCP does not accept channel credentials.
+- A configuration write atomically records the same sealed pair against the
+  new generation and leaves the function inactive. After a same-boot restart,
+  install the exact current deployment ID to recover that pending generation.
+  Installation still requires a separate permissions review.
+- `DELETE /api/v1/functions/{fn_id}` requires an exact UUIDv7 and live
+  read/admin authority. It reserves metadata history and invalidates the
+  current Factory before retiring the pool. It does not remove sealed assets.
+  The managed listener also mounts the work-history routes below.
+- An invocation whose authorized function version no longer matches the
+  acquired serving generation returns `409 NOT_ACTIVE` without dispatch.
+- `GET /api/v1/functions/{fn_id}/source` reads the authored entrypoint and
+  dependency manifest from the current sealed deployment; it never reads
+  a legacy `current` symlink. Pending and paused deployments remain readable.
+
+## Internal opt-in configuration publication (not normal routes)
+
+`workloadconfig.HTTPAdapter` is an explicitly registered Linux scratch adapter.
+Normal function/secret handlers retain legacy behavior; no boot schema or normal
+route is activated. See
+[`workloadconfig/README.md`](../backend/internal/workloadconfig/README.md).
+
+All mutation bodies include `expected` with **seven string fields**:
+`function_version`, `artifact_revision`, `artifact_epoch`, `generation`,
+`policy_revision`, `authority_epoch`, `approved_artifact`. Revisions are canonical
+positive decimal strings; generation is the exact durable UUID, and stored
+approval is only a CAS token. Also supply `current_artifact`, the actual installed
+Factory digest, except for installation. Owner is the exact path UUID, not a name.
+
+| Optional endpoint | Other required fields |
+| --- | --- |
+| `GET /api/v1/functions/{id}/configuration` | READ-only metadata inspection; no body |
+| `PUT /api/v1/functions/{id}/configuration/environment` | `environment`: complete string-to-string environment |
+| `PUT /api/v1/functions/{id}/configuration/settings` | `environment`, plus complete `settings` |
+| `PUT /api/v1/functions/{id}/configuration/secrets` | `secret: {key, value}` |
+| `DELETE /api/v1/functions/{id}/configuration/secrets` | `secret: {key}` |
+| `POST /api/v1/functions/{id}/configuration/install` | Only `expected`; installs a fresh Factory, **not approval** |
+
+`settings` has exactly `timeout_ms`, `memory_mb`, `cpus`, `network_mode`, `sdk`,
+`max_concurrency`, `concurrency_policy`, `auth_mode`, `rate_limit_per_min`.
+It cannot change code, runtime, deployment identity, entrypoint or status.
+Timeout is 1–86,400,000 ms, memory 16–1,048,576 MiB, CPUs finite 0–1024,
+concurrency/rate nonnegative; existing network/auth/concurrency-mode validators
+remain authoritative. Snapshot and concrete Factory bounds may refuse more
+conservatively before publication.
+
+Mutation requires live ADMIN for any outbound/inbound or retained source grant,
+quarantine or review-required state; truly empty, review-free owners preserve
+ordinary WRITE. Installation requires ADMIN. These writes do **not** additionally
+require READ. A trusted authenticator supplies token-free API-key, session or
+OAuth references; credentials/scopes/audience/expiry are rechecked transactionally.
+There is no authorable actor, permission or artifact-approval claim.
+
+The READ-only inspection returns `expected`, review/quarantine flags,
+environment/secret entry counts, and the actual installed `current_artifact`
+(empty if unavailable) with code/runtime digests when known. It returns no
+environment values, ciphertext or secret names, and never converts durable
+metadata into a current Factory. Writes can use deliberately supplied exact
+expectations without being given READ; inspection grants no write authority.
+
+Bodies are at most 1 MiB; duplicate/unknown fields, invalid UTF-8, unpaired UTF-16,
+null string values and inexact revisions deny. Success is 200/no-store, returning
+only the seven fresh expectation fields and `review_required:true`; no environment, plaintext,
+ciphertext or secret-name list is returned. Installation instead returns
+`{current_artifact,review_required:true}`. Errors are 400 `VALIDATION`,
+401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 409 `IAM_CONFLICT`, or sanitized 503
+`IAM_UNAVAILABLE`. Never automatically replace expectations and retry.
+
+Mutation commits generation/configuration/secrets, review-required deny,
+policy/authority epoch and audit together; invalidates the old current Factory
+before ACK; then retires/cancels outside locks. Follow with explicit installation
+and the existing source-aware policy review of the **new installed artifact**.
+The old current observer cannot approve the new durable generation. Busy workers
+may still hold old injected values, but lose protected SDK access. Configuration
+uses the actual installed pair, including after an explicit queued deployment
+install. An uninstalled or superseded queued generation cannot be installed
+through the configuration endpoint. This is not secret recall, production
+cut-over or reboot recovery.
+## Internal opt-in queued deployment publication
+
+Normal API construction is unchanged. Scratch `FunctionHandler.DeployIAM` uses
+shared managed capture/submit for upload and inline deployments. Required but
+missing service denies, not legacy fallback (inline: 503 `UNAVAILABLE`).
+Optional inline accepts only `code`, optional `filename` and empty `dependencies`
+as strict original JSON (256 KiB; duplicate/unknown/metadata/invalid UTF-8 or
+surrogate input: 400 `INVALID_JSON`). Extras, dependencies and TypeScript are
+unqualified. Returns 202 `{deployment_id,function_id,status:"queued"}` after
+authorized durable capture, or 403 `FORBIDDEN` for denied/conflicting submission.
+The optional multipart upload is capped at 50 MiB and accepts exactly one `code`
+file with no other metadata fields; duplicate/unknown form parts are rejected.
+Already-inactive targets require explicit activation and fresh submission.
+`succeeded` with phase `review_required` means inactive DENY publication, not
+invocation readiness. Separate host Factory installation/current-artifact review
+remain required; there is no public Install route or normal router switch.
+See [`builder/README.md`](../backend/internal/builder/README.md) for filesystem
+separation, transaction ordering and retained-failure recovery limits.
+
+The optional history deletion root can include `managed_sources`: bounded
+owner/policy UUID, owner revision/epoch, pin/enabled, before/after membership and
+digest metadata. It is inspection-only, contains no policy body or payload, and
+survives the function FK cascade. Its opt-in coordinator shares the managed
+service's source CAS, owner/definition locks and live-admin transaction. Normal
+routes remain unchanged; see `backend/internal/workloadpolicy/OWNER_DELETION.md`.
+
+## Internal opt-in deleted-work history (not normal routes)
+
+The scratch `workloadhistory.HTTPAdapter` registers POST
+`/api/v1/work-history/{list,get,capacity,purge,reissue}` only when explicitly supplied with
+the service and a trusted live authenticator. Normal router construction does
+not register these endpoints. READ is required for list/get/capacity; ADMIN is required
+for purge/reissue, rechecked against live credentials. See
+[`workloadhistory/README.md`](../backend/internal/workloadhistory/README.md).
+
+- `list`: `{target_id?, after?:{kind,id}, limit:1..100}`; returns metadata entries
+  in `(kind,id)` order, including a `reserved` flag. Omit target to inspect all.
+- `get`: `{kind,id}`; returns one metadata entry. Archives are non-executable;
+  payload is unavailable.
+- `capacity`: `{}`; returns `rows_used`, `bytes_used`, `rows_reserved`,
+  `bytes_reserved`, `max_rows` and `max_bytes` as decimal strings,
+  `purge_eligibility_days:90`, and advisory `can_manage`. These are canonical
+  serialized metadata budgets, not database file size; reservations are included
+  in the hard 100,000-row / 64-MiB caps. Capability is not a durable grant.
+- `purge`: `{selected:[{kind,id}], confirm:true}`; 1–32 exact records, no
+  duplicates, no reservations, and only records eligible after 90 days.
+- `reissue`: `{source:{kind:"job"|"cron",id}, target_id, payload, reviewed:true,
+  confirm:true, ...fresh_config}`; job config requires `scheduled_at` and
+  `max_attempts` (1–100). Cron config requires `name`, `expression`, `timezone`
+  and `enabled`; enabled cron starts at a fresh future time. The target is an
+  exact new UUID, never a name. Returns `{new_id,origin:"operator"}`.
+
+Success is 200 with `Cache-Control:no-store`. Invalid, duplicate/unknown-field,
+ineligible/missing source or unavailable target-authority requests return 400
+`VALIDATION`; live permission denial returns 403 `FORBIDDEN`; history capacity
+refusal returns 409 `CONFLICT`. Missing authentication returns 401
+`UNAUTHORIZED`; an explicitly registered but unavailable adapter returns 503
+`UNAVAILABLE`. There is no old-work resume/retry/adopt endpoint.
+
+With the opt-in registry deletion hook, function DELETE first reserves history
+before pool retirement or deleting status. A preparation failure may leave the
+function fully active; an interrupted committed deletion remains `deleting` and
+is resumable. The existing function-delete handler reports refused/incomplete
+deletion as `INTERNAL` and directs the caller to inspect current state before
+retrying. Nil-hook legacy deletion keeps its existing behavior.
+
 Management endpoints live under `/api/v1/`; invocation, MCP, metrics,
 and OAuth discovery/authorization also expose the public paths called out
 below. Management auth uses either:
@@ -246,6 +411,53 @@ Returns 410 `VERSION_GCD` if the target version was pruned by the GC, and 400
 if the target is not a succeeded deployment of this function, or if it is
 already active.
 
+In the optional managed-deployment fixture (not normal boot), both path owner
+and `deployment_id` must be exact UUIDs. `code_hash`, `latest`, unknown and
+duplicate fields are not accepted. HTTP 200 includes `id`, `deployment_id`,
+`function_id`, `version`, `code_hash`, `status: "succeeded"`,
+`phase: "review_required"` and `function_status: "inactive"`. This acknowledges
+promotion, not readiness. Current configuration and history are preserved;
+host Factory installation and policy review are separate. Invalid input returns
+400, live operator denial 403, ineligible/current targets and pause 409, and a
+missing service or unavailable sealed pair 503. No legacy fallback is attempted.
+
+### Managed workload pause and resume (opt-in only)
+
+The scratch `WorkloadLifecycleHandler` can explicitly register
+`POST /api/v1/functions/{id}/pause` and `POST /api/v1/functions/{id}/resume`.
+The normal router exposes neither route. Both use the exact canonical function
+UUID, not a name, and require a JSON object of at most 1024 bytes with exactly
+these fields:
+
+| Field | Required value |
+|---|---|
+| `generation` | Exact canonical durable generation UUID |
+| `policy_revision` | Exact positive decimal string, at most signed 64-bit |
+| `authority_epoch` | Exact positive decimal string, at most signed 64-bit |
+| `confirm` | JSON boolean `true` |
+
+Staged precondition: use the separately enabled authenticated
+`GET /api/v1/functions/{id}/configuration` with READ to review these three
+fields from `expected` for this owner. Inspect again after pause and after
+conflict; never infer the next epoch. Neither mutation does an automatic read
+on the operator's behalf, accepts extra fields, or retries stale work.
+
+Pause requires live WRITE for empty, review-free, non-quarantined policy sources
+and live ADMIN for privileged sources. Its HTTP 200 acknowledgement contains
+`function_id`, `function_status: "inactive"` and `operator_paused: true`.
+Resume requires live ADMIN and an exact current sealed pair. Its HTTP 200
+acknowledgement contains `function_id`, `function_status: "inactive"`,
+`operator_paused: false`, `installation_required: true`, `review_required: true`.
+This acknowledges a new inactive deny generation, not resumed execution or
+standing work. Fresh host Factory installation and explicit source-aware
+policy review are separate.
+
+Responses are `Cache-Control: no-store`. Invalid or unconfirmed input is
+400 `VALIDATION`, missing operator authentication is 401 `UNAUTHORIZED`,
+denied live authority is 403 `FORBIDDEN`, stale or ineligible state is
+409 `CONFLICT`, and unavailable composition, sealed pair or storage is
+503 `UNAVAILABLE`. No legacy fallback is attempted.
+
 ### `GET /api/v1/functions/{id}/source`
 Returns the function's current code + dependencies as JSON. Used by
 the Editor view.
@@ -431,10 +643,64 @@ legacy SDK tokens are not accepted.
 
 ## Jobs
 
+### Opt-in cron IAM controls (normal router remains unchanged)
+
+Explicit `CronHandler{CronEnabled: true, CronIAM: service}` uses the existing
+`GET /cron`, `GET|POST /functions/{fn_id}/cron` and
+`PUT|DELETE /functions/{fn_id}/cron/{id}` shapes under `/api/v1`. A scratch
+constructor additionally binds `POST /functions/{fn_id}/cron/{id}/resume`.
+These controls are not enabled by normal boot, router or schema construction.
+
+Inspection still requires `read`; create/update/enable/disable/delete/resume
+require live `admin`, not `read` plus `admin`. Trusted authentication supplies
+the API-key/OAuth/session reference; the service rechecks current credentials at
+commit. Request-supplied origin, creator, operator or approval fields are rejected.
+Create accepts the existing cron expression/timezone/enabled/payload body and
+assigns durable operator origin. It does not impersonate a function.
+
+Update and resume require decimal-string `expected_config_revision` and
+`expected_authority_generation`. Delete requires those as query parameters plus
+`confirm=true`. Missing, malformed or stale CAS, or ineligible state, returns
+`409 CONFLICT`; authority denial returns `403 IAM_DENIED`, invalid configuration
+`400 VALIDATION`, missing schedule `404 NOT_FOUND`, and unavailable storage
+`503 INTERNAL`. Resume accepts no edited configuration, preserves original
+provenance, revalidates current original rights and schedules only the next future
+fire. Enabling or regranting cannot resume suspended/quarantined work. Adoption
+and restore remain unavailable.
+
+List responses include `cron_controls: true` and advisory `can_manage`. Each row
+includes authority state/reason, host origin/source, immutable creation revisions,
+admission revisions, authority generation and config revision (decimal strings).
+Unknown historic schedules quarantine. The dashboard distinguishes Enabled from
+current authority, and disables mutations on stale/failed snapshots. A conflict
+requires an explicit refresh/review; refresh never acknowledges a failed mutation.
+
 - `POST /api/v1/jobs` — enqueue a background job.
 - `GET /api/v1/jobs` and `GET /api/v1/jobs/{id}` — list or inspect jobs.
 - `POST /api/v1/jobs/{id}/retry` — retry a failed job.
 - `DELETE /api/v1/jobs/{id}` — delete a job.
+
+### Staged IAM jobs fixture (not normal serving API)
+
+The internal, explicitly initialized jobs fixture additionally binds
+`POST /api/v1/jobs/{id}/resume`. It requires live `admin`, as do enqueue, retry
+and delete in that fixture; reads retain `read`. Normal routes and their
+permission gates are unchanged until coordinated cut-over.
+
+Fixture job responses add `authority_state` (`active`, `suspended`,
+`quarantined`), bounded `authority_reason`, host-set `origin_kind`, immutable
+creator/operator provenance, creation revisions, admission revisions and an
+authority generation. Revisions/generation are decimal strings. List responses
+include advisory `async_controls: true` and `can_manage`; the server still
+reauthorizes each mutation. Enqueue rejects unknown origin/authority fields.
+
+Resume rechecks the original creator UUID/current target rights and only
+reactivates suspended pending work. Terminal/quarantined jobs are not reopened.
+Retry keeps original provenance/idempotency scope; it is not operator adoption.
+Regrant alone does not resume old work. Denied management returns `403
+IAM_DENIED`, stale/ineligible state `409 CONFLICT`, and unavailable storage
+`503 INTERNAL`, without dispatch. See `backend/internal/workloadasync/README.md`
+for the fixture's exclusions and target-deletion retention limit.
 
 ## Inbound webhooks — the public receiver
 
@@ -679,7 +945,11 @@ the firewall **reads** (`GET /firewall/rules`, `/firewall/status`,
 > sandbox's resolver. Breaking for write-scoped automation touching these
 > endpoints.
 
-- `GET /api/v1/backup` and `POST /api/v1/restore` — download or restore an instance backup.
+- `GET /api/v1/backup` — admin gzip-tar download. Managed mode returns v2
+  (SQLite, available keys and current authored source; no host-bound stores
+  or witness). Legacy mode keeps the existing archive format.
+- `POST /api/v1/restore` — legacy only. Managed v2 restore is
+  [offline](OPERATIONS.md#managed-mode-portable-recovery).
 - `GET /api/v1/system/storage` — inspect disk/database usage.
 - `POST /api/v1/system/vacuum` — compact the SQLite database.
 - `GET|POST /api/v1/firewall/rules`
@@ -871,3 +1141,144 @@ OAuth-capable MCP clients discover and authorize through:
 - `GET|POST /oauth/authorize`
 - `POST /oauth/token`
 - `POST /oauth/revoke`
+# Staged named Function IAM management
+
+The source-aware REST adapter is **scratch-only and unregistered in normal
+serving**. Its explicit DTOs, routes, authorization, errors and version/source
+semantics are documented in [IAM_MANAGEMENT.md](IAM_MANAGEMENT.md).
+Do not interpret client command availability as production route activation.
+# Staged opt-in exposure mutation contract
+
+`workloadtrigger` is an internal candidate, not normal serving behavior. No
+normal router, boot schema or default MCP dependency enables it. Existing
+nil-dependency route/webhook APIs remain unchanged. Inspection/list/sign
+permissions remain unchanged.
+
+Explicit fixtures may supply `Triggers` to `RouteHandler`,
+`InboundWebhookHandler` and MCP dependencies, and register the inspection adapter:
+
+`GET /api/v1/exposures?kind=route|inbound&key=<path-or-trigger-UUID>&function_id=<literal-owner-UUID>`
+
+Inspection requires live READ and returns `version` (decimal string), `expected`
+(owner UUID → `{policy_revision, authority_epoch}`, both decimal strings), and
+the optional route/webhook projection. For a new inbound trigger omit `key`;
+for route rebind supply the intended new owner so inspection includes both
+existing and intended owners. Inspection returns no signature secret and does
+not authorize a subsequent write.
+
+All staged mutation bodies include `version` and `expected` from inspection:
+
+- `POST /api/v1/routes`: add `path`, literal `function_id`, optional `methods`.
+- `DELETE /api/v1/routes?path=...`: add `confirm:true`.
+- `POST /api/v1/functions/{fn_id}/inbound-webhooks`: add `name`, optional
+  `signature_format`, `signature_header`, `active`.
+- `PUT /api/v1/functions/{fn_id}/inbound-webhooks/{id}`: optional editable fields
+  as above; omitted values retain their previous values.
+- `DELETE /api/v1/functions/{fn_id}/inbound-webhooks/{id}`: add `confirm:true`.
+
+REST URL selectors are not accepted again in the body. Inbound owner and secret
+are immutable; rotation remains delete/recreate. Create returns the existing
+`inbound_webhook`, one-time `secret` and `trigger_url` envelope; update returns
+the existing row projection; route and delete acknowledgments retain their shapes.
+No plaintext secret is serialized by update/get/list.
+
+When explicitly enabled, external MCP/shared AI use the same core and existing
+`set_route`, `delete_route`, `create_inbound_webhook`, `delete_inbound_webhook`
+names with this CAS contract. They additionally expose `inspect_exposure` and
+`update_inbound_webhook`. MCP arguments are flat: include `function_id` for
+inbound operations and `id` for update/delete; route delete includes `path`.
+Delete requires `confirm:true`. Normal catalogs are unchanged.
+
+The staged MCP/shared-AI adapter preserves the legacy MCP result projection:
+create returns exactly `inbound_webhook` (an `InboundWebhookView`, including
+`function_name` and nested relative `trigger_url`) plus the one-time `secret`;
+there is no top-level `trigger_url`. Update returns only `inbound_webhook` with
+the same masked view; delete returns only `id` and `status`. Route operations
+retain `RouteOpOutput`. Display-label lookup follows successful mutation and
+does not add a READ requirement, change authorization, or gate a committed ACK.
+REST response envelopes and the shared mutation core are unchanged.
+
+Mutation needs current WRITE or ADMIN on truly empty review-free owners;
+any stored/attached/retained grant, inbound SDK acceptance, review requirement
+or quarantine requires live ADMIN for both old and new route owners. READ is
+independent, not an implied mutation prerequisite. Commit rechecks token-free
+API-key/session/OAuth provenance, permissions, revocation, expiry and audience.
+
+Malformed/duplicate/unknown/null/oversize/invalid-Unicode fields return
+`400 VALIDATION`; live credential/permission failure returns `403 FORBIDDEN`;
+stale source/mapping/version returns `409 IAM_CONFLICT`. Missing required owner,
+IAM state or storage is a generic `503 IAM_UNAVAILABLE`, without name adoption
+or fallback. Requests are bounded to 32 KiB and revisions stay decimal strings.
+Never retry automatically after conflict: inspect and explicitly resubmit.
+
+These are public exposure edits, not SDK policy changes: revision/epoch,
+artifact approval, grant sources and current Factories are preserved. Queued
+publication, status/rollback, full lifecycle and production cut-over remain
+separate unimplemented/unqualified boundaries; see the package README.
+
+## Custom routes on the internal managed listener
+
+`StartManaged` mounts the staged route and inbound-webhook REST subset above:
+`GET /api/v1/exposures` takes `kind=route` with a literal `key`, or
+`kind=inbound` with a literal owner `function_id` (omit `key` to obtain the
+create-time expectations). `POST /api/v1/routes` and
+`DELETE /api/v1/routes?path=...` require the staged CAS bodies. Inspection
+returns `route_published` / `inbound_published` separately from the stored
+mapping (which may be `null`). They describe publication only, not the target's
+runtime readiness. `GET /api/v1/routes` lists up to 256 mappings, each with its
+`version` (decimal string) and `published`, and a `truncated` flag; it needs
+live READ. Normal serving is unchanged.
+
+The managed catalog (`orva serve` in durable managed mode, via `StartManaged`; external MCP and Chat share it)
+adds eight tools over the same service and the same exact-CAS contract:
+READ `list_routes` (bounded, each row with decimal-string `version` and
+`published`, plus `truncated`), `list_inbound_webhooks` (exact owner
+`function_id` UUID, rows with `version`/`published`, the owner's string
+`policy_revision`/`authority_epoch` in `expected`, never the secret) and
+`inspect_exposure` (get); WRITE-advertised `set_route`, `delete_route`,
+`create_inbound_webhook`, `update_inbound_webhook` and `delete_inbound_webhook`
+(the service still requires live ADMIN where grants, review or quarantine are
+involved). Deletes require `confirm:true`. Only create returns the signing
+secret, once. Chat pauses for approval on every mutating tool under `all_writes`
+and on the deletes under `destructive_only`. The legacy catalog is unchanged.
+
+Inbound webhooks use `/api/v1/functions/{fn_id}/inbound-webhooks` with exact
+canonical lowercase owner and trigger UUIDs (names and any other UUID spelling,
+such as uppercase, braces or no hyphens, are rejected with `400 VALIDATION`):
+`GET` lists one owner's triggers plus its `expected` tokens (secret-free, each
+with `version` and `published`); `GET .../{id}` returns `inbound_webhook`,
+`published`, `version` and `expected`; `POST`, `PUT` and `DELETE` use the staged
+CAS bodies above, with `confirm:true` for delete. Create's body `version` is
+`"0"`; each create mints a fresh trigger UUID. There is no managed `/sign`
+endpoint: the secret is returned once on create and the caller signs.
+
+`POST /webhook/{id}` is served only for a published mapping: the stored row must
+match its publication on exposure version, owner, signature format, header,
+active flag and secret digest. Unknown, unpublished, legacy, raw-edited and
+restored rows return `404 NOT_FOUND`; a published but disabled trigger returns
+`410 INACTIVE`. Signatures use the existing formats (`hmac_sha256_hex`,
+`hmac_sha256_base64`, `github`, `stripe`, `slack`); a mismatch is
+`401 SIGNATURE_INVALID` and no function runs. A verified request runs only on the
+current managed Factory generation (the same pool, SDK policy and function
+status checks as `/fn/`), and never reaches a legacy fallback. After the worker
+is acquired and immediately before dispatch the exact publication that verified
+the signature (version, owner, format, header, active flag, secret) is read again;
+if it changed the worker is released unused and the request returns `404`. A
+commit landing after that read is concurrent with dispatch itself. `405` for
+non-POST. Secrets appear only in the create response.
+
+Custom invocation resolves one published mapping: exact path, then longest
+literal `/prefix/*`. A method mismatch returns `405 METHOD_NOT_ALLOWED` without
+trying a broader route; `HEAD` requires explicit permission or `*`. The same
+per-function authentication and managed invocation path as `/fn/` apply.
+`/` and the roots and descendants of `/api`, `/auth`, `/web`, `/_orva`, `/fn`,
+`/mcp`, `/webhook`, `/metrics`, `/register`, `/oauth`, and `/.well-known` are
+reserved even when their method or endpoint is absent. Use clean decoded path
+patterns; encoded separators do not enter custom dispatch.
+
+An unattested or restored mapping is inspectable but cannot win lookup.
+Restore retains mappings and their version counters while clearing public
+publication, for routes and inbound webhooks alike. Reinspect and explicitly
+republish via the same CAS API to reactivate a route (`POST /api/v1/routes`) or
+a webhook (`PUT` with no field changes). Any non-managed write to a webhook row
+also unpublishes it without changing its counter. This does not install or review the target workload.

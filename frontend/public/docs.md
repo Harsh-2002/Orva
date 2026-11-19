@@ -1,5 +1,134 @@
 # Orva — Documentation
 
+> The internal managed server composition is not the default Orva server.
+> It exposes authenticated capability discovery at `GET /api/v1/iam/capabilities`,
+> fresh unbound creation at `POST /api/v1/iam/functions`, and exact Factory
+> installation at `POST /api/v1/deployments/{id}/install`. The managed
+> MCP/Chat tool `install_managed_deployment` does not review or approve policy.
+> Normal routes and tool catalogs remain unchanged. See `docs/API.md`.
+> On this composition, a configuration write leaves the function inactive
+> until explicit installation. After a same-boot restart, use the exact
+> current deployment ID to install the pending sealed pair, then review policy.
+> Managed function deletion takes an exact UUIDv7; it retires the current
+> Factory after reserving metadata-only history and does not reclaim sealed
+> assets. Work-history routes and tools are exposed by this composition.
+> A request authorized for a superseded function version cannot dispatch to
+> its replacement generation; it returns `409 NOT_ACTIVE`.
+> The managed Editor reads authored source from the seal, not from a legacy
+> `current` symlink. Reading source neither installs nor approves it.
+> An admin `GET /api/v1/backup` returns a portable v2 archive of SQLite, available
+> keys and current authored source, never the host witness or sealed stores.
+> Restore managed archives with the stopped server binary's `orva managed restore`
+> command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
+> Use `tools/list` to discover the tools available to your MCP credential.
+> An all-permissions key sees 73 tools on the normal server and 39 on this
+> composition; read-only keys see 28 and 10 respectively.
+
+> Internal configuration qualification: optional `workloadconfig` HTTP and
+> MCP/shared-AI adapters publish environment, execution settings and encrypted
+> secret upsert/delete through one exact-CAS/live-operator boundary. These are
+> **not normal routes or default tools**. Mutation publishes review-required
+> deny and invalidates the old actual Factory before ACK. Explicit new Factory
+> installation and current aggregate-policy review are separate steps; stored
+> approval cannot establish current runtime authority. Configuration uses the
+> actual installed concrete pair, including after queued deployment installation;
+> it cannot install an uninstalled or superseded queued generation. Ordinary WRITE remains
+> sufficient only for truly empty, unquarantined, review-free owners; any outbound,
+> inbound or retained grant, quarantine/review state requires live ADMIN. No
+> blanket READ requirement is added to writes. Old injected secrets cannot be
+> erased by IAM. Boot/restore, all other writers and production activation remain
+> separate gates. See `docs/API.md` and `backend/internal/workloadconfig/README.md`.
+>
+> Only when supplied an explicit `Configuration` dependency, MCP and the shared
+> in-process AI registry expose READ-only `inspect_workload_configuration` and
+> mutation tools `publish_workload_environment`,
+> `publish_workload_settings`, `publish_workload_secret`,
+> `delete_workload_secret` (requires `confirm:true`) and
+> `install_workload_configuration` (ADMIN-only). Each takes exact function `id`
+> plus the original strict API body in `request`; revisions remain strings.
+> These mutation tools require WRITE or ADMIN catalog visibility, never imply
+> authority from catalog permissions, and recheck the live credential at commit.
+> MCP envelopes additionally use the existing bounded strict-management decoder.
+> Inspection takes `{id,request:{}}`, returning exact CAS metadata, counts and
+> actual current Factory digests, never environment or secret values. Mutation
+> schemas describe every authorable request field; no READ grant is implied by
+> ADMIN/WRITE and no write capability is implied by inspection.
+
+> Internal opt-in SDK IAM: `spans.emit` requires an execution-only
+> `own_execution` grant, a live original dispatch and a required current-artifact
+> observer. Admission queues or sheds an owned metadata envelope, never reads
+> traces or grants operator READ. Accepted telemetry may persist after revoke;
+> ACK is not durability. Normal serving is unchanged; real-runtime qualification
+> of this increment remains separate.
+> Internal queued-build boundary: explicit `DeployIAM` dependencies route REST
+> deploy and external MCP/shared-AI `deploy_function_inline` through one managed
+> capture/publication service. Normal dependencies/boot are unchanged. Only fresh
+> managed-store plain no-dependency Node/Python is in scope; legacy directories
+> are refused, not linked/adopted. Token-free host submitter provenance and exact
+> source/epoch/config digests are captured with deployment and live-rechecked at
+> publication. Empty review-free authority requires WRITE; outbound/inbound/
+> retained/quarantined/review-required authority requires ADMIN, without blanket
+> READ. Epoch/source/config changes invalidate queued work even for ADMIN.
+> `succeeded` / `review_required` means inactive DENY, not ready to invoke: fresh
+> concrete-pair host Factory installation and source-aware review are separate.
+> Optional raw inline rejects duplicate/unknown/host metadata and invalid
+> UTF-8/surrogates (256 KiB cap); MCP requires explicit `wait`. Dependency/TS,
+> legacy source/rollback/GC, restore, boot and automatic resume are unqualified.
+> In this fixture only, REST rollback and MCP/shared-AI `rollback_function`
+> promote a verified historical deployment UUID for an exact function UUID
+> without allocating a version. MCP/AI additionally require `confirm: true`.
+> Hash/name/latest aliases are not accepted. Current settings and stored policy
+> are preserved; durable pause blocks rollback. A successful promotion is
+> inactive `review_required`, pending separate host installation and policy review.
+> See `backend/internal/builder/README.md`; do not enable a partial cut-over.
+
+> Managed lifecycle is also opt-in only: REST `POST /api/v1/functions/{id}/pause`
+> and `/resume`, and MCP/shared-AI `pause_workload` and `resume_workload`, are
+> absent by default. Use an exact canonical function UUID (`function_id` in
+> tools) and review `expected.generation`, `expected.policy_revision` and
+> `expected.authority_epoch` through the separately enabled authenticated
+> configuration inspection (`GET /api/v1/functions/{id}/configuration` or
+> `inspect_workload_configuration` with `id` and an empty `request` object;
+> inspection requires READ). Copy only those three
+> fields into the mutation, using canonical UUIDs and positive signed-64-bit
+> decimal strings for the counters; include `confirm: true`. Unknown and
+> duplicate fields and JSON numbers for counters reject. Re-inspect after
+> pause or conflict; there are no implicit reads or retries. Pause needs live
+> WRITE for unprivileged sources or ADMIN for privileged sources and records
+> `operator_paused: true` with `function_status: "inactive"`. Resume needs live
+> ADMIN and the exact sealed pair; it returns `operator_paused: false`,
+> `function_status: "inactive"`, `installation_required: true` and
+> `review_required: true`. It does not resume execution or standing work.
+> Install a fresh Factory and explicitly review its new current artifact
+> separately. Both acknowledgements identify the function, not a successor
+> CAS token. `orva functions pause|resume <function-uuid> --request FILE` (or
+> `--request -`) forwards the reviewed JSON unchanged, with a CLI confirmation
+> prompt unless `--yes` is passed. See `docs/API.md` for response details.
+
+> Internal qualification note: deleted-work metadata history and explicit
+> fresh-work reissue exist only in an opt-in scratch composition, not normal
+> serving routes/catalogs. History stores no old payload, environment, secrets or
+> raw keys and can never execute. READ protects inspection; live ADMIN plus
+> explicit review/confirmation and fresh payload/config/target UUID are required
+> to create NEW OPERATOR-origin work. Capacity is 100,000 canonical metadata
+> records / 64 MiB including reservations; 90 days permits explicit audited purge,
+> never automatic expiry. Function deletion reserves first and fails closed on
+> insufficient capacity. Optional `Deps.History` adds `list_work_history`,
+> `get_work_history`, `get_work_history_capacity`, `purge_work_history` and
+> `reissue_work_history` to external MCP and the shared AI registry. Each takes
+> `{request: ...}` using the corresponding strict original-raw HTTP request shape;
+> mutations enforce confirmation/review in the service, not merely tool hints.
+> Capacity counters and archive revisions remain decimal strings. Normal nil
+> dependencies expose no history catalog. `orva history` uses bounded original
+> request files/stdin and JSON stdout; confirmed mutations still require the
+> service's live authorization. Optional Jobs/Schedules history controls use
+> independent metadata/draft state and explicit new-work review; normal views
+> do not enable them. CLI/service and component tests are not real-browser or
+> cross-surface SDK qualification. Those workflows, actual AI turns and restore
+> quarantine/cut-over remain separate gates. See the repository
+> `docs/API.md` and `backend/internal/workloadhistory/README.md`; do not activate
+> the partial fixture in production.
+
 > Everything you need to write, deploy, and operate functions on Orva.
 > Generated from the in-app Docs page (`{{ORIGIN}}/web/docs`).
 
@@ -1300,6 +1429,43 @@ Requires the caller's SDK permission and dispatches through the warm pool. The p
     }
 
 ## orva.jobs — durable background queue with retries
+
+**Independent cron core fixture:** explicitly configured SDK/scheduler
+`WithCronIAM` supports leased self `crons.upsert`, durable host-owned origin and
+standing/current-managed-target revalidation on firing. Edits/disables invalidate
+stale queued revisions. Regrant does not resume suspended schedules; shared-service
+admin resume revalidates original rights and selects only the next future firing.
+Normal boot is not activated by this core. A separate explicit controls fixture
+uses the same service through HTTP, CLI, external MCP and the shared AI registry.
+Legacy rows quarantine; restore/adoption and retained deleted-target history remain
+pending. Jobs-only construction still leaves cron disabled.
+
+**Cron controls fixture:** normal HTTP/router/catalog defaults remain legacy.
+An explicitly enabled handler/tool dependency exposes admin-only create/update/
+delete/resume with decimal-string config/authority CAS. `resume_cron_schedule`
+and `orva cron resume <id> --fn <owner-uuid> --config-revision <n>
+--authority-generation <n>` revalidate the original source and schedule only the
+next future firing. They do not adopt function work as operator work. Inspection
+remains read-only; admin does not additionally require read for a fully identified
+mutation. `delete_cron_schedule` separately requires `confirm=true`, regardless
+of AI approval policy. Origin/approval fields cannot be authored.
+
+The CronJobs view displays stored enabled state separately from current authority,
+source/reason and exact revisions, with explicit admin Resume. Missing authority,
+stale snapshots, conflicts and failed refreshes do not claim runnable authority.
+Quarantined legacy schedules explain why resume is unavailable. Regrant and
+enable never substitute for resume.
+
+**Internal IAM jobs fixture only:** normal serving IAM remains off. The opt-in
+fixture records host-only function/operator provenance and scopes idempotency by
+origin, creator and target UUID. Delayed attempts and retries recheck current
+standing grants/target acceptance, then the actual acquired worker generation.
+Authorization denial suspends without spending an attempt. Regrant alone does
+not resume work. Admin-only `resume_job` / `orva jobs resume <id>` explicitly
+revalidates one suspended pending job; terminal/quarantined jobs are not reopened.
+Fixture enqueue/retry/delete are also admin-only; reads remain read-only.
+Retry never elevates function work into operator work. These controls are not
+registered in normal serving; cron/adoption/restore are outside this slice.
 Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:
@@ -1826,7 +1992,6 @@ orva system health      # smoke test
 | `orva keys` | list / create / revoke | Manage API keys |
 | `orva activity` | [--follow] [--source web|api|...] | Paginated activity rows; live SSE with --follow |
 | `orva system` | health / metrics / db-stats / vacuum | Server diagnostics |
-| `orva chat` | [-p MSG] | Chat with the AI assistant — interactive REPL or one-shot |
 | `orva docs` | [--raw] | Render this reference in the terminal |
 | `orva setup` | [--skip-nsjail] [--skip-rootfs] | Full server build only: install nsjail + rootfs on a bare host |
 | `orva serve` | [--port N] | Full server build only: run the daemon |
@@ -1931,3 +2096,92 @@ distros do not need Debian-compatible protobuf or libnl shared-library ABIs.
 orva completion bash | sudo tee /etc/bash_completion.d/orva
 # or zsh / fish / powershell
 ```
+# Staged named Function IAM management (not production-activated)
+
+Explicit scratch hosts can expose source-aware named policies through the shared
+management service. Create/update produces immutable versions; attachment pins a
+specific version per function. New versions never auto-propagate. Effective
+access unions separate inline and enabled managed sources. Inline editing never
+edits the union. Detach removes one contribution; terminal global revoke disables
+only that policy's complete attachment set. Overlapping grants may remain.
+
+The optional shared external-MCP/in-product-AI family is:
+list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,
+get_iam_policy_impact, attach_iam_policy, detach_iam_policy, revoke_iam_policy,
+delete_iam_policy, get_function_permissions, set_function_permissions and
+review_function_permissions. These tools have closed operation-specific request
+schemas and strict raw decoding. Arguments wrap exact DTOs as id plus request;
+list/create omit id. Revisions/versions are decimal strings; artifacts are
+lowercase SHA-256 or null. No author-supplied actor, identity or capability is
+accepted. Reads require live read; mutations additionally require live admin.
+Detach/revoke/delete enforce confirm:true. Tool catalogs do not replace service
+authorization or explicit aggregate/current-artifact review.
+
+The slim CLI registers orva iam policies list/get/create/update/impact/attach/
+detach/revoke/delete and iam permissions get/put/review. Mutations require
+--request @file or @-; destructive commands additionally require normal
+confirmation or --yes and confirm:true in the body. Data remains JSON stdout.
+Never invent a function UUID for policy authoring or silently widen resources.
+
+Normal production routes, tool dependencies and IAM boot schemas remain off.
+The precise scratch HTTP/CLI/MCP contract is docs/IAM_MANAGEMENT.md in the source
+repository. Async, boot, restore and deletion lifecycle qualification is separate.
+# Staged exposure management (internal candidate)
+
+Optional `workloadtrigger` handlers and MCP/shared-AI dependencies delegate
+inbound-webhook CRUD and custom-route bind/rebind/delete to one source-aware,
+live-operator-checked transaction service. No normal boot/router/catalog
+activation is installed. Legacy nil dependencies retain existing behavior.
+
+Explicit fixtures use READ-only `/api/v1/exposures` / `inspect_exposure` to
+obtain exact string `version` and per-owner string `policy_revision` /
+`authority_epoch` expectations. Mutations carry those tokens; a rebind checks
+both old and new owner UUIDs. Empty review-free owners permit WRITE or ADMIN;
+any inbound/outbound/retained grant, review or quarantine requires current ADMIN.
+READ remains independent. Stale requests conflict; no implicit retry or name
+adoption occurs. Strict raw requests reject duplicate/unknown fields, invalid
+Unicode, oversized input and operator/artifact claims.
+
+Webhook create returns its new signing secret once; ownership and secret cannot
+be patched. Get/list/update remain masked; rotate by delete/recreate. Exposure
+edits preserve SDK grants, policy revision/epoch, artifact approval and Factory
+identity. They are not grant changes or code reapproval. Queued publication,
+status/rollback, recovery and complete serving IAM remain separate gates.
+See `docs/API.md` and `backend/internal/workloadtrigger/README.md` for this staged
+CAS contract and its boundaries, not normal production API behavior.
+
+The optional MCP/shared-AI adapter retains the legacy MCP webhook view: create
+returns `inbound_webhook` with `function_name` and nested relative `trigger_url`,
+plus the new signing `secret` once. Update returns only the masked
+`inbound_webhook` view; delete retains `id`/`status`. Route results retain their
+legacy projection. Display metadata adds no READ permission requirement and is
+not authority. These projections do not change the REST envelopes or CAS core.
+
+The internal managed listener mounts route inspection, listing, upsert and
+confirmed delete, plus inbound-webhook inspection (`kind=inbound`), list, get,
+create, update and confirmed delete, via REST (see `docs/API.md`). `POST
+/webhook/{id}` dispatches only a published, attested mapping (otherwise 404),
+verifies the existing signature formats, and runs only on the current managed
+Factory; restore clears webhook publication like route publication, so a webhook
+needs a fresh authorized `PUT` to dispatch again. Custom routes select the exact published route or
+longest published literal `/prefix/*`; method rejection does not try a broader
+route. The same per-function auth and managed pool as `/fn/` apply. Platform
+roots and their descendants remain reserved for all methods. Inspect
+`route_published` separately from the stored mapping; after restore the mapping
+is inactive until a fresh, authorized CAS upsert.
+
+The managed catalog (`orva serve` in durable managed mode, via `StartManaged`; external MCP and Chat share it)
+adds eight tools over the same service and the same exact-CAS contract:
+READ `list_routes` (bounded, each row with decimal-string `version` and
+`published`, plus `truncated`), `list_inbound_webhooks` (exact owner
+`function_id` UUID, rows with `version`/`published`, the owner's string
+`policy_revision`/`authority_epoch` in `expected`, never the secret) and
+`inspect_exposure` (get); WRITE-advertised `set_route`, `delete_route`,
+`create_inbound_webhook`, `update_inbound_webhook` and `delete_inbound_webhook`
+(the service still requires live ADMIN where grants, review or quarantine are
+involved). Deletes require `confirm:true`. Only create returns the signing
+secret, once. Through Chat that value appears only in the live result for the
+turn; stored history and model context hold a placeholder, and the Markdown
+export omits tool results. Chat pauses for approval on every mutating tool under
+`all_writes` and on the deletes under `destructive_only`. The legacy catalog is
+unchanged.

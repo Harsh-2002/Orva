@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -29,21 +31,19 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	"github.com/robfig/cron/v3"
 )
 
 // cronParser supports the standard 5-field expression with all the usual
 // shorthands (@hourly, @daily, @weekly, @monthly, @yearly) and ranges.
-var cronParser = cron.NewParser(
-	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-)
-
 // ParseCronExpr returns a Schedule the scheduler can use to compute the
 // next fire time. Exposed so handlers can validate user input before
 // persisting the row.
 func ParseCronExpr(expr string) (cron.Schedule, error) {
-	return cronParser.Parse(expr)
+	return workloadasync.ParseCronExpr(expr)
 }
 
 // loadLocationOr returns the IANA location for `name`, falling back to
@@ -103,13 +103,19 @@ type Scheduler struct {
 	httpClient *http.Client
 
 	// stop signals the loop to exit. Closed by Stop().
-	stop chan struct{}
+	stop     chan struct{}
+	stopOnce sync.Once
+	started  atomic.Bool
 
 	// metrics is the shared metrics struct that owns per-function
 	// baselines. Optional — may be nil in tests; recordExecution
 	// short-circuits the outlier hook when it's missing.
-	metrics *metrics.Metrics
-	sdkAuth *sdkauth.Authenticator
+	metrics      *metrics.Metrics
+	sdkAuth      *sdkauth.Authenticator
+	asyncIAM     *workloadasync.Service
+	asyncEnabled bool
+	cronIAM      *workloadasync.Service
+	cronEnabled  bool
 }
 
 // SetMetrics wires the metrics container so cron/job-recorded executions
@@ -142,10 +148,10 @@ func (s *Scheduler) SetEgressGuard(g firewall.Guard) {
 // pool manager from server.New. hub may be nil — the scheduler still
 // works, only the webhook fanout consumer misses out on cron/job
 // signals (which is fine for tests).
-func New(db *database.Database, pm *pool.Manager, dataDir string, hub *events.Hub) *Scheduler {
+func New(db *database.Database, pm *pool.Manager, dataDir string, hub *events.Hub, opts ...Option) *Scheduler {
 	jobsConc := 8
 	webhookConc := 4
-	return &Scheduler{
+	s := &Scheduler{
 		db:                 db,
 		pool:               pm,
 		dataDir:            dataDir,
@@ -161,6 +167,10 @@ func New(db *database.Database, pm *pool.Manager, dataDir string, hub *events.Hu
 		httpClient:         &http.Client{Timeout: 10 * time.Second},
 		stop:               make(chan struct{}),
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // publishCron emits a cron-related Hub event when a hub is wired. Used
@@ -202,6 +212,9 @@ func (s *Scheduler) publishJob(status string, j *database.Job, fnName, errMsg st
 // Start kicks off the timer loops. Returns immediately. ctx cancellation
 // drains in-flight invocations before the goroutine exits.
 func (s *Scheduler) Start(ctx context.Context) {
+	if !s.started.CompareAndSwap(false, true) {
+		return
+	}
 	// Recompute next_run_at on boot so a long downtime doesn't leave
 	// thousands of "missed" rows pretending they're due. Best-effort —
 	// any errors are logged and the row simply won't fire until its
@@ -235,12 +248,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 // Stop drains in-flight invocations and signals the loop to exit. Safe
 // to call multiple times.
 func (s *Scheduler) Stop(timeout time.Duration) {
-	select {
-	case <-s.stop:
-		return
-	default:
-		close(s.stop)
-	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	done := make(chan struct{})
 	go func() { s.inflightWG.Wait(); close(done) }()
 	select {
@@ -251,6 +259,9 @@ func (s *Scheduler) Stop(timeout time.Duration) {
 }
 
 func (s *Scheduler) recomputeNextRunOnBoot() {
+	if s.cronEnabled || s.asyncEnabled {
+		return
+	}
 	rows, err := s.db.ListAllCronSchedules()
 	if err != nil {
 		slog.Warn("scheduler: list schedules at boot failed", "err", err)
@@ -302,6 +313,13 @@ func (s *Scheduler) cronLoop(ctx context.Context) {
 }
 
 func (s *Scheduler) cronTick(ctx context.Context) {
+	if s.cronEnabled {
+		s.asyncCronTick(ctx)
+		return
+	}
+	if s.asyncEnabled {
+		return
+	} // Cron is not qualified in the staged async slice.
 	due, err := s.db.DueCronSchedules(time.Now().UTC(), 50)
 	if err != nil {
 		slog.Warn("scheduler: query due schedules failed", "err", err)
@@ -326,13 +344,32 @@ func (s *Scheduler) cronTick(ctx context.Context) {
 // caller's context (which may be the long-lived server context) doesn't
 // hold the worker pinned beyond the function's own timeout.
 func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule) {
+	s.fireCronManaged(parent, row, nil, nil)
+}
+func (s *Scheduler) fireCronManaged(parent context.Context, row *database.CronSchedule, managed *database.AsyncCron, admission *workloadiam.AsyncAdmission) {
 	ranAt := time.Now().UTC()
+	persist := func(status, msg string) {
+		if managed != nil {
+			_ = s.db.FinishAsyncCron(context.Background(), managed, ranAt, status, msg)
+		}
+	}
+	deny := func(err error) {
+		if managed != nil && (workloadasync.IsDenied(err) || admission.Context().Err() != nil) {
+			_ = s.db.SuspendAsyncCron(context.Background(), managed, "revoked")
+		}
+	}
 
 	// Compute next_run_at first so an Acquire failure still moves the row
 	// forward. Without this, a permanently-broken function would keep
 	// matching the "due" query every tick and saturate the goroutine.
 	var nextAt time.Time
-	if sched, err := ParseCronExpr(row.CronExpr); err == nil {
+	if managed != nil {
+		// Claim already advanced the exact revision; never write legacy results.
+		if row.NextRunAt == nil {
+			return
+		}
+		nextAt = *row.NextRunAt
+	} else if sched, err := ParseCronExpr(row.CronExpr); err == nil {
 		loc := loadLocationOr(row.Timezone)
 		nextAt = sched.Next(ranAt.In(loc)).UTC()
 	} else {
@@ -349,12 +386,24 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	// the timeout for the dispatch context.
 	fn, err := s.db.GetFunction(row.FunctionID)
 	if err != nil {
+		if managed != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				_ = s.db.SuspendAsyncCron(context.Background(), managed, "target_missing")
+			} else {
+				deny(err)
+			}
+			return
+		}
 		errMsg := "function lookup: " + err.Error()
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, "", errMsg)
 		return
 	}
 	if fn.Status == database.FunctionStatusDeleting {
+		if managed != nil {
+			_ = s.db.SuspendAsyncCron(context.Background(), managed, "target_missing")
+			return
+		}
 		// Do not refill a pool the delete just drained.
 		errMsg := "function is being deleted"
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
@@ -369,6 +418,10 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	executionLease, reserveErr := s.db.ReserveExecution(reserveCtx)
 	cancelReserve()
 	if reserveErr != nil {
+		if managed != nil {
+			deny(reserveErr)
+			return
+		}
 		errMsg := "execution storage backpressure: " + reserveErr.Error()
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
@@ -378,6 +431,10 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 
 	acq, err := s.pool.Acquire(parent, row.FunctionID)
 	if err != nil {
+		if managed != nil {
+			deny(err)
+			return
+		}
 		errMsg := "pool acquire: " + err.Error()
 		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
 		s.publishCron("failed", row, fn.Name, errMsg)
@@ -387,6 +444,17 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	defer cancel()
 	var reqErr error
 	defer func() { s.pool.Release(acq, reqErr) }()
+	if managed != nil {
+		if err := s.cronIAM.AdmitCron(parent, managed, admission, func() workloadiam.TargetState { return s.pool.TargetState(row.FunctionID, acq.Worker) }, ranAt); err != nil {
+			deny(err)
+			return
+		}
+		if facts, ok := acq.ManagedResources(); ok && facts.Timeout > 0 {
+			cancel()
+			ctx, cancel = context.WithTimeout(parent, facts.Timeout)
+			defer cancel()
+		}
+	}
 
 	// Build the synthetic event. Cron payloads land at POST / so the
 	// handler signature is identical to a public invocation; we add a
@@ -426,7 +494,12 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 			errMsg = "function timed out"
 		}
 		s.recordExecution(executionLease, execID, fn.ID, "error", 0, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
-		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		if managed != nil {
+			persist("failed", errMsg)
+			deny(err)
+		} else {
+			s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		}
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
@@ -445,13 +518,22 @@ func (s *Scheduler) fireCron(parent context.Context, row *database.CronSchedule)
 	if statusCode >= 500 {
 		errMsg := "function returned " + http3xxLabel(statusCode)
 		s.recordExecution(executionLease, execID, fn.ID, "error", statusCode, ranAt, stderr, errMsg, traceID, spanID, "", "cron", "")
-		s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		if managed != nil {
+			persist("failed", errMsg)
+		} else {
+			s.persistResult(row.ID, ranAt, nextAt, "failed", errMsg)
+		}
 		s.publishCron("failed", row, fn.Name, errMsg)
 		return
 	}
 
 	s.recordExecution(executionLease, execID, fn.ID, "success", statusCode, ranAt, stderr, "", traceID, spanID, "", "cron", "")
-	s.persistResult(row.ID, ranAt, nextAt, "ok", "")
+	if managed != nil {
+		persist("ok", "")
+		deny(nil)
+	} else {
+		s.persistResult(row.ID, ranAt, nextAt, "ok", "")
+	}
 }
 
 func (s *Scheduler) persistResult(id string, ranAt, nextAt time.Time, status, errMsg string) {
@@ -630,6 +712,10 @@ func (s *Scheduler) jobsLoop(ctx context.Context) {
 }
 
 func (s *Scheduler) jobsTick(parent context.Context) {
+	if s.asyncEnabled {
+		s.asyncJobsTick(parent)
+		return
+	}
 	// Don't claim more than the semaphore can run at once. Otherwise
 	// claimed-but-blocked jobs sit at status='running' while their
 	// goroutines wait, which inflates the in-flight metric and makes
@@ -676,6 +762,10 @@ func (s *Scheduler) jobsTick(parent context.Context) {
 }
 
 func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *database.ExecutionLease) {
+	s.runJobMode(parent, j, lease, nil, nil)
+}
+
+func (s *Scheduler) runJobMode(parent context.Context, j *database.Job, lease *database.ExecutionLease, managed *database.AsyncJob, admission *workloadiam.AsyncAdmission) {
 	defer lease.Cancel()
 	startedAt := time.Now()
 
@@ -692,6 +782,9 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 			return
 		}
 		_ = s.db.MarkJobFailure(j.ID, errMsg, j.Attempts, j.MaxAttempts)
+		if managed != nil && admission.Context().Err() != nil {
+			_ = s.db.SuspendAsyncJob(context.Background(), managed, "revoked")
+		}
 		// MarkJobFailure transitions to "failed" only when attempts
 		// have run out; otherwise it leaves the row in pending for
 		// the next tick. Mirror that decision here so we don't fire
@@ -703,12 +796,26 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 
 	fn, err := s.db.GetFunction(j.FunctionID)
 	if err != nil {
+		if managed != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				_ = s.db.SuspendAsyncJob(context.Background(), managed, "target_missing")
+			} else if admission.Context().Err() != nil {
+				_ = s.db.SuspendAsyncJob(context.Background(), managed, "revoked")
+			} else {
+				_ = s.db.DeferAsyncJob(parent, managed)
+			}
+			return
+		}
 		// No fn name to report (the row's gone) — webhook receivers
 		// still get the function_id.
 		finalize("", "function lookup: "+err.Error(), false)
 		return
 	}
 	if fn.Status == database.FunctionStatusDeleting {
+		if managed != nil {
+			_ = s.db.SuspendAsyncJob(parent, managed, "target_missing")
+			return
+		}
 		finalize(fn.Name, "function is being deleted", false)
 		return
 	}
@@ -718,6 +825,14 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 	}
 	acq, err := s.pool.Acquire(parent, j.FunctionID)
 	if err != nil {
+		if managed != nil {
+			if admission.Context().Err() != nil {
+				_ = s.db.SuspendAsyncJob(context.Background(), managed, "revoked")
+			} else {
+				_ = s.db.DeferAsyncJob(parent, managed)
+			}
+			return
+		}
 		finalize(fn.Name, "pool acquire: "+err.Error(), false)
 		return
 	}
@@ -725,6 +840,23 @@ func (s *Scheduler) runJob(parent context.Context, j *database.Job, lease *datab
 	defer cancel()
 	var reqErr error
 	defer func() { s.pool.Release(acq, reqErr) }()
+	if managed != nil {
+		err := s.asyncIAM.AdmitJob(parent, managed, admission, func() workloadiam.TargetState { return s.pool.TargetState(j.FunctionID, acq.Worker) })
+		if err != nil {
+			if workloadasync.IsDenied(err) {
+				_ = s.db.SuspendAsyncJob(context.Background(), managed, "policy_denied")
+			} else {
+				_ = s.db.DeferAsyncJob(context.Background(), managed)
+			}
+			return
+		}
+		j.Attempts = managed.Attempts
+		if facts, ok := acq.ManagedResources(); ok && facts.Timeout > 0 {
+			cancel()
+			ctx, cancel = context.WithTimeout(parent, facts.Timeout)
+			defer cancel()
+		}
+	}
 
 	body := string(j.Payload)
 	if body == "" {

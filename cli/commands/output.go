@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,8 +78,8 @@ func stdoutIsTerminal() bool {
 
 // styles resolves the Orva color palette for this command, honoring the same
 // gate as colorEnabled (--no-color / NO_COLOR / JSON mode / non-TTY). Every
-// command and the chat renderer style through the returned set so the look is
-// consistent and color control stays in one place.
+// command and the diff colorizer style through the returned set, so color
+// control stays in one place.
 func styles(cmd *cobra.Command) *theme.Styles {
 	return theme.New(colorEnabled(cmd))
 }
@@ -97,12 +98,17 @@ func emitJSON(v any) error {
 // the raw bytes if they aren't valid JSON. Use this for --output json on list
 // and get commands so machine output is faithful to the API response.
 func emitRaw(b []byte) error {
-	var v any
-	if json.Unmarshal(b, &v) != nil {
-		_, err := os.Stdout.Write(b)
+	return writeRawJSON(os.Stdout, b)
+}
+
+func writeRawJSON(w io.Writer, b []byte) error {
+	var formatted bytes.Buffer
+	if json.Indent(&formatted, b, "", "  ") != nil {
+		_, err := w.Write(b)
 		return err
 	}
-	return emitJSON(v)
+	_, err := w.Write(append(bytes.TrimRight(formatted.Bytes(), " \t\r\n"), '\n'))
+	return err
 }
 
 // jsonUnmarshal decodes JSON bytes into v with a consistent error message.

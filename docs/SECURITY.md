@@ -1,5 +1,202 @@
 # Security model
 
+Managed v2 backups export the database, available keys and authored current
+source only. The writer checks witness placement against backup roots and
+rejects witness aliases among archive inputs. Integrity checks are not
+producer authentication; trust the archive's transport and custody. Portable
+restore creates a new local Owner, keeps old policy text for review but clears
+artifact approval, quarantines standing work, and removes route/webhook
+publication. An incomplete layout denies both serving paths.
+
+The opt-in managed server uses the same Authority for the sealed pool,
+private SDK, job/cron admission, and protected writes. Startup holds admission
+closed while verifying the exact committed pair and pause state. Restore
+quarantine denies retained approvals; a normal same-boot restart retains only
+approval for the verified unchanged generation. The managed mux and shared
+MCP/Chat catalog are allowlists, not wrappers that fall through to legacy
+mutations. Session-backed mutations require a live UUID-backed session and
+a same-origin browser request. No environment variable selects managed mode in
+`orva serve`; only the durable mode record does.
+Configuration writes preserve the exact sealed pair in the same transaction
+as the successor generation, inactive status and review-required deny. A
+restart cannot install a pending generation or grant its retained policy.
+
+Managed boot authenticates the canonical Owner record with a distinct,
+pre-provisioned 32-byte random host witness before choosing an opener. The
+witness is mode `0600` in a mode `0700` directory, outside data/backup roots;
+it is never migrated, regenerated, rotated or backed up. Authenticated
+same-kernel-boot records require either exact cgroup fencing or typed removal
+of both authenticated identities (epoch and parent), observed on the captured
+cgroup-v2 mount. The kernel does not let populated or non-leaf cgroups be
+removed or permit renames; recreated paths have distinct 64-bit kernfs IDs.
+A missing/replaced group under the original parent, older references with no
+authenticated parent identity, and ambiguous mount or metadata views fail
+closed when exact fencing is unavailable. Only a different kernel boot
+qualifies for cold opening.
+Deleting the witness on uninstall makes sealed stores unrecoverable on that
+host. The kernel boot and witness do not attest the host or prevent privileged
+in-place rollback.
+
+## Opt-in restore-quarantine boundary
+
+The internal Linux recovery coordinator treats the archive and restored approval
+metadata as non-authoritative. Its host-owned, no-follow external marker contains
+only version/operation UUID/state and cannot be minted or cleared by guarded
+archive extraction. Trusted quiescence and closed admission are required before
+promotion; malformed controls and incomplete installation deny startup. Policy,
+inbound and all durable work origins are quarantined in one SQLite transaction;
+retained approvals/sources are inspection/review inputs, not active grants.
+
+This is not installed in normal serving or the existing public restore handler.
+Filesystem administrators and host callbacks remain trusted. Direct copying
+without the marker procedure is outside the guarantee. The marker provides no
+kernel fencing, artifact adoption, old-Factory rebinding or GC authority.
+Managed startup checks the verified Owner identity before opening a SQLite
+writer. Managed in-place restore rejects foreign or unbound archives before
+promotion. This binding is not a process fence or protection against a host
+administrator replacing raw database or sealed-store data.
+[Recovery details and test limits](../backend/internal/workloadrecovery/README.md).
+
+Explicit offline enrollment imports **no workload grants**. Current eligible
+deployments are rebuilt inside the Owner's managed build domain and bound to
+verified runtime/code generations. The managed SDK channel is transport only:
+legacy `sdk=true` becomes empty policy with review required and a system audit
+record; legacy `sdk=false` starts with empty policy tied to the verified pair.
+Function-origin jobs are suspended; unknown-provenance jobs and cron schedules
+are quarantined. Historical/excluded sources never supply managed serving
+authority. Stop even pre-lock binaries before enrollment; the durable intent
+blocks lock-aware binaries, and the final SQLite tombstone also blocks old
+binaries from opening their original DB path.
+
+## Opt-in configuration and secret publication
+
+`workloadconfig` is not serving-wired. Its owner lock → IAM gate → transaction
+boundary rechecks the complete function, durable generation, policy revision,
+authority epoch, original inline/attached sources and ciphertext snapshot.
+Any outbound, inbound-only or retained source grant, quarantine or review state
+requires current ADMIN; empty review-free owners retain ordinary WRITE.
+Trusted token-free credentials are re-resolved using existing API-key,
+session/user and OAuth token/client/audience/expiry checks. READ is not an
+implicit requirement of these writes.
+
+Encryption/decryption, candidate construction and concrete lease acquisition
+run outside owner/IAM locks. Commit failure cannot change admission, current
+Factory, registry cache or cancellations. Success atomically persists mutation,
+generation rotation, policy/epoch advancement and review-required deny, then
+invalidates the old actual Factory under the same gate before ACK. Callbacks,
+retirement and lease release follow outside owner/gate locks. A fresh strict
+snapshot must be installed before explicit source-aware review; the old observer
+cannot silently rebind retained approval. Inline/attachments are never replaced
+by their compiled union, and quarantine survives mutation/installation.
+
+Injected secrets cannot be recalled. Old busy workers can finish ordinary
+computation with old memory, but cannot perform new protected SDK operations
+after acknowledgment. Retirement and external credential rotation may still be
+necessary. Other writers, complete lifecycle, boot/restore/recovery and serving
+activation remain unqualified; do not enable this partial composition normally.
+
+Staged SDK IAM `spans.emit` requires an active original host dispatch, an
+execution-only `own_execution` grant and an explicit current-artifact observer
+under the IAM gate. Emission nonblockingly queues an immutable host-attributed
+envelope or sheds optional telemetry; it never waits on SQLite under admission.
+Revocation denies new emissions, not already accepted telemetry. Writer
+commit/retry uses original attribution and the existing function-deletion fence,
+without taking the IAM gate. No normal constructor enables this path.
+The deciding owner UUID/revision is captured under that same admission gate
+and retained as private immutable optional-job metadata through retry and
+persist-or-shed processing. Legacy telemetry has no IAM decision. There is no
+new database column, SDK-visible provenance field or durable decision audit;
+the snapshot is not authority to perform another operation.
+## Internal queued managed-build boundary (not activated)
+
+Explicit managed publication captures token-free operator provenance and exact
+source/epoch/configuration digests with deployment. Both capture and publication
+resolve live API-key/session/OAuth validity, permission, audience and expiry.
+Missing provenance/state denies. Retained disabled attachment or inbound-only
+authority requires ADMIN; truly empty review-free authority preserves WRITE,
+without extra READ. Source/epoch/config changes invalidate even admin submissions.
+
+New sealed output commits as inactive review-required DENY. After COMMIT, the
+actual old Factory becomes ineligible under the same gate before publication
+returns. Failed COMMIT changes no cache, Factory eligibility or cancellation.
+Fresh concrete leases, host installation and actual-current review are separate.
+No snapshot restores policy. This managed-only path refuses legacy directories
+and never retargets `current`; no link/SQLite atomicity is claimed. Normal boot/
+router/catalog remain unchanged; mixed legacy writers are not qualified.
+See `backend/internal/builder/README.md` for lock and recovery boundaries.
+
+The optional managed workload pause/resume adapters take only an exact owner
+and operator-reviewed generation, policy revision and authority epoch plus
+`confirm: true`. Authentication supplies the token-free operator reference;
+request fields never grant authority. The publication core rechecks current
+credentials transactionally: pause uses WRITE for unprivileged sources and
+ADMIN for privileged sources, and resume requires ADMIN. Channel tokens are
+not operator credentials. Resume consumes durable pause only into a new
+inactive review-required generation; it does not restore a Factory, approval,
+execution or standing work. Fresh installation and explicit source-aware
+review remain separate. Default router and tool catalogs do not enable this
+boundary; it provides no startup, recovery or mixed-legacy guarantee.
+
+The opt-in configuration service uses the exact installed Factory and its
+enrolled stores after queued replacement. A successful configuration COMMIT
+pins that pair in the pool for the exact successor generation only. Queued
+publication discards superseded configuration pins; activation and pool swap
+recheck under the same owner lock and gate. Neither DB metadata nor the previous
+approval can make a pair current. This is not production lifecycle authority.
+
+The optional managed/history deletion coordinator atomically removes named
+membership with archive reservation and terminal admission closure. It preserves
+survivor authority and retains only bounded source/audit metadata under the
+existing history budget. Current trusted operator references are rechecked in
+the commit transaction. Failed preparation never falls back to cascade-only
+removal. This internal composition is not boot activation or universal SQL
+fencing; independent acceptance and restore/queued-build integration remain gates.
+
+## Opt-in deleted-work metadata boundary
+
+The internal history service uses trusted current-request operator references
+and live transaction-time admin/read checks; request bodies and SDK identity
+claims cannot grant operator reissue authority. Metadata remains sensitive and
+requires READ. It retains no old payload, env, secret, raw deduplication key,
+generation token or lease. Archives never execute; explicit confirmed/admin
+reissue creates new operator work, payload and target UUID without restoring
+original policy approval. Capacity denial precedes status/admission closure.
+This is an opt-in tested service boundary, not universal raw-SQL fencing or
+production activation. Managed-policy deletion membership/audit coordination and
+restore quarantine remain unqualified; see `workloadhistory/README.md`.
+
+## Staged jobs authority (inactive in normal serving)
+
+The explicit jobs fixture reauthorizes host-recorded function origin/current
+standing grants and target `job` acceptance before claim and again after real
+pool wait, including the acquired target's approved artifact. It does not
+fabricate an SDK execution lease for scheduled work. Creation revisions are
+provenance, not grants; admission revision changes conservatively require
+explicit admin revalidation. Regrant never revives a cancelled registration.
+
+Function-origin retry/resume cannot inherit operator bypass. Accepted operator
+jobs are durable admin-owned work, independent of later key expiry; management
+mutations still recheck live admin credentials in their own transaction. New
+idempotency records isolate origin/creator/target, leaving the legacy index
+unchanged. Restore, cron and adoption are not implemented by this fixture.
+Target-FK deletion still removes job rows; retained deletion history is not
+claimed, and stale final admission fails closed. See the `workloadasync` README.
+
+The independent cron core fixture is also inactive in normal serving. It requires
+explicit schema and SDK/scheduler options separate from jobs. SDK registration
+uses a live leased self caller, scoped own-cron grant and self cron acceptance;
+host firing uses standing rights and the actual managed worker after pool wait.
+Authority/configuration CAS rejects stale queued firings after edit/disable, and
+completion CAS prevents an older result from overwriting newer configuration.
+Admin-service resume revalidates original rights and selects the next future time,
+never missed catch-up. Separate opt-in HTTP/MCP/shared-AI controls capture only
+trusted authentication references and delegate to that service. Mutations are
+admin-only (not read-plus-admin), require exact configuration/authority CAS, and
+reject author origin/approval fields. Destructive confirmation is enforced by code
+separately from AI approval hints. Normal routes/catalog and restore/adoption are
+not activated. Historic cron rows quarantine, including named rows; the existing
+target-FK cascade is not retained suspension history.
+
 This document explains how Orva isolates user-supplied code from the host
 and from other functions. It is descriptive, not prescriptive — every
 claim below is grounded in a specific file/line that you can audit.
@@ -15,12 +212,104 @@ require a live UUID-backed session/user and expiry. Audit actors are derived
 from the checked reference, not treated as authorization. Checks occur before
 mutation and commit; expiry during commit cannot be excluded.
 
-This is an internal opt-in seam, **not a serving authorization feature**.
-Credential UUIDs are not authenticators: references must be captured after
-trusted authentication, never accepted from function authors. Request/AI/MCP
-submitter capture, ordered live IAM/pool publication and normal session UUID
-writes are not wired. The existing persistence-only publisher is unchanged.
+`SaveIAMPolicyAsOperator` applies the same live checks to policy CAS, epoch and
+audit. The internal `workloadpolicy` core joins ordered registry/IAM publication
+with that transaction, but requires a trusted current-artifact observer which
+serving has not installed. Explicit review, not ordinary replacement, clears
+quarantine/review flags. Empty-policy revocation does not require usable runtime
+artifacts and never activates retained grants.
+
+These remain **not serving authorization features**. Credential UUIDs are not
+authenticators. API-key REST authentication and MCP bearer resolution capture
+token-free immutable credential references in a private context key; OAuth
+includes its initially validated audience, never a request override. AI request
+contexts inherit these values. This carries provenance, not frozen permissions;
+publication still rechecks current credentials transactionally.
+
+Legacy browser sessions do not turn cookie prefixes into references and clear
+inherited operator context. After explicit session-identity schema initialization,
+new sessions receive independent UUIDs transactionally. Browser authentication
+and its cache carry only that stable reference and display label, with cache
+validity bounded by observed session expiry. The reference is never serialized
+into the session API response and does not replace commit-time live checks.
+Normal boot still does not initialize that schema. Queued build capture,
+authoritative production artifact publication and public IAM adapters remain
+unwired. Audience-less legacy OAuth authentication remains unchanged, but supplies
+no IAM publication reference. Persistence-only APIs retain their existing behavior.
 See `docs/FUNCTION_IAM_PLAN.md` for the remaining cut-over gates.
+
+The inactive `workloadspawn.Factory` retains exact code/runtime anchors and
+owned config/secrets; prepared-plan quotas do not bound live workers or global
+provider memory. Retirement prevents new preparations, not already-issued
+execution. Current-generation denial must still publish under the IAM gate
+before obsolete bootstrap code can obtain authority.
+
+`workloadfence` separately owns a durable Linux cgroup epoch, enrolls trusted
+commands before exec and mints an opaque death proof only after durable entry
+closure and kernel recursive emptiness. Captured service budgets and jail-parent
+capabilities constrain resource delegation and relocation within that epoch.
+Trusted-host ownership and stable/no-reuse assumptions remain prerequisites.
+No serving constructor or artifact recovery consumer uses this package; passing
+kernel checks does not authorize recovered artifacts, reclamation or IAM grants.
+
+Optional sandbox Domain inputs compose that epoch with Spawn, Execute and
+RunBuild. Host nsjail and its jailed descendants remain inside the same domain;
+requested controller failure denies rather than falling back to global placement.
+Opt-in CPU quotas require exact integer-millisecond representation and use that
+same validated quota in argv. Nil-domain behavior is unchanged. Independent
+kernel membership and limit readback checks are not resource-exhaustion stress,
+serving integration or proof that completed build outputs have no surviving writer.
+
+The builder's internal runtime-binding option captures one runtime generation
+for syntax, dependency and compiler steps, retaining a pipeline anchor and
+command leases through Wait/cleanup. Full runtime identity is distinct from the
+interpreter ABI used for dependency caching. Invalid/retired bindings and managed
+cache hits without provenance deny rather than resolving mutable rootfs paths.
+The serving constructor does not enable this option. Capturing a supplied Domain
+does not confer exclusive ownership or prove all build descendants have exited.
+
+The separate managed-output mode creates its own exclusive build Domain and
+fresh artifact staging. Fence/Check must succeed before output inspection,
+sealing or deletion. Failed cleanup retains staging, runtime and finite quota
+ownership for explicit retry; it never returns an approved output. Host hooks,
+provider-supplied Domains, dependency manifests and TypeScript deny in this
+limited plain Node/Python profile. Archive parent components reject before
+normalization. This does not bind stores to an instance epoch, publish current
+generations, enable recovery or restore approval.
+
+Typed child Domains additionally serialize creation and command entry against
+their ancestors. Parent fencing covers descendant builds, while child fencing
+does not stop sibling workers. Managed output can require this concrete
+ParentDomain profile; historical raw-budget provisioning is mutually exclusive.
+Attached-child pins retain partial-construction/reclaim cleanup ownership.
+Trusted-host topology, no outside entrants and deliberate boot-owner wiring
+remain prerequisites. Nested placement alone does not bind persistent stores
+to the instance epoch or permit recovery.
+
+Internal `artifactfs.Owner` uses one durable association record for both code
+and runtime stores. Its same-boot recovery verifies the bound epochs and
+Fence/Checks them before inspecting assets, then commits a new association
+before exposing verified committed generations. Incomplete transitions deny;
+unfinished assets remain quarantined. Unbound recovery remains inspection-only.
+This does not restore policy authority, enable serving, repair interrupted
+transitions or solve cold-start/reboot budget capture. See `artifactfs/OWNER.md`.
+
+The unregistered permissions HTTP adapter authenticates a live operator and
+derives its reference/capabilities server-side. Policy mutations still recheck
+live admin authority in the shared transaction. The separate live scratch
+fixture connects this adapter and the real UI controller to Factory-created
+Node/Python workers and private-SDK KV enforcement. It is not the serving pool,
+production browser login, complete SDK enforcement or production route wiring.
+
+The subsequent internal managed-pool fixture uses the actual public invoke,
+Proxy and acquired-worker paths for KV and two-sided buffered calls. Frozen
+Factory facts supply resources, secrets, identity and acquired timeout/header
+configuration. Shared-gate current-generation checks deny obsolete workers even
+when their old policy remains approved; generation-bound release cannot return
+one to a replacement pool. Independent delayed-import/replacement race runs and
+cross-runtime browser denial/grant/revocation journeys passed. Normal serving
+construction remains unchanged. This is not production activation, complete
+mutation-writer coverage, stream/async acceptance or hard-resource enforcement.
 
 ## Threat model
 
@@ -755,6 +1044,18 @@ per-conversation **approval policy** (`all_writes` / `destructive_only`
 / `auto`), which can pause a write for human approval before it runs,
 and a code-enforced `confirm=true` requirement on destructive tools.
 
+Tools that mint a one-time credential (`create_api_key`, `create_webhook`,
+`create_inbound_webhook`) declare the credential fields. The assistant shows the
+value only in that turn's live result; the stored tool call, the conversation
+message and every later model request carry
+`[redacted: shown once to the operator]` instead. The Markdown export lists a
+tool's name and status only, never its result. In the browser the live value is
+held in tab memory (never `localStorage`/`sessionStorage`) and dropped on reload,
+conversation switch, leaving Chat or **Hide value**. Result fields that must be
+redacted are matched only when the whole result is one valid JSON value;
+otherwise the entire result is replaced. External MCP clients still receive the
+value once, as before.
+
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same
 conversation list (they are not isolated per credential). BYO provider
@@ -831,3 +1132,76 @@ is required by a Bifrost release that builds with this tree.
 If you find a security issue please open a private security advisory
 on the GitHub repository (Settings → Security → Advisories) rather
 than a public issue.
+
+## Internal managed Function IAM increment (inactive)
+
+The staged named-policy store/service is not registered in production and its
+schema is not initialized at boot. Immutable versions are attached by explicit
+pin, never followed automatically. Effective authority is a union of separately
+retained inline and managed sources. Detach and terminal global revoke remove
+only their own contribution; overlapping grants can remain.
+
+The internal service validates at most 25 affected owners, takes sorted mutation
+locks followed by the IAM gate, rechecks live admin and source/definition/
+membership CAS in one transaction, then publishes every owner together. Failed
+COMMIT changes neither live authority nor cancellations. Source-only reductions
+preserve approval and quarantine/review state and can proceed with explicitly
+unknown current artifacts; they never approve different code. Cancellation
+callbacks run after IAM and owner locks are released and before acknowledgement.
+
+This does not qualify migration/restore, function deletion, privileged deployment,
+async enforcement or real SDK/UI/CLI/MCP behavior. The legacy inline-only HTTP
+adapter refuses managed mode. The precise internal contract and remaining gates
+are in `backend/internal/workloadpolicy/MANAGED.md`.
+## Scratch source-aware management adapters
+
+The optional named-policy adapters reject duplicate/unknown raw fields on both
+external MCP and in-process agent paths before generic decoding discards
+evidence. Live read is required before inspection; live read plus admin are
+rechecked inside the final mutation transaction. Tool visibility and confirm
+flags are not authority. Function responses keep editable inline policy separate
+from read-only effective union and attributed version pins. These adapters and
+schema initialization remain explicitly scratch-only, not serving activation.
+See `IAM_MANAGEMENT.md` for the exact staged wire contract and limitations.
+# Staged public exposure writer boundary
+
+The optional `workloadtrigger` candidate serializes inbound-webhook CRUD and
+custom-route create/rebind/delete under sorted owner locks → IAM → database.
+It requires literal UUID owners, exact policy/source/epoch and exposure-version
+CAS, and live token-free operator credential checks in the mutation transaction.
+A route rebind authorizes both its existing and intended owner; deletion first
+resolves the existing owner. Missing required state denies without legacy fallback.
+
+WRITE or ADMIN suffices only for truly empty review-free owners. Any outbound or
+inbound SDK grant, retained attachment grant, review or quarantine requires live
+ADMIN. READ-only inspection stays separate. Event callbacks run after all locks;
+failed COMMIT cannot publish an event, mapping, version or exposure-audit entry.
+Audit retains 32 immutable actor/digest entries per owner without secrets/bodies.
+
+Exposure is not SDK inbound acceptance. These edits do not advance policy epoch,
+bind approval, change grant sources, replace Factories or mint SDK access.
+Queued code still must recheck canonical epoch, current source-aware privilege
+and credential validity at its own ordered publication boundary; that writer
+cut-over is not implemented here. This is not a claim about legacy queued safety.
+Normal boot/router/catalog construction remains inactive. Signature-secret
+rotation stays delete/recreate and secrets are returned only once on create.
+
+The opt-in managed listener considers only route rows with an exact
+transactional publication for their version, owner and methods. A version
+high-water mark alone is not proof: legacy updates and recreations remove
+publication, and preexisting rows are not adopted. Selection precedes method
+checking. Reserved control-plane paths stay in the platform mux on all methods.
+Inbound webhooks on the managed listener follow the same rule. `/webhook/{id}`
+dispatches only a row whose publication matches its exposure version, owner,
+signature format and header, active flag and the SHA-256 of its stored secret;
+triggers on any non-managed write (insert or update) delete the publication, so
+legacy, raw-edited and restored rows return 404 until a managed `PUT` republishes
+them. Signature failure runs no code and logs only the failure reason. The verified
+publication is re-read after worker acquisition and just before dispatch; a
+disable, delete, raw edit or restore that committed in between refuses the request
+with 404 and releases the worker unused. Secrets are
+returned once on create and never logged.
+Managed restore removes route and webhook publications in the durable quarantine
+transaction before admission opens; a backed-up grant is not a fresh decision
+to expose a function publicly. Inspection and explicit CAS republication do
+not change SDK policy or target admission.

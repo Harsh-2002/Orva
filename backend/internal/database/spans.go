@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/trace"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 )
 
 // UserSpan is one orva.trace.span() call captured from inside a function.
@@ -37,15 +38,58 @@ func (db *Database) AsyncInsertUserSpan(s *UserSpan) {
 	if s.Status == "" {
 		s.Status = "ok"
 	}
-	db.asyncExecFunctionTelemetry(s.FunctionID, `
+	db.asyncExecFunctionTelemetry(s.FunctionID, userSpanInsert,
+		userSpanArgs(*s)...)
+}
+
+const userSpanInsert = `
 		INSERT INTO user_spans (id, function_id, trace_id, parent_span_id, execution_id,
 		                       name, started_at, duration_ms, attributes,
 		                       status, error_message, offset_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+func userSpanArgs(s UserSpan) []any {
+	return []any{
 		s.ID, nullableString(s.FunctionID), s.TraceID, s.ParentSpanID, s.ExecutionID,
 		s.Name, s.StartedAt, s.DurationMS, nullableString(s.Attributes),
 		s.Status, nullableString(s.ErrorMessage), s.OffsetMS,
-	)
+	}
+}
+
+// TryInsertAdmittedUserSpan transfers an owned immutable envelope without I/O
+// or waiting on the writer. Commit/retry retains its original identity.
+func (db *Database) TryInsertAdmittedUserSpan(s UserSpan, decision workloadiam.SpanDecision) bool {
+	if db == nil || db.writer == nil {
+		return false
+	}
+	a := db.writer
+	if !a.enqueueMu.TryRLock() {
+		a.recordDropped(writeTelemetry, 1)
+		return false
+	}
+	defer a.enqueueMu.RUnlock()
+	select {
+	case <-a.stopRequested:
+		a.recordDropped(writeTelemetry, 1)
+		return false
+	default:
+	}
+	j := writeJob{sql: userSpanInsert, args: userSpanArgs(s), functionID: s.FunctionID,
+		spanDecision: decision, enqueuedAt: time.Now().UnixNano()}
+	// Cover the inline string header/revision with headroom plus retained UUID.
+	j.bytes = jobBytes(j.sql, j.args) + len(j.functionID) + 32 + len(decision.OwnerID())
+	if !reserveQueueBytes(&a.telemetryBytes, int64(j.bytes), maxTelemetryQueueBytes) {
+		a.recordDropped(writeTelemetry, 1)
+		return false
+	}
+	select {
+	case a.telemetry <- j:
+		return true
+	default:
+		a.telemetryBytes.Add(-int64(j.bytes))
+		a.recordDropped(writeTelemetry, 1)
+		return false
+	}
 }
 
 // ListUserSpansByTrace returns every user span attached to any execution

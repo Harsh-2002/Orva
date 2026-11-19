@@ -16,6 +16,90 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- Managed backups use portable v2. Download with `orva backup download`
+  and use the stopped server binary's `orva managed restore --archive FILE
+  --confirm` on the independently provisioned destination, not the legacy
+  online restore command. Cross-host restore clears approval and unpublishes
+  public exposures.
+- Legacy instances remain legacy on upgrade. To opt in to managed serving,
+  back up and stop the instance, run `orva managed enroll --dry-run`, then
+  apply the reviewed plan explicitly. No SDK grants or standing authority
+  carry over. Only current supported deployments are rebuilt; older sources
+  remain offline and unsupported functions require explicit exclusion.
+- The AI assistant no longer stores one-time credentials it mints. API keys,
+  outbound webhook secrets and inbound webhook secrets created through Chat
+  appear only in that turn's live result; stored history and later model
+  requests show a placeholder (the Markdown export never includes tool
+  results). Copy the value before reloading or leaving Chat. Existing
+  conversations created before this change are not rewritten.
+- `orva serve` holds an exclusive data-directory lock. Legacy directories
+  without a mode file still support group write access and symlinked directory
+  paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it
+  cannot take the lock or finds an unexpected mode, tombstone or assertion.
+  Managed serving remains explicit opt-in via the durable mode record and
+  retains stricter directory checks. It needs a separately provisioned witness
+  and a delegated cgroup-v2 budget. Same-boot daemon restarts fence intact
+  epochs or recover when the manager removes both the epoch and its recorded
+  parent and recreates the service/container at the same path. Partial
+  removal, absent authenticated parent identities when a group is gone,
+  changed paths, and witness mismatches still exit 78. Older references
+  require exact same-boot fencing until retired or a verified cold recovery.
+  Native uninstall destroys
+  the standard witness even if data is retained; the sealed stores then
+  become unrecoverable on that host. New systemd units do not restart on 78.
+
+### Internal queued IAM publication (not activated)
+
+- Adds explicit managed-store queued capture/publication and optional REST/MCP/
+  shared-AI adapters. Normal serving/boot remains unchanged; no public breaking
+  behavior is enabled. New output publishes inactive review-required DENY,
+  followed by separate fresh Factory installation and review. Legacy filesystem
+  mixing, dependencies/TypeScript, restore and automatic resume remain unqualified.
+
+### Fixed
+
+- Python SDK concurrent first use no longer reports an unavailable channel while
+  another thread is initializing it. Missing/invalid channels still fail closed;
+  no transport fallback or permission change is introduced.
+
+### Internal cron controls and UI (not activated)
+
+- Adds opt-in HTTP, compiled CLI, external-MCP/shared-AI controls and schedule
+  authority/source/reason/revision UI over the existing cron service.
+- **Future breaking cut-over requirement:** durable cron mutations require admin
+  and exact decimal configuration/authority CAS; delete also requires explicit
+  confirmation. Inspection remains read-gated. Normal router/catalog/schema
+  defaults remain unchanged; restore/adoption/deleted-target retention are HOLDs.
+
+### Internal IAM cron core (not activated)
+
+- Adds independent opt-in leased self-cron registration, host provenance,
+  standing and acquired-worker admission, revision-CAS stale-firing rejection,
+  suspension and future-only admin-service resume. Normal boot/routes/catalog
+  and existing jobs-only options are unchanged.
+- **Future cut-over requirement:** cron management must be admin-gated, with live
+  credential checks; historical cron rows quarantine. Public management controls,
+  UI, restore/adoption and retained deleted-target history are still pending.
+
+### Internal IAM jobs fixture (not activated)
+
+- Adds opt-in provenance-scoped jobs, current standing/acquired-worker admission,
+  suspension, and explicit admin resume through the Jobs UI, CLI and shared
+  external-MCP/AI registry. Normal router construction and boot migration remain off.
+- **Future breaking cut-over requirement:** IAM jobs enqueue/retry/resume/delete
+  require admin rather than write. Existing function-origin work retains its
+  original rights on retry; key expiry does not revoke accepted operator work.
+  Legacy hints need review and unknown origins quarantine. No production upgrade
+  procedure is enabled yet. Cron, adoption/reissue, restore and retained
+  deleted-target history remain pending.
+
+### Removed
+
+- Removed the `orva chat` CLI command. The dashboard AI assistant and server-side
+  AI/MCP interfaces are unchanged.
+
+### Upgrade notes
+
 - Awaited Node `trace.span` now waits for its bounded telemetry channel request
   before completing, preventing handler return from racing lease revocation.
   Submission may add latency up to the existing 30-second request deadline
@@ -24,6 +108,16 @@ unreleased range, and the sections below as the record for everything before it.
   runtime adapters together with the server when upgrading.
 
 ### Added
+
+- Staged metadata-only history inspection, explicit fresh-work reissue and
+  audited purge through shared UI, CLI and MCP/AI adapters. Normal server routes,
+  catalogs and boot schemas remain inactive pending coordinated IAM cut-over.
+
+- Staged reusable-policy management: immutable version pins, source-aware
+  Permissions components, `orva iam` commands and shared MCP/AI adapters.
+  These require internal service wiring; normal servers do not expose IAM
+  routes/tools or initialize IAM schemas. Existing SDK permissions remain
+  unchanged until the coordinated cut-over.
 
 - Current Node and Python adapters automatically route KV, function
   invoke/streaming, jobs, cron updates, and custom spans over an inherited

@@ -152,9 +152,8 @@ func TestIAMInvokeBeginDenialsAndValidation(t *testing.T) {
 	for _, args := range []string{`{`, `{"name":"missing","worker_id":"forged"}`, `{"name":"missing","body":"` + strings.Repeat("x", maxInvokeBody) + `"}`} {
 		iamCall(t, h, c.ctx, c.caller, "invoke", args, 400)
 	}
-	for _, op := range []string{"invoke.stream.open", "invoke.stream.next"} {
-		iamCall(t, h, c.ctx, c.caller, op, `{"name":"iam-1"}`, 403)
-	}
+	iamCall(t, h, c.ctx, c.caller, "invoke.stream.open", `{"name":"iam-1"}`, 403)
+	iamCall(t, h, c.ctx, c.caller, "invoke.stream.next", `{"handle":"missing"}`, 403)
 }
 
 func TestIAMInvokeObservedAdmission(t *testing.T) {

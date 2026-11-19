@@ -53,6 +53,26 @@
       </div>
     </header>
 
+    <section class="space-y-3">
+      <h2 class="text-lg font-semibold text-foreground-strong">
+        Staged named permissions
+      </h2>
+      <p class="max-w-prose text-sm text-foreground-muted">
+        Named-policy management is available only in explicit scratch hosts, not
+        normal production routing. Versions are immutable, attachments stay pinned,
+        and effective access is read-only. Inline edits never replace attached
+        sources. Detach or revoke can leave overlapping grants from other sources.
+        Consult the source repository's IAM_MANAGEMENT contract before using the
+        staged CLI or optional MCP tools.
+        Optional configuration publication also remains scratch-only: environment,
+        settings and secret changes first publish review-required deny. Explicit
+        new Factory installation and review are separate. Configuration uses the
+        installed code and runtime pair, including after queued deployment
+        installation. Old injected secrets cannot be recalled. No normal routes
+        or tools are activated.
+      </p>
+    </section>
+
     <!-- ── 1. Handler contract ─────────────────────────────── -->
     <section
       id="handler"
@@ -233,6 +253,10 @@
         <code class="doc-chip">/mcp/</code>
         <code class="doc-chip">/web/</code>
         <code class="doc-chip">/_orva/</code>.
+        On the internal managed listener, inspect the mapping and its CAS
+        tokens with <code class="doc-chip">GET /api/v1/exposures?kind=route</code>
+        (include the route path as <code class="doc-chip">key</code>).
+        Restored mappings must be explicitly republished before they can receive requests.
       </Callout>
     </section>
 
@@ -435,6 +459,27 @@
         <div class="doc-microlabel">
           Background jobs: jobs.enqueue()
         </div>
+        <details class="text-sm text-foreground-muted max-w-prose">
+          <summary>Internal IAM jobs fixture (not active in normal serving)</summary>
+          <p class="mt-2">
+            Origin and creator are host-owned. Current grants and target acceptance
+            are checked again at each attempt. Denial suspends without spending an
+            attempt; regrant does not resume stored work. Admin resume revalidates
+            one suspended pending job, and retry never adopts it as operator work.
+            Cron, adoption and restore are not enabled by this fixture.
+          </p>
+        </details>
+        <details class="text-sm text-foreground-muted max-w-prose">
+          <summary>Separate cron controls fixture (not active in normal serving)</summary>
+          <p class="mt-2">
+            Schedule source and authority are host-owned. Explicit admin Resume
+            revalidates the original source and selects the next future firing,
+            without catch-up or adoption. Mutations use inspected decimal
+            configuration and authority revisions; stale conflicts require refresh
+            and review. Inspection requires read, while identified mutations require
+            admin without an additional read grant. Restore and adoption remain unavailable.
+          </p>
+        </details>
         <TabbedCode
           :tabs="sdkJobsTabs"
           storage-key="docs.sdk.jobs"
@@ -614,9 +659,8 @@
             MCP: Model Context Protocol
           </h2>
           <p class="doc-lede">
-            Same API surface the dashboard uses, exposed as 73 tools an agent
-            can call directly. API key permissions scope the available tool
-            set.
+            Let agents use Orva tools. The server and your credential determine
+            which tools are available.
           </p>
         </div>
       </div>
@@ -725,11 +769,12 @@
         <code class="doc-chip">ttlMs</code> and
         <code class="doc-chip">cacheScope</code>. Orva returns
         <code class="doc-chip">cacheScope: "private"</code> because the tool
-        catalog is permission-scoped (a full-permission key lists 73 tools; a
-        <code class="doc-chip">read</code>-only key lists 27) and
-        channel-specific (a channel token sees only that channel's
-        functions); a shared cache entry would hand one caller another
-        caller's tool surface. <code class="doc-chip">ttlMs</code> is
+        list depends on the caller. On a standard server, a full-permission
+        key lists 73 tools and a read-only key lists 28. Channel tokens list
+        only their bundled functions. The internal managed server lists
+        39 and 10 tools respectively, and does not accept channel tokens.
+        Use <code class="doc-chip">tools/list</code> for your exact count.
+        <code class="doc-chip">ttlMs</code> is
         <code class="doc-chip">0</code> because the catalog changes on any
         deploy, channel edit, or permission change, and statelessness removed
         the session a <code class="doc-chip">tools/list_changed</code>
@@ -917,6 +962,12 @@
         excludes submission wait. Telemetry errors are swallowed. Acknowledgement
         means queued, not durably stored.
       </p>
+      <p class="doc-prose">
+        The opt-in IAM fixture additionally requires an active original execution,
+        an explicit own-execution span-emission grant and current artifact proof.
+        Optional telemetry may be shed. Emission never grants trace-read access.
+        Normal serving is unchanged.
+      </p>
 
       <h3 class="doc-h3">
         What user code sees
@@ -1044,8 +1095,10 @@
             Every error response uses the same envelope so log scrapers and
             retries can match on
             <code class="doc-chip">code</code>. Deploys are content-addressed;
-            rollback retargets the active version pointer and refreshes warm
-            workers.
+            normal rollback retargets the active version pointer and refreshes warm
+            workers. In the opt-in managed fixture, rollback requires an exact
+            deployment UUID and leaves the function inactive until separate
+            installation and policy review.
           </p>
         </div>
       </div>
@@ -1097,7 +1150,16 @@
             every client command; only the full build adds
             <code class="doc-chip">serve</code>,
             <code class="doc-chip">setup</code>, and
-            <code class="doc-chip">init</code>.
+            <code class="doc-chip">managed</code>.
+          </p>
+          <p class="doc-lede">
+            For managed mode, <code class="doc-chip">orva backup download</code>
+            saves the database, available keys and current source, not the witness
+            or sealed stores. On the stopped destination, run
+            <code class="doc-chip">orva managed restore --archive FILE</code>
+            to check the archive; add <code class="doc-chip">--confirm</code>
+            to rebuild it into a fresh local Owner. Review restored permissions
+            before re-enabling protected work.
           </p>
         </div>
       </div>
@@ -2127,7 +2189,7 @@ const mcpInstallTabsPrimary = computed(() => [
   {
     label: 'Claude Code',
     lang: 'bash',
-    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards; `/mcp` lists Orva\'s 73 tools.',
+    note: 'Anthropic\'s `claude` CLI. Restart Claude Code afterwards and check the tools available to your key.',
     code: `claude mcp add --transport http --scope user orva ${origin.value}/mcp --header "Authorization: Bearer ${T.value}"`,
   },
   {

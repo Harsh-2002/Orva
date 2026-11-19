@@ -405,14 +405,20 @@ func registerFunctionTools(rc *regCtx) {
 				lk := deps.PoolMgr.FunctionLock(fn.ID)
 				lk.Lock()
 				defer lk.Unlock()
-				deps.PoolMgr.Drain(fn.ID)
 			}
 			// Detached so the caller giving up cannot leave it half done; a
 			// retry resumes a function left 'deleting'.
 			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
 			defer cancel()
-			if err := deps.Registry.Delete(dctx, fn.ID); err != nil {
-				return nil, DeletedOutput{}, fmt.Errorf("delete did not finish; the function is marked deleting, retry to resume: %w", err)
+			if err := deps.Registry.DeleteWithDrain(dctx, fn.ID, func() {
+				if deps.PoolMgr != nil {
+					deps.PoolMgr.Drain(fn.ID)
+				}
+			}); err != nil {
+				if deps.Registry.DeletionHook == nil {
+					return nil, DeletedOutput{}, fmt.Errorf("delete did not finish; the function is marked deleting, retry to resume: %w", err)
+				}
+				return nil, DeletedOutput{}, fmt.Errorf("delete refused or incomplete; inspect current state before retrying: %w", err)
 			}
 			if deps.PoolMgr != nil {
 				deps.PoolMgr.DrainAndRemove(fn.ID)

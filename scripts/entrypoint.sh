@@ -69,12 +69,23 @@ touch /var/lib/orva/.setup-complete
 # cgroup-v2 domain controllers cannot be enabled while tini shares the parent
 # with the daemon. Never create a group at the host cgroup root.
 SUPERVISOR_CGROUP=
+MANAGED_LAYOUT=
+if [ "${1:-}" = /usr/local/bin/orva ] && [ "${2:-}" = serve ] &&
+   { [ -e "${ORVA_DATA_DIR:-/var/lib/orva}/.orva-serving-mode" ] ||
+     [ -L "${ORVA_DATA_DIR:-/var/lib/orva}/.orva-serving-mode" ]; }; then
+  # The daemon validates the marker under lock. Do not bootstrap the legacy CLI.
+  MANAGED_LAYOUT=1
+  export ORVA_MANAGED_WITNESS_PATH="${ORVA_MANAGED_WITNESS_PATH-/var/lib/orva-host/witness}"
+fi
 if [ "${1:-}" = /usr/local/bin/orva ] && [ "${2:-}" = serve ] &&
    [ -r /proc/self/cgroup ] && [ "$(cat "/proc/$PPID/comm" 2>/dev/null)" = tini ]; then
   cgroup_rel=$(sed -n 's/^0:://p' /proc/self/cgroup)
   case "$cgroup_rel" in
     /*) if [ "$cgroup_rel" != / ]; then
           cgroup_base=/sys/fs/cgroup$cgroup_rel
+          if [ -n "$MANAGED_LAYOUT" ]; then
+            export ORVA_MANAGED_WORKLOAD_PARENT="${ORVA_MANAGED_WORKLOAD_PARENT-$cgroup_base/orva.workers}"
+          fi
           if mkdir "$cgroup_base/orva.supervisor" 2>/dev/null &&
              printf '%s\n' "$PPID" > "$cgroup_base/orva.supervisor/cgroup.procs" 2>/dev/null; then
             SUPERVISOR_CGROUP=$cgroup_base/orva.supervisor
@@ -124,11 +135,13 @@ api_key: $api_key
 EOF
     echo ">> wrote CLI config to $cfg_path (endpoint=http://localhost:8443)"
 )
-write_cli_config &
-cli_helper_pid=$!
-if [ -n "$SUPERVISOR_CGROUP" ]; then
-  # The helper belongs to this entrypoint and may finish before the move.
-  printf '%s\n' "$cli_helper_pid" > "$SUPERVISOR_CGROUP/cgroup.procs" 2>/dev/null || true
+if [ -z "$MANAGED_LAYOUT" ]; then
+  write_cli_config &
+  cli_helper_pid=$!
+  if [ -n "$SUPERVISOR_CGROUP" ]; then
+    # The helper belongs to this entrypoint and may finish before the move.
+    printf '%s\n' "$cli_helper_pid" > "$SUPERVISOR_CGROUP/cgroup.procs" 2>/dev/null || true
+  fi
 fi
 
 exec "$@"

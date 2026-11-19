@@ -13,6 +13,7 @@ import (
 // functionPool holds the idle workers and live counters for one function.
 // All methods are safe for concurrent use.
 type functionPool struct {
+	managed   *managedGeneration
 	fnID      string
 	min       int
 	max       int    // resource-derived channel ceiling, possibly lowered by max_warm
@@ -452,6 +453,9 @@ func (p *functionPool) release(w *sandbox.Worker, reqErr error) {
 
 // isUnusable returns true if the worker should not be reused.
 func (p *functionPool) isUnusable(w *sandbox.Worker) bool {
+	if p.managed != nil && !p.managed.active.Load() {
+		return true
+	}
 	if w == nil || w.IsDead() {
 		return true
 	}
@@ -484,6 +488,10 @@ func (p *functionPool) killWorker(w *sandbox.Worker) {
 // sweep walks the idle channel, killing dead/max-use workers and putting live
 // ones back. Pool idle expiry and scale-down are controller decisions.
 func (p *functionPool) sweep(defaultMaxUses int64) {
+	if p.managed != nil {
+		p.sweepManaged()
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closing.Load() {
@@ -507,6 +515,33 @@ func (p *functionPool) sweep(defaultMaxUses int64) {
 		default:
 			return
 		}
+	}
+}
+
+func (p *functionPool) sweepManaged() {
+	var dead []*sandbox.Worker
+	p.mu.Lock()
+	if !p.closing.Load() {
+		n := len(p.idle)
+		for i := 0; i < n; i++ {
+			select {
+			case w := <-p.idle:
+				if p.isUnusable(w) {
+					dead = append(dead, w)
+				} else {
+					select {
+					case p.idle <- w:
+					default:
+						dead = append(dead, w)
+					}
+				}
+			default:
+			}
+		}
+	}
+	p.mu.Unlock()
+	for _, w := range dead {
+		p.killWorker(w)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/scheduler"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 )
 
 // CronHandler exposes CRUD over per-function cron schedules. The scheduler
@@ -18,8 +19,10 @@ import (
 // handler doesn't need a back-channel to notify it because the goroutine
 // re-queries every tick.
 type CronHandler struct {
-	DB       *database.Database
-	Registry *registry.Registry
+	DB          *database.Database
+	Registry    *registry.Registry
+	CronEnabled bool
+	CronIAM     *workloadasync.Service
 }
 
 // cronRequest is the shape of POST/PUT bodies. Payload is optional and
@@ -51,6 +54,10 @@ func resolveTZ(name string) (*time.Location, string, error) {
 
 // List handles GET /api/v1/functions/{fn_id}/cron.
 func (h *CronHandler) List(w http.ResponseWriter, r *http.Request) {
+	if h.CronEnabled {
+		h.iamList(w, r, r.PathValue("fn_id"))
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID := r.PathValue("fn_id")
 
@@ -71,6 +78,10 @@ func (h *CronHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Create handles POST /api/v1/functions/{fn_id}/cron.
 func (h *CronHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if h.CronEnabled {
+		h.iamCreate(w, r)
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID := r.PathValue("fn_id")
 
@@ -133,6 +144,10 @@ func (h *CronHandler) Create(w http.ResponseWriter, r *http.Request) {
 // subset of {cron_expr, enabled, payload}; omitted fields keep their
 // previous value.
 func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
+	if h.CronEnabled {
+		h.iamMutate(w, r, "update")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID := r.PathValue("fn_id")
 	id := r.PathValue("id")
@@ -203,6 +218,10 @@ func (h *CronHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/functions/{fn_id}/cron/{id}.
 func (h *CronHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if h.CronEnabled {
+		h.iamMutate(w, r, "delete")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	fnID := r.PathValue("fn_id")
 	id := r.PathValue("id")
@@ -224,6 +243,10 @@ func (h *CronHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // function. Joins with the functions table so the UI gets function_name
 // without a second roundtrip per row.
 func (h *CronHandler) ListAll(w http.ResponseWriter, r *http.Request) {
+	if h.CronEnabled {
+		h.iamList(w, r, "")
+		return
+	}
 	reqID := r.Header.Get("X-Request-ID")
 	rows, err := h.DB.ListAllCronSchedulesWithFunction()
 	if err != nil {

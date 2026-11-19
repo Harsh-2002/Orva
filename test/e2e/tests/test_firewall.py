@@ -779,9 +779,11 @@ def main():
         gen = (c.get("/api/v1/firewall/status") or {}).get("policy_generation") or ""
         if fs is None or not gen:
             reason = why if fs is None else "the instance reports no policy generation"
-            print("  (fail-closed case skipped — this module must take the compiled "
-                  "policy file off the instance's disk, which needs the data dir of "
-                  f"the instance under test: {reason})")
+            detail = f"requires the policy file in the verified scratch instance's data dir: {reason}"
+            if REQUIRE_SANDBOX:
+                check("compiled policy is available for the fail-closed case", False, detail)
+            else:
+                print(f"  (fail-closed case skipped — {detail})")
         else:
             policy_rel = f"firewall/policy/egress-{gen}.cfg"
             check("the generation file the worker loads is on disk",

@@ -1,6 +1,9 @@
 package commands
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestCommandTree proves every advertised subcommand path resolves via
 // cobra.Command.Find. A new subcommand that's forgotten in RegisterClient
@@ -9,17 +12,21 @@ import "testing"
 func TestCommandTree(t *testing.T) {
 	root := NewRoot()
 	paths := [][]string{
+		{"iam"}, {"iam", "policies", "list"}, {"iam", "policies", "get"}, {"iam", "policies", "create"}, {"iam", "policies", "update"}, {"iam", "policies", "impact"}, {"iam", "policies", "attach"}, {"iam", "policies", "detach"}, {"iam", "policies", "revoke"}, {"iam", "policies", "delete"},
+		{"iam", "permissions", "get"}, {"iam", "permissions", "put"}, {"iam", "permissions", "review"},
+		{"history"}, {"history", "list"}, {"history", "get"}, {"history", "capacity"}, {"history", "purge"}, {"history", "reissue"},
 		{"functions"}, {"functions", "list"}, {"functions", "get"}, {"functions", "create"}, {"functions", "delete"}, {"functions", "update"}, {"functions", "purge-cache"},
+		{"functions", "pause"}, {"functions", "resume"},
 		{"deploy"},
-		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"},
+		{"deployments"}, {"deployments", "list"}, {"deployments", "get"}, {"deployments", "logs"}, {"deployments", "install"},
 		{"rollback"},
 		{"invoke"},
 		{"logs"},
 		{"executions"}, {"executions", "list"}, {"executions", "get"}, {"executions", "logs"},
 		{"executions", "delete"}, {"executions", "prune"}, {"executions", "replay"},
 		{"kv"}, {"kv", "get"}, {"kv", "put"}, {"kv", "delete"}, {"kv", "list"}, {"kv", "incr"}, {"kv", "cas"},
-		{"cron"}, {"cron", "create"}, {"cron", "list"}, {"cron", "update"}, {"cron", "delete"},
-		{"jobs"}, {"jobs", "enqueue"}, {"jobs", "list"}, {"jobs", "get"}, {"jobs", "retry"}, {"jobs", "delete"},
+		{"cron"}, {"cron", "create"}, {"cron", "list"}, {"cron", "update"}, {"cron", "delete"}, {"cron", "resume"},
+		{"jobs"}, {"jobs", "enqueue"}, {"jobs", "list"}, {"jobs", "get"}, {"jobs", "retry"}, {"jobs", "delete"}, {"jobs", "resume"},
 		{"secrets"}, {"secrets", "set"}, {"secrets", "list"}, {"secrets", "delete"},
 		{"keys"}, {"keys", "list"}, {"keys", "create"}, {"keys", "revoke"},
 		{"channels"}, {"channels", "create"}, {"channels", "list"}, {"channels", "show"},
@@ -41,7 +48,6 @@ func TestCommandTree(t *testing.T) {
 		{"login"},
 		{"completion"},
 		{"upgrade"},
-		{"chat"},
 		{"docs"},
 	}
 	for _, p := range paths {
@@ -58,6 +64,19 @@ func TestCommandTree(t *testing.T) {
 	}
 }
 
+func TestChatCommandIsNotRegistered(t *testing.T) {
+	root := NewRoot()
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "chat" {
+			t.Fatal("chat command is still registered")
+		}
+	}
+	root.SetArgs([]string{"chat"})
+	if _, err := root.ExecuteC(); err == nil || !strings.Contains(err.Error(), `unknown command "chat"`) {
+		t.Fatalf("executing chat returned %v, want an unknown-command error", err)
+	}
+}
+
 // TestRequiredFlagsPresent confirms each subcommand still owns the flags
 // downstream tooling (CI scripts, docs examples, the existing test
 // harness) relies on. Catches accidental flag drops during refactors.
@@ -66,6 +85,21 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		path []string
 		flag string
 	}{
+		{[]string{"iam", "policies", "create"}, "request"},
+		{[]string{"iam", "policies", "update"}, "request"},
+		{[]string{"iam", "policies", "impact"}, "request"},
+		{[]string{"iam", "policies", "attach"}, "request"},
+		{[]string{"iam", "policies", "detach"}, "request"},
+		{[]string{"iam", "policies", "revoke"}, "request"},
+		{[]string{"iam", "policies", "delete"}, "request"},
+		{[]string{"iam", "permissions", "put"}, "request"},
+		{[]string{"iam", "permissions", "review"}, "request"},
+		{[]string{"iam", "policies", "get"}, "history"},
+		{[]string{"iam", "policies", "get"}, "version"},
+		{[]string{"iam", "policies", "list"}, "offset"},
+		{[]string{"history", "get"}, "request"},
+		{[]string{"history", "purge"}, "request"},
+		{[]string{"history", "reissue"}, "request"},
 		{[]string{"deploy"}, "name"},
 		{[]string{"deploy"}, "runtime"},
 		{[]string{"deploy"}, "entrypoint"},
@@ -87,6 +121,8 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"kv", "cas"}, "expected"},
 		{[]string{"kv", "cas"}, "new"},
 		{[]string{"functions", "list"}, "limit"},
+		{[]string{"functions", "pause"}, "request"},
+		{[]string{"functions", "resume"}, "request"},
 		{[]string{"functions", "list"}, "offset"},
 		{[]string{"functions", "create"}, "sdk"},
 		{[]string{"functions", "update"}, "sdk"},
@@ -98,6 +134,8 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"upgrade"}, "data-dir"},
 		{[]string{"cron", "create"}, "fn"},
 		{[]string{"cron", "create"}, "expr"},
+		{[]string{"cron", "resume"}, "config-revision"},
+		{[]string{"cron", "resume"}, "authority-generation"},
 		{[]string{"webhooks", "create"}, "name"},
 		{[]string{"webhooks", "create"}, "url"},
 		{[]string{"webhooks", "update"}, "events"},
@@ -112,13 +150,6 @@ func TestRequiredFlagsPresent(t *testing.T) {
 		{[]string{"pool", "set"}, "fn"},
 		{[]string{"diff"}, "from"},
 		{[]string{"diff"}, "to"},
-		{[]string{"chat"}, "prompt"},
-		{[]string{"chat"}, "provider"},
-		{[]string{"chat"}, "model"},
-		{[]string{"chat"}, "thinking"},
-		{[]string{"chat"}, "conversation"},
-		{[]string{"chat"}, "auto-approve"},
-		{[]string{"chat"}, "raw"},
 		{[]string{"docs"}, "raw"},
 	}
 	root := NewRoot()

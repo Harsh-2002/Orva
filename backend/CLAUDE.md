@@ -1,5 +1,80 @@
 # Backend
 
+`orva serve` selects the opt-in `server.StartManaged` composition only from
+durable managed mode. The boot caller holds the outer flock across Owner
+recovery, managed SQLite and shutdown. It starts the managed scheduler before
+the listener and drains HTTP, stops the instance, then fences/closes the Owner.
+Legacy serve still follows directory aliases and requires an absent mode file
+and no root SQLite tombstone. The default installer doesn't enable managed mode.
+The server-only `managed enroll` command plans from an offline SQLite scratch
+copy, checks exact DB/source identity, and writes a fail-closed outer intent.
+It rebuilds only current compatible deployments under the bound Owner, commits
+empty policy, denies standing work, and records excluded owners as inactive.
+Owner binding and enrollment associations commit in the same transaction.
+Relocation preserves the original source tree and publishes the mode last.
+Startup restores durable pause and reconstructs
+only valid exact associations; restore gets a deny evaluator before dispatch.
+`scheduler.RunManaged` starts only shared-authority job/cron loops and drains
+before it returns. Legacy mutation routes and tools are not mounted in this
+composition. The authenticated final boot run selects same-boot exact fencing
+or typed epoch-and-parent removal, or a true kernel-cold opener.
+Managed v2 downloads project source from exact current code leases. The
+offline restore command reseals under a fresh local Owner, commits rebinding
+and quarantine in staged SQLite, and publishes managed mode last. Same-Owner
+replay retains the guarded store-preserving path.
+
+Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
+over `workload_inbound_publications` (triggers unpublish any non-managed write;
+restore clears them), the existing signature verifiers, and only the managed
+Factory path; `InboundTriggerHandler.Managed` has no legacy fallback.
+Managed custom routes use one published-mapping lookup in `InvokeHandler`.
+Managed MCP/Chat route and inbound-webhook tools (`tools_managed_exposures_linux.go`)
+register only with `Deps.Triggers`, delegate to `workloadtrigger.Service` and share
+the exposure schema with `registerExposureTools`; the normal catalog is unchanged.
+Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
+Restore clears publications before admission.
+
+Bound configuration writes persist the same pair against the new generation
+and mark it inactive in the deny publication transaction. Explicit installation
+can recover that association after a same-boot restart; policy review remains
+separate. Managed deletion reserves metadata history and retires the Factory
+at the same gate before deleting the row. It does not reclaim sealed outputs.
+
+`workloadconfig` is an internal opt-in environment/execution-settings/secret
+mutation service. It rechecks exact durable/source/ciphertext CAS and current
+operator authority under owner → IAM → DB ordering, commits review-required deny,
+then pins the exact current pair to the committed successor and invalidates the
+old actual Factory before ACK. Explicit queued installation in the same stores
+changes which pair later configuration resolves. Cancellation/retirement
+callbacks run outside owner/IAM locks. Explicit new concrete Factory installation
+precedes separate aggregate-policy review. Optional HTTP/MCP/shared-AI adapters
+do not activate normal routes or boot schemas. Other writers, full lifecycle
+and recovery remain separate gates. See its README.
+`builder.NewPublicationQueue` is opt-in managed-store-only queued deployment
+capture/publication, never normal boot activation. It refuses legacy function
+filesystem directories, captures live token-free submitter/source/epoch provenance
+transactionally, and publishes inactive review-required deny while invalidating
+the old actual Factory under the same gate. Fresh concrete-pair Install and
+source-aware Review are separate. Opt-in managed rollback promotes a verified
+historical deployment ID without rewriting history and also publishes inactive
+review-required deny. Durable pause blocks rollback; internal resume uses the
+same promotion association with the exact current sealed pair and a fresh deny
+generation. Pause/resume have explicit REST and MCP/shared-AI adapters; normal
+routing, catalogs and boot are unchanged. No symlink promotion, legacy
+rollback/GC adoption or autoresume; see `builder/README.md`.
+
+`workloadhistory` is an internal opt-in deletion/history service. Its explicit
+schema and registry hook are absent from normal boot/router construction.
+Capacity and canonical metadata capture commit before deleting status and IAM
+retirement; process callbacks run outside the gate. History is inspection-only;
+confirmed/admin reissue creates new operator work with a fresh target UUID and
+payload. Real Node/Python sealed-pool scratch lifecycle tests qualify this narrow
+path, not complete function lifecycle or restore. Explicit managed-policy
+coordination removes the retiring owner's attachments and advances membership/
+audit in the history reservation transaction; surviving owners are unchanged.
+Public history controls, boot/restore and complete lifecycle remain separate
+cut-over gates. See its README.
+
 Go 1.27 (the embedded Bifrost AI gateway requires go ≥1.27; the Dockerfile + all CI workflows pin golang 1.27 in lock-step). Module: `github.com/Harsh-2002/Orva` (rooted at the repo, not at
 `backend/`). SQLite with no CGO (`modernc.org/sqlite`).
 
@@ -29,9 +104,11 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `artifactfs` | Inert Linux-only staging, manifest verification and code/runtime lifetime leases. Explicit persistent publication and inspection-only recovery; recovered trees cannot be activated or deleted. No legacy adoption, serving or GC integration; see its README. |
-| `workloadspawn` | Inert one-use composition of owned generation/config/secrets snapshots and verified path leases. Freezes spawn inputs and host fingerprint; it is not current-generation proof, policy approval or serving-pool wiring. |
+| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. Managed boot uses a host-bound Owner with exact fencing, typed same-boot epoch-and-parent removal, or verified prior-boot history. At the cap it retires the oldest verified epoch. See OWNER.md. |
+| `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
+| `workloadpolicy` | Shared policy publication core and unregistered HTTP adapter. Requires trusted live authentication/current-artifact observation; mutations recheck live operator authority transactionally. The live scratch KV workflow exercises it, but no serving route or observer is installed. |
+| `workloadfence` | Linux cgroup-v2 epoch ownership, pre-exec enrollment and kernel-verified descendant fencing. Package-only acceptance does not authorize artifact recovery, reclamation or IAM admission; see its README for ownership and relocation constraints. |
 | `config` | Config struct; environment variables only — there is no config file or YAML loader (see docs/CONFIG.md) |
 | `database` | SQLite schema, migrations, all CRUD helpers |
 | `registry` | In-memory function registry wrapping DB |
@@ -42,6 +119,19 @@ build jail after archive validation and before dependency installation. A `.ts`
 entrypoint without `tsconfig.json` fails early; the existing jailed `tsc` step
 checks a configured TypeScript project after npm install. No host-side parsing
 or author-code execution is involved in the pre-install checks.
+Internal `WithRuntimeBinding` captures one concrete runtime generation per Build,
+holds a pipeline anchor and gives commands independent leases through cleanup.
+Managed cache hits without provenance deny; legacy construction is unchanged.
+No serving caller enables this path. Runtime pinning does not fence build
+descendants or seal/approve code output; see `builder/README.md`.
+Separate internal managed-output mode owns fresh staging and an exclusive build
+Domain, fencing before inspection, Seal or Abort. Failed cleanup retains bounded
+ownership for retry. Only plain no-dependency Node/Python is qualified; no
+serving caller, durable publication, current authority or recovery is enabled.
+Managed output can use a concrete ParentDomain instead of raw budget/path
+provisioning. Build domains then inherit ancestor entry gates; root fencing
+blocks later starts through retained child handles. This is not boot wiring
+or a durable code/runtime store association.
 | `pool` | Warm-sandbox pool manager (`pool.Manager`) per function. Each worker executes one request at a time; pending counts derive from the detected memory/FD envelope, with a reserved share for other functions. Saturated pools wait at most 2 seconds; a pool that can still grow or is spawning waits up to the 10-second adapter-readiness budget plus one scaler tick. The HTTP proxy reserves a conservative share of daemon memory before body read; unknown-length bodies are charged at the configured cap. Waiting does not occupy the host execution limiter or count against the function's execution timeout. A spawned worker enters the idle pool only after its adapter emits the ready frame following user-code import; nsjail's nice-19 default is overridden to normal priority. Failed asynchronous spawns wake pending callers with the original error, preserving fail-closed egress-policy responses. |
 
 `pool/hostmem.go` discovers the process's cgroup-v2 ancestry via
@@ -90,6 +180,14 @@ mixed-runtime long-soak and cross-pool fairness workloads.
 `proxy.Proxy` caches the non-security streaming settings for at most 30 seconds
 per instance; a refresh never blocks concurrent invocations that already have
 a prior snapshot.
+
+Internal `ManagedAuthority` mode installs concrete frozen Factories, derives
+resources from the same generation used for spawn, and denies missing owners
+without legacy fallback. Current caller/target observers share the IAM gate;
+retirement and generation-bound Release reject late or obsolete workers.
+Public Proxy timeout/header facts come from the acquired generation. The live
+scratch fixture exercises pooled KV and two-sided buffered calls; normal
+serving construction, boot schemas and production policy routes remain off.
 
 Worker release parks a healthy worker even if a transient capacity snapshot is
 below the current pool size; the controller applies its 30-second scale-down
@@ -176,7 +274,12 @@ cancellation atomic with the subsequent wire write.
 runtime trees. Nil keeps legacy resolution. Function/runtime labels must match;
 spawn failure releases ownership, and successful workers release only during
 centralized post-Wait cleanup. It does not mint artifact approval. Host endpoint
-probes reject absolute links before following them; pools still supply no leases.
+probes reject absolute links before following them; normal serving pools still
+supply no leases. Internal managed pools transfer concrete Factory leases.
+Optional `ExecConfig.Domain` and `BuildConfig.Domain` enroll Spawn, Execute and
+RunBuild before exec and constrain nsjail relocation to the same owned epoch.
+Required controller failure denies without legacy fallback. No serving caller
+supplies a domain; see `sandbox/DOMAIN.md` for ownership and validation limits.
 | `sdkhost` | SDK channel op executor (`kv.*`, `invoke`, `invoke.stream.*`). `invoke*` call the identity-based F2F cores in `server/handlers/internal_invoke.go` (`CheckDepth`/`ResolveCallee`/`RunInvoke`/`OpenStream`), preserved independently of the removed SDK HTTP wrappers; trace/span/depth come only from `caller.Exec`, the callee ctx derives from `caller.Exec.Ctx`. Streams live in a per-channel `sandbox.SDKSession` (max 8, lease-scoped) and are torn down by `LeaseRevoked`/`Closed`. The invoker is attached after the pool exists (`Host.SetInvoker`). |
 | `sandbox` | nsjail process lifecycle; `Worker` type with `Dispatch`/`DispatchEx`. Also the function runtime versions: `NodeMajor` / `PythonMinor`, which the runtime labels, the build version hash and `TestRuntimeVersionsAgree` all read |
 | `proxy` | HTTP → sandbox bridge; request capture (A3); streaming write-loop (C1) |
@@ -201,7 +304,7 @@ probes reject absolute links before following them; pools still supply no leases
 | `version` | Single source of truth for the version string |
 | `ai` | In-product AI chat assistant. `Manager` (service layer) wires the SQLite store, the secrets cipher (provider-key encryption), the in-process tool registry, the embedded Bifrost LLM gateway (`ai/llm`), and the agentic loop (`ai/agent`). Served at `/api/v1/ai/*` by `server/ai_handler.go` (SSE for chat/approval). The agent's `defaultSystemPrompt` const lives in `ai/manager.go` — it's a Go **raw string, so it must stay backtick-free** (escape any fenced-code examples by description, not literal ```). |
 | `ai/llm` | Wraps the embedded Bifrost gateway (`github.com/maximhq/bifrost/core`) behind neutral types + a normalized event stream. `Account` resolves BYO keys from `ai_provider_configs` live. Thinking levels → `ChatReasoning`. **Bifrost owns its own transport** (fasthttp + `providers/utils.ConfigureDialer`) and exposes no hook for Orva's dialer, so the egress control for model calls is the per-turn `firewall.CheckEndpoint` preflight, not `Policy.Blocks`. `privatenet.go` decides `NetworkConfig.AllowPrivateNetwork`: Bifrost refuses every RFC1918 destination without it, which made LAN-hosted endpoints (ollama, vLLM) unreachable regardless of operator policy. It is enabled **only when the configured base URL is itself private**, so a public provider keeps Bifrost's resolve-then-dial rebinding guard. The decision is memoised — `GetConfigForProvider` is on the per-request path. |
-| `ai/agent` | Agentic loop (≈25-iteration budget): stream model turn → emit SSE deltas → detect tool calls → approval-gate writes → in-process dispatch → feed results back. Decoupled from `mcp` (takes tools + a dispatcher). Two independent gates: the per-conversation **approval policy** (`all_writes` / `destructive_only` / `auto`, checked in `approvalNeeded`) and a separate code-enforced `confirm=true` requirement on destructive tools. |
+| `ai/agent` | Agentic loop (≈25-iteration budget): stream model turn → emit SSE deltas → detect tool calls → approval-gate writes → in-process dispatch → feed results back. Decoupled from `mcp` (takes tools + a dispatcher). Two independent gates: the per-conversation **approval policy** (`all_writes` / `destructive_only` / `auto`, checked in `approvalNeeded`) and a separate code-enforced `confirm=true` requirement on destructive tools. Tools registered with `withOneTimeResult` have those result fields replaced by `RedactedPlaceholder` before the audit row, conversation message or model history is written; only the live SSE `tool_result` frame (`one_time: true`) carries the value. |
 
 The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo-root** `internal/ids/` and `internal/client/` — shared with the slim CLI codebase, not under `backend/internal/`.
 
@@ -209,7 +312,7 @@ The canonical UUIDv7 generator (`ids`) and HTTP client (`client`) live at **repo
 
 All Cobra subcommands share one binary with the server. `orva serve` starts the daemon; every other command is a CLI client that reads `~/.orva/config.yaml`. The command library lives at repo-root `cli/commands/` (NOT under `backend/cmd/orva/`, which holds only `main.go`/`serve.go`/`setup.go` + the embedded `adapters/`); both binaries register it via `commands.NewRoot()`. See `cli/CLAUDE.md`.
 
-Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.go`, `invoke.go`, `logs.go`, `executions.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `dns.go`, `firewall.go`, `fixtures.go`, `channels.go`, `traces.go`, `pool.go`, `keys.go`, `system.go`, `backup.go`, `activity.go`, `chat.go`, `docs.go`, `completion.go`.
+Key files: `deploy.go`, `deployments.go`, `diff.go`, `rollback.go`, `functions.go`, `invoke.go`, `logs.go`, `executions.go`, `cron.go`, `kv.go`, `jobs.go`, `secrets.go`, `webhooks.go`, `routes.go`, `dns.go`, `firewall.go`, `fixtures.go`, `channels.go`, `traces.go`, `pool.go`, `keys.go`, `system.go`, `backup.go`, `activity.go`, `docs.go`, `completion.go`.
 
 ## Key Patterns
 
@@ -250,12 +353,31 @@ retain their legacy `LIKE` semantics until the coordinated IAM cut-over.
 Omitting it preserves current behavior; explicitly passing nil denies protected
 operations. It authorizes KV under fresh observed admission, including all batch
 selectors before the transaction, and binds literal-list cursors to owner/prefix.
-Buffered F2F has a staged acquired-worker admission seam behind a separate trusted
-target-state observer; missing observers or unbound pool artifacts deny. Streams,
-jobs, cron and spans still deny; owned stream close is cleanup. Target-state
+Buffered and streaming F2F have staged acquired-worker admission behind a trusted
+target-state observer; missing observers or unbound pool artifacts deny. Stream
+heads, chunks, completion and errors reauthorize at bounded handoff; frame I/O,
+encoding and cleanup stay outside admission. Jobs require the separate explicit
+`workloadasync` fixture service; cron requires separate explicit `WithCronIAM`;
+spans require explicit own-execution emission grants and a required current-artifact
+observer; optional persistence never reauthorizes accepted envelopes;
+span jobs retain the deciding owner/revision as private immutable queue metadata,
+not a stored span column or SDK claim;
+owned stream close is cleanup. Target-state
 observers must read active/current-generation facts under the same IAM gate,
 never infer activity from policy existence or perform DB/I/O/worker-lock reads.
 Never enable the partial path in serving configuration before coordinated cut-over.
+
+`workloadasync` composes staged jobs through the same Authority and actual managed
+target observer. Its schema/HTTP/MCP/scheduler options are explicit fixture-only;
+normal constructors and boot migration remain unchanged. See its README for
+standing provenance, admission-revision invalidation, admin-only controls and the
+unresolved target-FK history-retention limit. Cron remains disabled in jobs-only
+mode. The independent cron core fixture adds explicit schema, leased self-upsert,
+standing/final managed-target firing and admin-service future-only resume; no
+normal boot activation is installed. Separate opt-in `CronHandler` / MCP cron
+dependencies delegate management to the same service with exact string CAS and
+live admin checks. Normal router/catalog defaults remain unchanged. The explicit
+scratch controls UI entry compiles the real CronJobs view, not API snapshots.
 
 `workload_iam*.go` holds inert policy storage and read-only legacy preflight.
 Its explicit schema initializer is test-only for now, never called on boot.
@@ -263,9 +385,9 @@ CAS saves validate signed revisions and atomically append digest/actor audit
 records (32 retained per live function). Policy and audit rows cascade on
 function deletion; host-level deletion audit remains a cut-over obligation.
 Storage is not admin authorization or live artifact verification.
-`IAMPolicyRecord.AdmissionEvaluator` preserves revision metadata but compiles
-empty authority for quarantined/review-required records; the future loader must
-use it rather than compiling retained grants directly.
+`IAMPolicyRecord.AdmissionEvaluator` preserves revision and approval metadata
+but denies protected and standing work for quarantined/review-required records;
+the future loader must use it rather than compiling retained grants directly.
 
 `secrets.Manager.SnapshotForIAM` strictly decrypts caller-supplied snapshot rows
 into a bounded owned map or returns an error without partial output. It checks
@@ -292,12 +414,46 @@ deny-state/pool publication remain service obligations; no serving caller uses i
 `session_identity*.go` is an inert additive UUID-reference/backfill seam for
 browser sessions. Its initializer is test-only and reads rowids, never bearer
 tokens, during backfill. Token-free lookups recheck row/user/expiry in the DB.
-Legacy login writers, cookies, auth actors and caches are unchanged; NULL-ID
-sessions deny these new lookups. Identity records are provenance, not admin grants.
+Before explicit initialization, login writers retain legacy NULL-ID behavior.
+Afterward, new sessions receive independent UUIDs transactionally; browser auth
+captures those token-free references on fresh and cached paths and keeps cache
+validity within observed session expiry. NULL-ID sessions still clear inherited
+operator references. Identity records are provenance, not admin grants.
 `PublishWorkloadEnvironmentAsOperator` rechecks live credential/admin facts in the
 same transaction as publication. References must come from trusted authentication,
 never author input. It derives audit actors and checks expiry before mutation and
-commit; request capture, live IAM publication and serving wiring remain absent.
+commit; browser-session/queued-build capture and serving wiring remain absent.
+`SaveIAMPolicyAsOperator` applies the same live operator checks to policy CAS,
+authority-epoch advancement and bounded audit in one transaction. It derives
+actors and rechecks credentials before commit, preserving the persistence-only
+save API. It does not verify current runtime/code artifacts or install authority:
+the shared management service must bind reviewed current artifacts and publish
+under the registry mutation lock and IAM gate before exposing a serving API.
+`auth.OperatorReference` is the shared token-free credential reference. API-key
+REST authentication and MCP capture it under a private context key; OAuth retains
+its validated stored audience. AI request contexts inherit it. It carries no
+frozen permissions or bearer. Legacy browser sessions clear inherited references
+instead of promoting cookie prefixes. Explicitly initialized UUID sessions retain
+stable provenance through browser auth and AI request contexts; commit-time live
+checks remain mandatory.
+
+`workload_managed*.go` adds test-initialized named definitions, immutable versions,
+version-pinned attachments and separately preserved inline sources. Explicit
+`workloadpolicy.NewManaged` composes these through sorted owner locks, one IAM
+gate and one operator-rechecked transaction, then publishes all affected owners
+and signals cancellations after releasing locks. Source removals retain
+approval/quarantine; new versions never auto-propagate. The old HTTP adapter
+refuses managed mode rather than exposing the union as editable inline. This is
+an internal opt-in service, not boot migration or production cut-over; see
+`workloadpolicy/MANAGED.md`.
+
+`ExecuteManaged` supplies the strict source-aware boundary for the optional HTTP,
+external MCP and AI registry adapters. The CLI uses that HTTP contract, not a
+local evaluator. Managed mutations recheck read and live admin authority; the
+per-operation schemas retain raw duplicate/unknown-field rejection. Normal
+router/MCP construction supplies no IAM service. Scratch workflows qualify
+Node/Python enforcement and UI/CLI/MCP parity; deterministic-provider AI-turn
+tests qualify approval/resume separately, not browser Chat or public providers.
 
 ## Runtime SDK channel tests
 

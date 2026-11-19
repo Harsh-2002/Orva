@@ -20,6 +20,11 @@ type Registry struct {
 	// Wired by server.New from events.Hub.Publish. Best-effort: a nil
 	// publisher is a no-op for tests / setups without the event hub.
 	PublishEvent func(eventType string, data any)
+	// DeletionHook is internal opt-in, installed once before serving.
+	DeletionHook interface {
+		Prepare(context.Context, string) (func(), error)
+		Drain(context.Context, string) error
+	}
 }
 
 // New creates a new Registry with the given database backend.
@@ -32,6 +37,11 @@ func New(db *database.Database) *Registry {
 func (r *Registry) MutationLock(id string) *sync.Mutex {
 	lk, _ := r.mutations.LoadOrStore(id, &sync.Mutex{})
 	return lk.(*sync.Mutex)
+}
+
+// PolicyMutationLock follows all sorted owner locks and precedes the IAM gate.
+func (r *Registry) PolicyMutationLock(id string) *sync.Mutex {
+	return r.MutationLock("policy:" + id)
 }
 
 // GenerateID returns a new function ID — a UUIDv7 in canonical
@@ -100,6 +110,12 @@ func (r *Registry) SetSilent(fn *database.Function) error {
 	return r.set(fn, false)
 }
 
+// CacheCommitted publishes an already committed row without a second DB write.
+// Callers own MutationLock; event callbacks belong after releasing that lock.
+func (r *Registry) CacheCommitted(fn *database.Function) {
+	r.cache.Store(fn.ID, fn.Clone())
+}
+
 func (r *Registry) set(fn *database.Function, publish bool) error {
 	if fn.ID == "" {
 		id, err := GenerateID()
@@ -146,9 +162,40 @@ func (r *Registry) set(fn *database.Function, publish bool) error {
 // on a function with millions of executions (see database.DeleteFunction); a
 // cancelled ctx leaves the function 'deleting' and a later call finishes it.
 func (r *Registry) Delete(ctx context.Context, id string) error {
+	return r.DeleteWithDrain(ctx, id, nil)
+}
+
+// DeleteWithDrain prepares history before touching cache or retiring any pool.
+func (r *Registry) DeleteWithDrain(ctx context.Context, id string, drain func()) error {
 	lk := r.MutationLock(id)
 	lk.Lock()
-	defer lk.Unlock()
+	if r.DeletionHook != nil {
+		cancel, err := r.DeletionHook.Prepare(ctx, id)
+		if err != nil {
+			lk.Unlock()
+			return err
+		}
+		if fn, err := r.db.GetFunction(id); err == nil {
+			r.cache.Store(id, fn.Clone())
+		}
+		lk.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if drain != nil {
+			drain()
+		}
+		lk.Lock()
+		defer lk.Unlock()
+		if err := r.DeletionHook.Drain(ctx, id); err != nil {
+			return err
+		}
+	} else {
+		defer lk.Unlock()
+		if drain != nil {
+			drain()
+		}
+	}
 	// Show 'deleting' to every cache reader before the batches start; the
 	// invoke paths reject anything that is not 'active'. A missing function
 	// is left to the idempotent database delete.

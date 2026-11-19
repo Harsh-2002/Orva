@@ -55,6 +55,29 @@
         <p class="mb-1 mt-3 text-[10px] uppercase tracking-label text-foreground-muted">
           Result
         </p>
+        <p
+          v-if="tool.oneTime"
+          class="mb-2 rounded-md bg-warning-tint px-2 py-1.5 text-xs text-warning-fg"
+          data-testid="one-time-note"
+          role="status"
+        >
+          Copy this value now. It is shown only once and is not stored: after a reload it is replaced by a placeholder.
+          <Button
+            size="xs"
+            variant="ghost"
+            class="ml-1"
+            @click="$emit('dismiss-one-time', tool.id)"
+          >
+            Hide value
+          </Button>
+        </p>
+        <p
+          v-else-if="redacted"
+          class="mb-2 text-xs text-foreground-muted"
+          data-testid="redacted-note"
+        >
+          The one-time value was shown once and is not stored.
+        </p>
         <CodeBlock
           :code="resultStr"
           lang="json"
@@ -98,7 +121,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['approve', 'reject'])
+defineEmits(['approve', 'reject', 'dismiss-one-time'])
 
 const status = computed(() => props.tool.status)
 
@@ -124,17 +147,21 @@ function pretty(v) {
 }
 const argsStr = computed(() => pretty(props.tool.args))
 const resultStr = computed(() => pretty(props.tool.result))
+// Must match agent.RedactedPlaceholder on the server.
+const REDACTED = '[redacted: shown once to the operator]'
+const redacted = computed(() => resultStr.value.includes(REDACTED))
 
 // Auto-expand while active or failed; collapse on success unless the user opened
 // it. The user's manual toggle always wins after that.
-const active = (s) => s === 'running' || s === 'pending_approval' || s === 'failed'
+// A live one-time credential stays open: collapsing it would hide the only copy.
+const active = (s) => s === 'running' || s === 'pending_approval' || s === 'failed' || props.tool.oneTime === true
 const userToggled = ref(false)
 const expanded = ref(active(status.value))
 function toggle() {
   userToggled.value = true
   expanded.value = !expanded.value
 }
-watch(status, (s) => {
+watch([status, () => props.tool.oneTime], ([s]) => {
   if (userToggled.value) return
   expanded.value = active(s)
 })

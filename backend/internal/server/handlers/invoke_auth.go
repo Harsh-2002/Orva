@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -126,8 +127,17 @@ func (h *InvokeHandler) authorizeInvoke(w http.ResponseWriter, r *http.Request, 
 			return "UNAUTHORIZED"
 		}
 
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
 		_ = r.Body.Close()
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeInvokeAuthError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body too large")
+				return "PAYLOAD_TOO_LARGE"
+			}
+			writeInvokeAuthError(w, http.StatusBadRequest, "INVALID_REQUEST", "could not read request body")
+			return "INVALID_REQUEST"
+		}
 		// Restore the body for the downstream proxy. nopCloser is a no-op so
 		// the proxy can call Close() without harm.
 		r.Body = io.NopCloser(strings.NewReader(string(body)))

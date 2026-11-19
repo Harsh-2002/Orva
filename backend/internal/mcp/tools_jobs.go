@@ -101,6 +101,10 @@ type JobOpOutput struct {
 func registerJobTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "jobs"
+	if deps.AsyncEnabled {
+		registerAsyncJobTools(rc)
+		return
+	}
 
 	regAddTool(rc, permWrite,
 		&mcpsdk.Tool{

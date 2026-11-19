@@ -133,6 +133,10 @@ Requires the caller's SDK permission and dispatches through the warm pool. The p
     }
 
 ## orva.jobs — durable background queue with retries
+
+Origin, creator and authority are host-owned. Never put operator identity or authority fields into jobs.enqueue requests. In an explicitly IAM-managed environment, later attempts can suspend when current grants deny; regrant alone is not resume, and retry never adopts function work as operator work. Normal serving IAM remains inactive until coordinated cut-over.
+
+In an explicitly enabled cron-controls fixture only, durable schedule management requires live admin and inspected decimal configuration/authority revisions. Resume revalidates the original function/operator source and selects the next future firing, never catch-up or adoption. Inspection requires read; an identified mutation does not additionally require read. Destructive confirmation remains separate from AI approval. Normal-serving cron IAM controls are not enabled; never fabricate source or approval fields.
 Fire-and-forget. Producer returns immediately; worker runs async on the same pool. Backed by SQLite; survives orvad restart. Failed jobs retry with exponential backoff in SECONDS (attempt 1 → 2s, 2 → 4s, 3 → 8s, …), capped at 1h, up to max_attempts, then move to "failed" terminal state (visible on the Jobs page; emits a job.failed webhook).
 
   Python:
@@ -264,6 +268,7 @@ Treat each handler as a tiny service. Apply these by default:
 4. Timeouts on outbound HTTPS. httpx default is no timeout — set timeout=10. node fetch default is also no timeout — pass an AbortSignal.timeout(10_000). 30 s sandbox cap means you get killed mid-request otherwise.
 5. Catch broad, return narrow. try/except around your business logic; map to 400 / 401 / 404 / 502 / 500 with a short message. Don't leak stack traces in production responses (log them, return a request id).
 6. Trace scope. SDK trace.span records code spans directly under the containing execution, not a nested code-span stack. Await Node trace.span: it waits for channel ACK/failure or the existing 30-second request deadline including queue wait, preserving the wrapped value/error and swallowing telemetry failures. Recorded duration excludes submission wait; ACK means queued, not durably stored. SDK logs are execution-scoped, not attributed to the enclosing code span. Structured log collection covers HTTP, F2F, cron/jobs and inbound webhooks, but is best-effort and can arrive after the response. Do not promise audit-log durability or code-span-specific log correlation.
+In the staged opt-in IAM fixture, spans.emit additionally needs an execution-only own_execution grant and current-artifact proof. Never infer a grant or trace-read access from instrumentation. Optional telemetry can be shed; revocation blocks new emission, not already accepted envelopes. Normal serving is unchanged.
 6. Hot-path safety. Module-level work runs once per cold start and re-runs on warm timeout. Cache JWKS / config / heavy imports at module level. Don't open DB connections at import time if they can fail — lazy-init inside the handler with a simple cached singleton.
 7. JSON everywhere unless asked. Default Content-Type: application/json. Use text/html only when serving a web page.
 

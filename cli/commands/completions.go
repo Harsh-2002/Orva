@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"net/url"
 	"time"
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
@@ -93,48 +92,20 @@ func completeRuntimes(cmd *cobra.Command, _ []string, _ string) ([]string, cobra
 	return ids, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeChatModels suggests model ids of the operator's active provider for
-// `orva chat --model`.
-func completeChatModels(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-	client, ok := completionClient(cmd)
-	if !ok {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	settingsResp, err := client.Get("/api/v1/ai/settings")
-	if err != nil || checkResponse(settingsResp) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	var st struct {
-		Settings struct {
-			ActiveProviderID string `json:"active_provider_id"`
-		} `json:"settings"`
-	}
-	if decodeJSON(settingsResp, &st) != nil || st.Settings.ActiveProviderID == "" {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	resp, err := client.Get("/api/v1/ai/providers/" + url.PathEscape(st.Settings.ActiveProviderID) + "/models")
-	if err != nil || checkResponse(resp) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	var out struct {
-		Models []struct {
-			ID string `json:"id"`
-		} `json:"models"`
-	}
-	if decodeJSON(resp, &out) != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-	ids := make([]string, 0, len(out.Models))
-	for _, m := range out.Models {
-		ids = append(ids, m.ID)
-	}
-	return ids, cobra.ShellCompDirectiveNoFileComp
-}
-
 // wireCompletions attaches dynamic completions to the command tree. Commands
 // are resolved via root.Find so this stays decoupled from how each subcommand
 // var is named/scoped.
 func wireCompletions(root *cobra.Command) {
+	for _, op := range []string{"get", "put", "review"} {
+		if c, _, err := root.Find([]string{"iam", "permissions", op}); err == nil {
+			c.ValidArgsFunction = completeFunctionNames
+		}
+	}
+	for _, op := range []string{"get", "update", "impact", "attach", "detach", "revoke", "delete"} {
+		if c, _, err := root.Find([]string{"iam", "policies", op}); err == nil {
+			c.ValidArgsFunction = completeIAMPolicyIDs
+		}
+	}
 	// First positional = function name.
 	for _, path := range [][]string{
 		{"invoke"}, {"diff"}, {"rollback"}, {"logs"},
@@ -150,7 +121,7 @@ func wireCompletions(root *cobra.Command) {
 
 	// --fn flag = function name.
 	for _, path := range [][]string{
-		{"pool", "get"}, {"pool", "set"}, {"cron", "create"}, {"jobs", "list"},
+		{"pool", "get"}, {"pool", "set"}, {"cron", "create"}, {"cron", "update"}, {"cron", "delete"}, {"cron", "resume"}, {"jobs", "list"},
 	} {
 		if c, _, err := root.Find(path); err == nil {
 			_ = c.RegisterFlagCompletionFunc("fn", completeFunctionNames)
@@ -170,9 +141,34 @@ func wireCompletions(root *cobra.Command) {
 	if c, _, err := root.Find([]string{"deploy"}); err == nil {
 		_ = c.RegisterFlagCompletionFunc("runtime", completeRuntimes)
 	}
-	if c, _, err := root.Find([]string{"chat"}); err == nil {
-		_ = c.RegisterFlagCompletionFunc("model", completeChatModels)
-	}
 	// Global --output enum.
 	_ = root.RegisterFlagCompletionFunc("output", fixedCompletion("table", "json"))
+}
+
+func completeIAMPolicyIDs(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	c, ok := completionClient(cmd)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	response, err := c.Get("/api/v1/iam/policies")
+	if err != nil || checkResponse(response) != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var payload struct {
+		Items []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if decodeJSON(response, &payload) != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	out := make([]string, 0, len(payload.Items))
+	for _, p := range payload.Items {
+		out = append(out, p.ID+"\t"+p.Name)
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }

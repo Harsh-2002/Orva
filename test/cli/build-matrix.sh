@@ -67,7 +67,7 @@ done
 
 # Size sanity: the slim CLI should stay well under the ceiling stripped. If it
 # balloons past that, somebody pulled in a heavy server package.
-# Ceiling is 28 MB: `orva chat`/`orva docs` render terminal markdown via
+# Ceiling is 28 MB: `orva docs` renders terminal markdown via
 # charmbracelet/glamour, which pulls in chroma (syntax highlighting) — a
 # deliberate ~8 MB add that puts the binaries in the ~18-20 MB range. The
 # ceiling keeps headroom while still catching accidental server-package bloat.

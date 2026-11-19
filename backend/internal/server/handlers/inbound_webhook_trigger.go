@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -53,10 +54,34 @@ type InboundTriggerHandler struct {
 	Metrics  *metrics.Metrics
 	SDKAuth  *sdkauth.Authenticator
 
+	// Managed resolves only attested, published mappings and dispatches only to
+	// the exact current managed Factory generation. There is no legacy fallback.
+	Managed bool
+
 	// PublishEvent fires an `event: execution` so the live UI sees
 	// inbound-triggered runs in the same feed as HTTP invokes. Wired in
 	// server.New from events.Hub.Publish; nil-safe.
 	PublishEvent func(eventType string, data any)
+}
+
+// InboundFinalAdmissionTestHook is a test-only seam run between managed lookup
+// and the final publication recheck. Production leaves it nil.
+var InboundFinalAdmissionTestHook func(hookID string)
+
+// finalAdmission re-reads the managed publication and requires it to equal the
+// snapshot whose signature was verified: same exposure version, owner, format,
+// header, active flag and secret. It returns a zero status when still admitted.
+func (h *InboundTriggerHandler) finalAdmission(ctx context.Context, verified *database.InboundWebhook, version uint64) (int, string, string) {
+	current, currentVersion, err := h.DB.MatchManagedInboundVersion(ctx, verified.ID)
+	if err != nil {
+		return http.StatusServiceUnavailable, "UNAVAILABLE", "inbound webhook lookup unavailable"
+	}
+	if current == nil || currentVersion != version || current.FunctionID != verified.FunctionID ||
+		current.SignatureFormat != verified.SignatureFormat || current.SignatureHeader != verified.SignatureHeader ||
+		current.Active != verified.Active || subtle.ConstantTimeCompare([]byte(current.Secret), []byte(verified.Secret)) != 1 {
+		return http.StatusNotFound, "NOT_FOUND", "inbound webhook not found"
+	}
+	return 0, "", ""
 }
 
 // ServeHTTP routes /webhook/{id} → function. The path is fixed:
@@ -77,7 +102,21 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	hook, err := h.DB.GetInboundWebhook(id)
+	var hook *database.InboundWebhook
+	var publishedVersion uint64
+	var err error
+	if h.Managed {
+		hook, publishedVersion, err = h.DB.MatchManagedInboundVersion(r.Context(), id)
+		if errors.Is(err, database.ErrExposureUnavailable) {
+			respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "inbound webhook lookup unavailable", reqID)
+			return
+		}
+		if err == nil && hook == nil {
+			err = errors.New("unpublished")
+		}
+	} else {
+		hook, err = h.DB.GetInboundWebhook(id)
+	}
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
 		return
@@ -156,10 +195,23 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
+	if h.Managed {
+		if !h.Pool.AcceptsManagedVersion(acq, fn.Version) {
+			status, opts := invokeError(proxy.ErrInvocationVersionChanged, fn, reqID)
+			respond.ErrorWithDetail(w, status, opts)
+			return
+		}
+		if facts, managed := acq.ManagedResources(); managed && facts.Timeout > 0 {
+			timeout = facts.Timeout
+		} else {
+			respond.Error(w, http.StatusServiceUnavailable, "FUNCTION_UNAVAILABLE", "target function not available", reqID)
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 
 	// Generate execution id up-front so the activity + execution rows
 	// stay correlated. Format mirrors invoke / cron / job.
@@ -198,6 +250,19 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	releaseExecution := h.SDKAuth.BindExecution(execID, fn.ID, traceID, spanID, startedAt, 0)
 	defer releaseExecution()
 	ctx = sandbox.WithExecution(ctx, sandbox.NewExecInfo(ctx, execID, traceID, spanID, 0, startedAt))
+	if h.Managed {
+		// The publication that verified this signature must still be the exact
+		// one at final admission; a disable, delete, raw edit or restore that
+		// committed after lookup must not run user code. The worker is released
+		// unused. A commit after this read is concurrent with dispatch itself.
+		if InboundFinalAdmissionTestHook != nil {
+			InboundFinalAdmissionTestHook(hook.ID)
+		}
+		if status, code, msg := h.finalAdmission(ctx, hook, publishedVersion); status != 0 {
+			respond.Error(w, status, code, msg, reqID)
+			return
+		}
+	}
 	respJSON, stderr, err := acq.Worker.Dispatch(ctx, eventJSON)
 	durationMS := time.Since(startedAt).Milliseconds()
 	stderr = executionlogs.Process(h.DB, stderr, fn.ID, execID, traceID, spanID)

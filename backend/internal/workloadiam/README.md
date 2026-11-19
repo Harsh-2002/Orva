@@ -1,7 +1,7 @@
 # workloadiam foundation (inert)
 
 No serving callers, boot migrations, public routes or activation are included.
-The SDK host has internal opt-in KV integration and a staged buffered-F2F seam;
+The SDK host has internal opt-in KV integration and staged buffered/streaming F2F;
 serving construction omits these options. Inert database storage is a separate foundation. Existing serving
 SDK behavior is unchanged. This package uses only the standard library.
 
@@ -47,6 +47,13 @@ at compile time. `Decode` is mandatory for untrusted JSON: plain `json.Unmarshal
 does not provide these guarantees.
 
 ## Exported integration seam
+
+`EmitSpanObserved` is the spans-only counterpart to `DoObserved`: it returns
+an opaque, by-value `SpanDecision` to the bounded effect while retaining the
+same read gate used for evaluation. Owner UUID and revision come from the
+deciding evaluator, never a second policy read outside admission. The zero
+snapshot denotes no IAM decision. It is queue provenance, not a reusable grant
+or persisted audit. Existing `DoObserved` callers are unchanged.
 
 - `Decode([]byte) (Policy, error)`; `Validate(Policy) error`.
 - `Compile(Metadata, Policy) (*Evaluator, error)` freezes all slices/pointers.
@@ -131,6 +138,13 @@ policy storage and current credential validation must use the coordinated
 publication boundary in future integration; this coordinator does not create it.
 
 ## Not implemented / obligations before cut-over
+
+`PublishBatch` commits and installs up to 25 owner snapshots under one write
+gate, or changes none on any CAS/persistence failure. Its deferred form lets the
+shared management service release sorted owner locks before signalling context
+callbacks; it must signal before acknowledging. Duplicate owners and zero
+authorities deny. Candidates and expected revisions are owned before admission.
+The managed source service contract is in `../workloadpolicy/MANAGED.md`.
 
 Live storage/admin integration, quarantine, authority epochs and async attempt/
 firing checks remain outside this package. Resolve names to immutable UUIDs before evaluation. Host

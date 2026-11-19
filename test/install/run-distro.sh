@@ -146,6 +146,8 @@ if [[ "$DISTRO_INIT" == "systemd" ]]; then
     # successful restore leaves the server down.
     [[ "$unit" == *"RestartForceExitStatus=70"* ]] \
         || die "orva.service would not restart after a backup restore"
+    grep -qx 'RestartPreventExitStatus=78' <<<"$unit" \
+        || die "orva.service would restart after a serving-mode refusal"
     [[ "$unit" == *"Environment=ORVA_PORT="* ]] \
         || die "orva.service ignores --port, so the installer's URL would lie"
     ok "orva.service sandbox capability set"

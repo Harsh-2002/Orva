@@ -1,5 +1,43 @@
 # Production deployment notes
 
+## Opt-in managed daemon (supervised setups only)
+
+The daemon selects managed serving only from `.orva-serving-mode`, under the
+same outer lock as legacy serving. It requires an exclusive, verified sealed
+Owner and matching database. Startup does not enroll legacy functions. Use the
+separate [offline enrollment procedure](OPERATIONS.md#offline-legacy-enrollment)
+to convert an existing instance. For managed [portable restore](OPERATIONS.md#managed-mode-portable-recovery),
+independently provision the destination witness, rootfs trees, adapters and
+delegated cgroup. Do not clone the witness or mount the source's sealed stores. Keep the
+first listener private during operator onboarding.
+
+Prepare an owned cgroup-v2 service/container budget with CPU, memory and PID
+delegation. The workload parent is its `orva.workers` child. Systemd can use
+the regular `orva.service` with `Delegate=yes`; no persistent slice is needed.
+When the manager removes the entire old subtree, the daemon can recover under
+the replacement at the same absolute path. If a launcher keeps the original
+subtree, restart in its `orva.daemon` leaf with an explicit workload-parent
+path and the daemon fences the exact old epochs. Never start a managed daemon
+at the host cgroup root.
+
+For a supervised container setup, keep `/var/lib/orva-host/witness` on a
+separate, private volume (dedicated name `orva-host-witness`) outside the data
+volume and backups. A same-container restart can recover after Docker removes
+the whole cgroup subtree, provided its replacement has the same absolute
+workload-parent path and the host cgroup view is unchanged. Container
+recreation can change that path and is not supported by this proof. Cold
+recovery still requires a different kernel boot and stable witness and store
+identities.
+
+Managed custom routes do not carry public exposure across restore. To re-expose
+a retained mapping, use fresh inspection and the managed REST CAS upsert after
+the restore; do not use the legacy route writer.
+
+Only the managed boot path uses `workloadrecovery` and the managed scheduler.
+The normal migration path and public legacy restore routes remain separate.
+See [fresh provisioning and shutdown](OPERATIONS.md#fresh-managed-provisioning).
+See [the opt-in recovery contract](../backend/internal/workloadrecovery/README.md).
+
 > Orva is in active development and the maintainers don't recommend it
 > for production-critical workloads yet. The notes below are for
 > operators running it in homelabs, side projects, internal tools,
@@ -275,6 +313,13 @@ restore needs `supervisor="supervise-daemon"` in `/etc/init.d/orva`
 (`start-stop-daemon` never respawns); verify with
 `grep supervise-daemon /etc/init.d/orva`.
 
+New systemd units also set `RestartPreventExitStatus=78`. An exit 78 is a
+[startup configuration refusal](OPERATIONS.md#serving-startup-exits-78), not a
+crash to restart. Re-run the installer to refresh older units. OpenRC's
+`supervise-daemon` has no per-status filter, and the unit's `respawn_max=0`
+means unlimited respawns, so it retries a refusal every `respawn_delay`
+seconds until you stop the service (`rc-service orva stop`). Docker restart policy behavior is unchanged.
+
 ### Downtime
 
 Image swap: ~5 seconds (orvad shuts down cleanly within `TimeoutStopSec=30s`,
@@ -386,3 +431,12 @@ The SDK HTTP route families, worker credentials/base URL and
 longer carry an Orva HTTP exception. Do not restore a network exemption to fix
 an SDK error: check the function's `sdk` permission and installed adapter first.
 Public HTTP invocation and operator APIs retain their existing authentication.
+## Internal configuration qualification is not a deployment switch
+
+Do not activate `workloadconfig`, its explicit schemas, optional management
+adapters or managed pool construction on a normal deployment. Its sealed
+Node/Python scratch acceptance covers environment/settings/secret publication,
+deny-first invalidation and separate new-Factory review, not all writers,
+boot/restore/recovery or production cut-over. There is no feature flag or
+automatic migration for this increment. See `docs/OPERATIONS.md` and
+`backend/internal/workloadconfig/README.md`.

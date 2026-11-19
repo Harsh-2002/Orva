@@ -104,6 +104,33 @@ func init() {
 	jobsCmd.AddCommand(jobsEnqueueCmd)
 	jobsCmd.AddCommand(jobsRetryCmd)
 	jobsCmd.AddCommand(jobsDeleteCmd)
+	jobsCmd.AddCommand(&cobra.Command{
+		Use: "resume [id]", Short: "Resume one suspended pending job (IAM fixture, admin only)",
+		Long: "Explicitly resume one suspended pending job using its original authority. Requires current rights and admin permission. Does not reopen terminal jobs or adopt quarantined work. Available only on the opt-in IAM async fixture until coordinated cut-over.",
+		Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := getClient(cmd)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Post("/api/v1/jobs/"+url.PathEscape(args[0])+"/resume", nil)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err := checkResponse(resp); err != nil {
+				return err
+			}
+			raw, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			if outputJSON(cmd) {
+				return emitRaw(raw)
+			}
+			okf(cmd, "Resumed job %s", args[0])
+			return nil
+		},
+	})
 }
 
 func runJobsList(cmd *cobra.Command, args []string) error {

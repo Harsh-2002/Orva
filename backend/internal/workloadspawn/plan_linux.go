@@ -50,9 +50,10 @@ type planState struct {
 }
 
 type inputs struct {
-	fn      *database.Function
-	secrets map[string]string
-	paths   *artifactfs.PreparedPaths
+	fn           *database.Function
+	secrets      map[string]string
+	paths        *artifactfs.PreparedPaths
+	preparedDone func()
 }
 
 // NewPlan transfers paths only after validating and cloning every input.
@@ -89,7 +90,6 @@ func NewPlan(prepared *secrets.PreparedArtifactSnapshot, paths *artifactfs.Prepa
 		Domain                                  string
 		Owner                                   string
 		Generation                              Generation
-		Version                                 int
 		SourceCodeHash                          string
 		Code, Runtime                           artifactfs.Identity
 		Name, Language, Authored, Run, Network  string
@@ -99,8 +99,8 @@ func NewPlan(prepared *secrets.PreparedArtifactSnapshot, paths *artifactfs.Prepa
 		MaxConcurrency, RateLimit               int
 		ConcurrencyPolicy, AuthMode, Deployment string
 	}{
-		"orva.workloadspawn.v1", fn.ID, Generation{r.Generation, r.Revision, r.Epoch},
-		fn.Version, fn.CodeHash, code, runtime, fn.Name, fn.Runtime, fn.Entrypoint,
+		"orva.workloadspawn.v2", fn.ID, Generation{r.Generation, r.Revision, r.Epoch},
+		fn.CodeHash, code, runtime, fn.Name, fn.Runtime, fn.Entrypoint,
 		fn.RunEntrypoint, fn.NetworkMode, fn.MemoryMB, fn.TimeoutMS, fn.CPUs, fn.SDK,
 		fn.MaxConcurrency, fn.RateLimitPerMin, fn.ConcurrencyPolicy, fn.AuthMode, fn.ActiveDeploymentID,
 	}
@@ -225,6 +225,9 @@ func (p *SpawnPlan) take() *inputs {
 func (p *SpawnPlan) Close() {
 	if in := p.take(); in != nil {
 		in.paths.Release()
+		if in.preparedDone != nil {
+			in.preparedDone()
+		}
 	}
 }
 
@@ -234,6 +237,9 @@ func (p *SpawnPlan) Spawn(ctx context.Context, template sandbox.ExecConfig) (*sa
 	in := p.take()
 	if in == nil {
 		return nil, ErrUsed
+	}
+	if in.preparedDone != nil {
+		defer in.preparedDone()
 	}
 	defer in.paths.Release()
 	if ctx == nil {

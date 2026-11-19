@@ -466,7 +466,7 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		rec, reqWithCtx, codeDir, lang,
 		fn.ID, execID, timeoutMS,
 		fn.CPUs,
-		"", true, start,
+		"", true, start, fn.Version,
 	)
 	duration := time.Since(start)
 	if deps.Metrics != nil {
