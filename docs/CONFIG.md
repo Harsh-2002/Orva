@@ -42,7 +42,7 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_MANAGED_WITNESS_PATH` | `/etc/orva/host-witness/witness` (native); `/var/lib/orva-host/witness` (Docker entrypoint) | Absolute path to the pre-provisioned, private host witness. No creation or rotation at serving startup. |
 | `ORVA_MANAGED_BACKUP_DIR` | unset | Additional existing absolute backup root to exclude from witness placement, in addition to `ORVA_DATA_DIR`. Keep all other backup tooling away from the witness too. |
 | `ORVA_MANAGED_WORKLOAD_PARENT` | `orva.workers` beneath the current service/container cgroup | Exact absolute `orva.workers` child of an owned, non-root cgroup-v2 budget. Explicitly set the original path when launching in an already delegated budget's `orva.daemon` leaf. This is not `ORVA_CGROUPV2_MOUNT`. |
-| `ORVA_MANAGED_NODE_GENERATION`, `ORVA_MANAGED_PYTHON_GENERATION` | unset | Exact existing sealed runtime generation for new builds in each language. An unset language cannot build; a configured generation of the wrong runtime or a missing generation refuses startup. This never imports a mutable rootfs. |
+| `ORVA_MANAGED_NODE_GENERATION`, `ORVA_MANAGED_PYTHON_GENERATION` | unset | Optional override naming an exact existing sealed generation for new builds in each language. An invalid override refuses startup. When unset, serving uses the recorded generation or seals an installed trusted rootfs for that language before listening. At least one language must have a selected generation. |
 
 ---
 

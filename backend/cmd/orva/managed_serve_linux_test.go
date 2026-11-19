@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -124,6 +125,10 @@ func TestManagedDaemonKernel(t *testing.T) {
 	_, port, err := net.SplitHostPort(addr)
 	mustManagedBoot(t, err)
 	t.Setenv("ORVA_PORT", port)
+	for _, key := range []string{managedNodeRuntimeEnv, managedPythonRuntimeEnv} {
+		t.Setenv(key, "")
+		mustManagedBoot(t, os.Unsetenv(key))
+	}
 	bin, err := os.Executable()
 	mustManagedBoot(t, err)
 	start := func(group, args string) *exec.Cmd {
@@ -149,6 +154,7 @@ func TestManagedDaemonKernel(t *testing.T) {
 		mustManagedBoot(t, cmd.Execute())
 	}
 	inPlace("--managed-witness", witness)
+	inPlace("--data-dir", data, "--skip-rootfs", "--skip-nsjail")
 	inPlace("--managed-layout", "provision")
 	t.Setenv(servingmode.Env, servingmode.Provisioning)
 	mustManagedBoot(t, start(budget, "serve").Wait())
@@ -163,6 +169,23 @@ func TestManagedDaemonKernel(t *testing.T) {
 	assertExit(start(daemonLeaf, "serve"), exitConfig) // Nonempty roots cannot be provisioned anew.
 	mustManagedBoot(t, start(daemonLeaf, "--managed-layout publish").Wait())
 	t.Setenv(servingmode.Env, servingmode.Managed)
+	assertExit(start(daemonLeaf, "serve"), exitConfig) // Neither installed nor sealed.
+	realRootfs := os.Getenv("ORVA_MANAGED_BOOT_ROOTFS")
+	for lang, bin := range map[string]string{"node": "node", "python": "python3"} {
+		target := filepath.Join(data, "rootfs", lang)
+		mustManagedBoot(t, os.MkdirAll(target, 0755))
+		if realRootfs != "" {
+			cmd := exec.CommandContext(t.Context(), "cp", "-a", filepath.Join(realRootfs, lang)+"/.", target)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("install runtime fixture: %v: %s", err, out)
+			}
+		} else {
+			binDir := filepath.Join(target, "usr/local/bin")
+			mustManagedBoot(t, os.MkdirAll(binDir, 0755))
+			mustManagedBoot(t, os.WriteFile(filepath.Join(binDir, bin), []byte("fixture only"), 0755))
+		}
+		mustManagedBoot(t, installAdapter(target, lang))
+	}
 	managedDir := filepath.Join(data, servingmode.Managed)
 	const blockedIP = "192.0.2.10"
 	func() {
@@ -179,7 +202,11 @@ func TestManagedDaemonKernel(t *testing.T) {
 	client := &http.Client{Timeout: 250 * time.Millisecond}
 	awaitHTTP := func() {
 		t.Helper()
-		for until := time.Now().Add(8 * time.Second); time.Now().Before(until); {
+		wait := 8 * time.Second
+		if realRootfs != "" {
+			wait = 100 * time.Second
+		}
+		for until := time.Now().Add(wait); time.Now().Before(until); {
 			r, err := client.Get("http://" + addr + "/api/v1/auth/status")
 			if err == nil {
 				r.Body.Close()
@@ -217,6 +244,11 @@ func TestManagedDaemonKernel(t *testing.T) {
 	awaitHTTP()
 	checkChat := managedDaemonChat(t, "http://"+addr, blockedIP)
 	checkChat(false)
+	if realRootfs != "" {
+		t.Run("fresh-deploy-invoke", func(t *testing.T) {
+			checkFreshManagedDeploy(t, "http://"+addr)
+		})
+	}
 	old := epochGroup()
 	child := exec.Command("/bin/sleep", "120")
 	child.Stdout, child.Stderr = io.Discard, io.Discard
@@ -234,6 +266,7 @@ func TestManagedDaemonKernel(t *testing.T) {
 	mustManagedBoot(t, first.Process.Kill())
 	assertExit(first, -1)
 	populated(old, true)
+	mustManagedBoot(t, os.Rename(filepath.Join(data, "rootfs"), filepath.Join(data, "offline-rootfs")))
 	mustManagedBoot(t, os.Remove(fwDir))
 	second := start(daemonLeaf, "serve")
 	awaitHTTP()
@@ -274,6 +307,18 @@ func TestManagedDaemonKernel(t *testing.T) {
 	}
 	mustManagedBoot(t, third.Process.Signal(syscall.SIGTERM))
 	mustManagedBoot(t, third.Wait())
+	func() {
+		db, err := database.New(filepath.Join(data, "managed", "orva.db"))
+		mustManagedBoot(t, err)
+		defer func() { mustManagedBoot(t, db.Close()) }()
+		runtimes, err := db.LegacyEnrollmentRuntimes(t.Context())
+		mustManagedBoot(t, err)
+		seals, err := filepath.Glob(filepath.Join(data, "sealed-runtime", "generation-*"))
+		mustManagedBoot(t, err)
+		if len(seals) != 2 || len(runtimes) != 2 || runtimes["node"] == "" || runtimes["python"] == "" {
+			t.Fatal("fresh startup or restart did not keep exactly two durable runtime selections")
+		}
+	}()
 	t.Setenv(managedParentEnv, parent)
 	ownerRecord := filepath.Join(data, "sealed-owner", "owner.json")
 	prior, err := os.ReadFile(ownerRecord)
@@ -306,6 +351,68 @@ func TestManagedDaemonKernel(t *testing.T) {
 		mustManagedBoot(t, os.Remove(filepath.Join(latest, child)))
 	}
 	assertExit(start(daemonLeaf, "serve"), exitConfig)
+}
+
+func checkFreshManagedDeploy(t *testing.T, base string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	mustManagedBoot(t, err)
+	client := &http.Client{Timeout: 5 * time.Second, Jar: jar}
+	call := func(t *testing.T, method, path string, body any, want int) []byte {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		mustManagedBoot(t, err)
+		req, err := http.NewRequestWithContext(t.Context(), method, base+path, bytes.NewReader(raw))
+		mustManagedBoot(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", base)
+		res, err := client.Do(req)
+		mustManagedBoot(t, err)
+		defer res.Body.Close()
+		data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		mustManagedBoot(t, err)
+		if res.StatusCode != want {
+			t.Fatalf("%s %s: status %d, want %d: %s", method, path, res.StatusCode, want, data)
+		}
+		return data
+	}
+	// managedDaemonChat onboarded the only operator; a second onboard is refused.
+	call(t, "POST", "/api/v1/auth/login", map[string]string{"username": "fixture", "password": "scratch-only"}, 200)
+	for _, tc := range []struct{ lang, filename, code string }{
+		{"node", "handler.js", `exports.handler=()=>({statusCode:200,body:"fresh-node"})`},
+		{"python", "handler.py", "def handler(event):\n    return {'statusCode': 200, 'body': 'fresh-python'}\n"},
+	} {
+		t.Run(tc.lang, func(t *testing.T) {
+			var fn struct{ ID string }
+			mustManagedBoot(t, json.Unmarshal(call(t, "POST", "/api/v1/functions", map[string]string{
+				"name": "fresh-" + tc.lang, "runtime": tc.lang,
+			}, 201), &fn))
+			var created struct {
+				ID string `json:"deployment_id"`
+			}
+			mustManagedBoot(t, json.Unmarshal(call(t, "POST", "/api/v1/functions/"+fn.ID+"/deploy-inline", map[string]string{
+				"filename": tc.filename, "code": tc.code,
+			}, 202), &created))
+			path := "/api/v1/deployments/" + created.ID
+			deadline := time.Now().Add(30 * time.Second)
+			for {
+				raw := call(t, "GET", path, nil, 200)
+				var build struct{ Status string }
+				mustManagedBoot(t, json.Unmarshal(raw, &build))
+				if build.Status == "succeeded" {
+					break
+				}
+				if build.Status == "failed" || time.Now().After(deadline) {
+					t.Fatalf("%s deploy did not succeed: %s", tc.lang, raw)
+				}
+				time.Sleep(30 * time.Millisecond)
+			}
+			call(t, "POST", path+"/install", nil, 200)
+			if got := string(call(t, "GET", "/fn/"+fn.ID, nil, 200)); got != "fresh-"+tc.lang {
+				t.Fatalf("invocation returned %q", got)
+			}
+		})
+	}
 }
 
 // Exercise the dashboard's session-authenticated API against ordinary daemon

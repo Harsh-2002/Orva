@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  69 and 23 respectively. Channel credentials are accepted at `/mcp` and expose
+  75 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -45,8 +45,8 @@ on this composition.
 The managed composition is intended to become the only serving mode, so it
 mounts the operator surfaces of the normal server. Every route requires exactly
 the permission the normal server's `requiredPermission` assigns it: `read` for
-GET, `write` for other methods, `admin` for keys, channels, `/ai/*`, backup,
-storage and vacuum. A key holding a different permission gets `403`; no
+GET, `write` for other methods, `admin` for keys, channels, firewall, `/ai/*`,
+backup, storage and vacuum. A key holding a different permission gets `403`; no
 credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
@@ -58,6 +58,8 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
 | Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
 | Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| Operator KV | `GET /api/v1/functions/{fn_id}/kv`, `GET .../kv/{key}` | read |
+| | `PUT/DELETE .../kv/{key}`, `POST .../kv/{key}/incr`, `POST .../kv/{key}/cas` | write |
 | Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
@@ -68,12 +70,20 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
+| Outbound webhooks | `GET /api/v1/webhooks`, `GET .../{id}`, `GET .../{id}/deliveries` | read |
+| | `POST /api/v1/webhooks`, `PUT/DELETE .../{id}`, `POST .../{id}/test`, `POST .../deliveries/{id}/retry` | write |
+| Egress / firewall | `GET/POST /api/v1/firewall/rules`, `PUT/DELETE /api/v1/firewall/rules/{rule_id}`, `GET /api/v1/firewall/status`, `POST /api/v1/firewall/resolve`, `GET/PUT /api/v1/firewall/dns` | admin |
 | Chat | `/api/v1/ai/*` (see [AI assistant](#ai-assistant)) | admin |
 
 The OAuth authorization server endpoints are not mounted: existing grants can
 be listed and revoked, not issued. Connected apps and sessions are cookie-bound,
 as on the normal server, and have no MCP tool. `GET /api/v1/system/storage`
 reports the plain data directory; it does not include sealed artifact stores.
+
+Outbound webhook REST routes manage subscriptions and delivery records only.
+Test and retry queue deliveries without making HTTP requests. Managed mode
+does not start outbound event fanout or the delivery worker, so queued deliveries
+are not sent and these routes do not enable outbound webhook egress.
 
 - **Activity.** Eligible requests queue best-effort activity rows, with key
   (`source: api`) or browser session (`source: web`) attribution when resolved.
@@ -97,6 +107,11 @@ reports the plain data directory; it does not include sealed artifact stores.
   tokens are never returned). `invoke_function` and `list_runtimes` are not part
   of it. A failed invocation that wrote no response is now reported as an error
   rather than an empty `200`, in every catalog.
+- **Operator KV.** External MCP and Chat share `kv_get` and `kv_list` (`read`)
+  and `kv_put`, `kv_delete`, `kv_incr` and `kv_cas` (`write`). Managed calls
+  recheck the operator's current credential and required tier at tool entry.
+  These tools operate on stored data by function name or UUID, including for
+  inactive functions. They do not run function code or grant SDK permissions.
 
 ### Managed channels
 

@@ -20,7 +20,7 @@ type managedState struct {
 }
 type managedGeneration struct {
 	factory *workloadspawn.Factory
-	pool    *functionPool
+	pool    atomic.Pointer[functionPool]
 	active  atomic.Bool
 	pending *PendingConfiguration // IAM gate
 }
@@ -70,10 +70,9 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	facts := factory.Resources()
 	g := &managedGeneration{factory: factory}
-	g.pool = m.makePool(&database.Function{ID: factory.Owner(), MemoryMB: facts.MemoryMB, CPUs: facts.CPUs,
-		MaxConcurrency: facts.MaxConcurrency, ConcurrencyPolicy: facts.ConcurrencyPolicy}, g)
+	p := m.makeManagedPool(g)
+	g.pool.Store(p)
 	m.poolMu.Lock()
 	if err := ctx.Err(); err != nil {
 		m.poolMu.Unlock()
@@ -98,8 +97,10 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 		next.generations[id] = current
 	}
 	next.generations[factory.Owner()] = g
+	var oldPool *functionPool
 	if old != nil {
-		old.pool.mu.Lock()
+		oldPool = old.pool.Load()
+		oldPool.mu.Lock()
 	}
 	var checked error
 	var pending *PendingConfiguration
@@ -113,18 +114,18 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 		if old != nil {
 			pending, old.pending = old.pending, nil
 			old.active.Store(false)
-			old.pool.markRetired()
+			oldPool.markRetired()
 		}
 		g.active.Store(true)
 		m.managed.current.Store(next)
-		m.pools.Store(factory.Owner(), g.pool)
+		m.pools.Store(factory.Owner(), p)
 	})
-	if old != nil {
-		old.pool.mu.Unlock()
+	if oldPool != nil {
+		oldPool.mu.Unlock()
 	}
 	if err == nil && checked == nil {
 		m.wg.Add(1)
-		go m.reap(g.pool)
+		go m.reap(p)
 	}
 	m.poolMu.Unlock()
 	if err != nil || checked != nil {
@@ -134,9 +135,63 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 		pending.release()
 		if old != nil {
 			old.factory.Close()
-			drainManagedIdle(old.pool)
+			drainManagedIdle(oldPool)
 		}
 	}, nil
+}
+
+func (m *Manager) makeManagedPool(g *managedGeneration) *functionPool {
+	facts := g.factory.Resources()
+	return m.makePool(&database.Function{ID: g.factory.Owner(), MemoryMB: facts.MemoryMB, CPUs: facts.CPUs,
+		MaxConcurrency: facts.MaxConcurrency, ConcurrencyPolicy: facts.ConcurrencyPolicy}, g)
+}
+
+func (m *Manager) rotateManagedEgressPools() int {
+	retired := 0
+	for _, g := range m.managed.current.Load().generations {
+		if g.active.Load() && g.factory.Resources().NetworkMode == "egress" && m.rotateManagedPool(g, g.pool.Load()) {
+			retired++
+		}
+	}
+	return retired
+}
+
+func (m *Manager) rotateManagedPool(g *managedGeneration, old *functionPool) bool {
+	owner := g.factory.Owner()
+	next := m.makeManagedPool(g)
+	// Busy workers keep their slots until release, even across policy rotations.
+	next.concSem = old.concSem
+	m.poolMu.Lock()
+	current := m.managed.current.Load()
+	registered, _ := m.pools.Load(owner)
+	if m.closing.Load() || current.generations[owner] != g || registered != old || g.pool.Load() != old {
+		m.poolMu.Unlock()
+		return false
+	}
+	old.mu.Lock()
+	swapped := false
+	err := m.managed.authority.ChangeHostState(func() {
+		if !g.active.Load() || old.closing.Load() || g.factory.Retired() {
+			return
+		}
+		old.markRetired()
+		g.pool.Store(next)
+		m.pools.Store(owner, next)
+		swapped = true
+	})
+	old.mu.Unlock()
+	if err == nil && swapped {
+		m.wg.Add(1)
+		go m.reap(next)
+	}
+	m.poolMu.Unlock()
+	if swapped {
+		drainManagedIdle(old)
+		if m.scaler != nil {
+			m.scaler.nudge()
+		}
+	}
+	return swapped
 }
 
 func (m *Manager) ManagedBy(a *workloadiam.Authority) bool {
@@ -168,21 +223,22 @@ func (m *Manager) removeManaged(owner string) {
 			next.generations[id] = current
 		}
 	}
-	g.pool.mu.Lock()
+	p := g.pool.Load()
+	p.mu.Lock()
 	var pending *PendingConfiguration
 	err := m.managed.authority.ChangeHostState(func() {
 		pending, g.pending = g.pending, nil
 		g.active.Store(false)
-		g.pool.markRetired()
+		p.markRetired()
 		m.managed.current.Store(next)
 		m.pools.Delete(owner)
 	})
-	g.pool.mu.Unlock()
+	p.mu.Unlock()
 	m.poolMu.Unlock()
 	if err == nil {
 		pending.release()
 		g.factory.Close()
-		drainManagedIdle(g.pool)
+		drainManagedIdle(p)
 	}
 }
 
@@ -219,17 +275,18 @@ func (m *Manager) InvalidateOwnerFactoryUnderGate(owner string) func() {
 	}
 	pending := g.pending
 	g.pending = nil
+	p := g.pool.Load()
 	active := g.active.Swap(false)
 	return func() {
 		pending.release()
 		if !active {
 			return
 		}
-		g.pool.mu.Lock()
-		g.pool.markRetired()
-		g.pool.mu.Unlock()
+		p.mu.Lock()
+		p.markRetired()
+		p.mu.Unlock()
 		g.factory.Close()
-		drainManagedIdle(g.pool)
+		drainManagedIdle(p)
 	}
 }
 
@@ -275,12 +332,13 @@ func (m *Manager) AcceptsManagedVersion(a *AcquireResult, authorizedVersion int)
 		return false
 	}
 	g := a.pool.managed
-	return g.factory.FunctionVersion() == authorizedVersion && g.active.Load() &&
+	return g.factory.FunctionVersion() == authorizedVersion && g.active.Load() && g.pool.Load() == a.pool &&
+		!a.pool.closing.Load() &&
 		m.managed.current.Load().generations[g.factory.Owner()] == g
 }
 
 func (m *Manager) TargetState(owner string, worker *sandbox.Worker) workloadiam.TargetState {
-	if worker == nil {
+	if worker == nil || !worker.AcceptsNewDispatch() {
 		return workloadiam.TargetState{}
 	}
 	s, ok := worker.WorkloadState()
@@ -292,8 +350,22 @@ func (m *Manager) TargetState(owner string, worker *sandbox.Worker) workloadiam.
 		FunctionID: owner, WorkerID: s.Identity.WorkerID, ArtifactRevision: s.Identity.ArtifactRevision}}
 }
 
-func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sandbox.Worker, error) {
-	if m.closing.Load() || !g.active.Load() {
+// egressPolicyForSpawn resolves the compiled policy an egress worker loads.
+// Fail-closed: a pool with no policy source never spawns an egress worker.
+func (m *Manager) egressPolicyForSpawn(networkMode string) (string, string, error) {
+	if networkMode != "egress" {
+		return "", "", nil
+	}
+	if m.tmpl.EgressPolicy == nil {
+		return "", "", sandbox.ErrEgressPolicyMissing
+	}
+	return m.tmpl.EgressPolicy()
+}
+
+func (m *Manager) spawnManaged(ctx context.Context, p *functionPool) (*sandbox.Worker, error) {
+	g := p.managed
+	acceptsWork := func() bool { return !m.closing.Load() && g.active.Load() && !p.closing.Load() }
+	if !acceptsWork() {
 		return nil, errPoolRetired
 	}
 	if ready := m.tmpl.ManagedSpawnReady; ready != nil && !ready() {
@@ -304,19 +376,13 @@ func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sand
 		return nil, err
 	}
 	defer plan.Close()
-	if m.closing.Load() || !g.active.Load() {
+	if !acceptsWork() {
 		return nil, errPoolRetired
 	}
 	facts, tmpl := g.factory.Resources(), m.tmpl
-	var policy, revision string
-	if facts.NetworkMode == "egress" {
-		if tmpl.EgressPolicy == nil {
-			return nil, sandbox.ErrEgressPolicyMissing
-		}
-		policy, revision, err = tmpl.EgressPolicy()
-		if err != nil {
-			return nil, err
-		}
+	policy, revision, err := m.egressPolicyForSpawn(facts.NetworkMode)
+	if err != nil {
+		return nil, err
 	}
 	if facts.SDK && tmpl.SDKHandler == nil {
 		return nil, errors.New("managed SDK host unavailable")
@@ -327,7 +393,8 @@ func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sand
 		Domain:     tmpl.ManagedDomain,
 		SDKHandler: tmpl.SDKHandler, EgressPolicyPath: policy, EgressPolicyGen: revision,
 		ResolvConfPath: tmpl.DataDir + "/firewall/resolv.conf", HostsPath: tmpl.DataDir + "/firewall/hosts",
-		SeccompPolicy: sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, sandbox.SeccompAllowForNetworkMode(facts.NetworkMode), nil),
+		SeccompPolicy:           sandbox.BuildSeccompPolicy(tmpl.DefaultSeccomp, sandbox.SeccompAllowForNetworkMode(facts.NetworkMode), nil),
+		WorkloadDispatchAllowed: acceptsWork,
 		WorkloadTransitionHook: func(change func()) {
 			// A configured Authority is immutable and live for this Manager's lifetime.
 			if err := m.managed.authority.ChangeHostState(change); err != nil {
@@ -341,7 +408,7 @@ func (m *Manager) spawnManaged(ctx context.Context, g *managedGeneration) (*sand
 	ready, cancel := context.WithTimeout(ctx, adapterReadyTimeout)
 	err = worker.AwaitReady(ready)
 	cancel()
-	if err != nil || m.closing.Load() || !g.active.Load() {
+	if err != nil || !acceptsWork() {
 		_ = worker.Kill()
 		if err != nil {
 			return nil, err

@@ -141,10 +141,94 @@ func TestManagedServingLive(t *testing.T) {
 		}
 		return b
 	}
+	egressRan := false
+	t.Run("egress-rotation", func(t *testing.T) {
+		egressRan = true
+		var fn struct{ ID string }
+		managedMust(t, json.Unmarshal(call(t, http.MethodPost, "/api/v1/functions",
+			map[string]string{"name": "managed-egress", "runtime": "node"}, 201), &fn))
+		base := "/api/v1/functions/" + fn.ID
+		config := base + "/configuration"
+		var deployment struct {
+			ID string `json:"deployment_id"`
+		}
+		managedMust(t, json.Unmarshal(call(t, http.MethodPost, base+"/deploy-inline", map[string]string{
+			"filename": "handler.js",
+			"code":     `exports.handler=()=>({statusCode:200,body:"egress fixture"})`,
+		}, 202), &deployment))
+		install := "/api/v1/deployments/" + deployment.ID + "/install"
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			row, err := db.GetDeployment(deployment.ID)
+			managedMust(t, err)
+			if row.Status == "succeeded" {
+				break
+			}
+			if row.Status == "failed" || time.Now().After(deadline) {
+				t.Fatalf("egress fixture build: %s %s", row.Status, row.ErrorMessage)
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+		call(t, http.MethodPost, install, nil, 200)
+		var current struct {
+			Expected map[string]string `json:"expected"`
+			Artifact string            `json:"current_artifact"`
+		}
+		managedMust(t, json.Unmarshal(call(t, http.MethodGet, config, nil, 200), &current))
+		call(t, http.MethodPut, config+"/settings", map[string]any{
+			"expected": current.Expected, "current_artifact": current.Artifact, "environment": map[string]string{},
+			"settings": database.WorkloadExecutionSettings{TimeoutMS: 5000, MemoryMB: 128, CPUs: 0.5,
+				NetworkMode: "egress", ConcurrencyPolicy: "queue", AuthMode: "none"},
+		}, 200)
+		call(t, http.MethodPost, install, nil, 200)
+		invoke := func() {
+			t.Helper()
+			if got := string(call(t, http.MethodGet, "/fn/"+fn.ID, nil, 200)); got != "egress fixture" {
+				t.Fatalf("egress fixture returned %q", got)
+			}
+		}
+		invoke()
+		manager := service.service.runtime.pool
+		factory := manager.CurrentFactory(fn.ID)
+		if factory == nil || factory.Resources().NetworkMode != "egress" {
+			t.Fatal("no installed egress Factory")
+		}
+		acquired, err := manager.Acquire(ctx, fn.ID)
+		managedMust(t, err)
+		oldWorker := acquired.Worker
+		manager.Release(acquired, nil)
+		_, before, err := service.service.firewall.EgressPolicy()
+		managedMust(t, err)
+		call(t, http.MethodPost, "/api/v1/firewall/rules",
+			map[string]string{"rule_type": "cidr", "value": "192.0.2.77/32", "label": "egress fixture"}, 201)
+		_, after, err := service.service.firewall.EgressPolicy()
+		managedMust(t, err)
+		if before == after || oldWorker.AcceptsNewDispatch() || manager.CurrentFactory(fn.ID) != factory {
+			t.Fatal("policy publication did not replace only the egress workers")
+		}
+		invoke()
+		acquired, err = manager.Acquire(ctx, fn.ID)
+		managedMust(t, err)
+		replacement := acquired.Worker
+		manager.Release(acquired, nil)
+		if replacement == oldWorker {
+			t.Fatal("rotated worker was acquired again")
+		}
+		reopen(t)
+		invoke()
+	})
+	nodeRan := false
 	for _, lang := range []string{"node", "python"} {
 		t.Run(lang, func(t *testing.T) {
+			if lang == "node" {
+				nodeRan = true
+			}
 			managedServeLifecycle(t, db, call, lang)
 		})
+	}
+	// An isolated egress run does not create the Node fixture used below.
+	if egressRan && !nodeRan {
+		return
 	}
 	node, err := db.GetFunctionByName("managed-node")
 	managedMust(t, err)

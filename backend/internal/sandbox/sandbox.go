@@ -67,6 +67,9 @@ type ExecConfig struct {
 	// WorkloadTransitionHook is trusted host configuration, captured once at
 	// Spawn. Nil applies state changes directly, preserving legacy behavior.
 	WorkloadTransitionHook WorkloadTransitionHook
+	// WorkloadDispatchAllowed is checked under the transition hook before
+	// submitting a new dispatch; it may only read bounded host state.
+	WorkloadDispatchAllowed func() bool
 	// SDKHandler serves the worker's private SDK channel. Nil disables the
 	// channel; a non-nil handler requires a channel-capable installed adapter.
 	SDKHandler SDKHandler
