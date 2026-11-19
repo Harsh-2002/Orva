@@ -187,17 +187,35 @@ func enrollmentLegacyRows(t *testing.T, dir string) (rows []string, digest strin
 	return rows, fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
-// enrollmentKernelBudget returns the cgroup the launch wrapper must enter: owner
-// capture refuses a process that is not already inside the delegated budget, so
-// a run that forgets the wrapper fails loudly instead of passing against
-// rlimit-only limits.
+// enrollmentKernelBudget returns a fresh per-case budget under the VM's root
+// budget. Owner capture refuses a process outside a delegated budget, and a
+// killed case leaves controller-enabled children behind, after which cgroup v2
+// refuses new processes in that budget, so cases cannot share one.
 func enrollmentKernelBudget(t *testing.T) string {
 	t.Helper()
-	budget := os.Getenv("ORVA_MANAGED_BOOT_BUDGET")
-	if os.Getenv("ORVA_OWNER_KERNEL_TEST") != "disposable-vm" || budget == "" {
+	root := os.Getenv("ORVA_MANAGED_BOOT_BUDGET")
+	if os.Getenv("ORVA_OWNER_KERNEL_TEST") != "disposable-vm" || root == "" {
 		t.Skip("requires ORVA_OWNER_KERNEL_TEST=disposable-vm and ORVA_MANAGED_BOOT_BUDGET from an owned disposable VM")
 	}
+	enrollmentMust(t, os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+cpu +memory +pids"), 0))
+	budget, err := os.MkdirTemp(root, "case-")
+	enrollmentMust(t, err)
+	t.Cleanup(func() { removeCgroupTree(t, budget) })
 	return budget
+}
+
+// removeCgroupTree removes a cgroup and its descendants bottom-up; cgroupfs
+// only accepts rmdir on empty, process-free directories.
+func removeCgroupTree(t *testing.T, dir string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() {
+			removeCgroupTree(t, filepath.Join(dir, e.Name()))
+		}
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Logf("cgroup %s not removed: %v", dir, err)
+	}
 }
 
 // enrollmentStubNsjail accepts the only path the product looks at. A stub is
