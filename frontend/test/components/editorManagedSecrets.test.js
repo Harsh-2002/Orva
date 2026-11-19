@@ -15,6 +15,7 @@ window.matchMedia = window.matchMedia || ((q) => ({
 
 const FN = {
   id: 'fn-a', name: 'alpha', description: '', runtime: 'python', entrypoint: 'handler.py',
+  version: 1,
   memory_mb: 64, cpus: 0.5, code_hash: 'ha', timeout_ms: 5000, network_mode: 'none', sdk: false,
   max_concurrency: 0, concurrency_policy: 'queue', auth_mode: 'none', rate_limit_per_min: 0,
   env_vars: { EXISTING: 'keep' },
@@ -166,10 +167,10 @@ const noMutations = () => {
 }
 
 const configurationCalls = () => h.get.mock.calls.filter(([url]) => url.endsWith('/configuration'))
-const settings = (revision) => ({
+const settings = (revision, functionVersion = '1') => ({
   data: {
     expected: {
-      function_version: '1', artifact_revision: '4', artifact_epoch: '2', generation: 'gen-1',
+      function_version: functionVersion, artifact_revision: '4', artifact_epoch: '2', generation: 'gen-1',
       policy_revision: String(revision), authority_epoch: '3', approved_artifact: ARTIFACT,
     },
     current_artifact: ARTIFACT,
@@ -178,6 +179,7 @@ const settings = (revision) => ({
     secret_entries: 1,
   },
 })
+const settingsAck = { data: { function_version: '2' } }
 
 beforeEach(() => {
   h.mode.mockReset()
@@ -196,7 +198,7 @@ beforeEach(() => {
     return { data: {} }
   })
   h.post.mockResolvedValue({ data: {} })
-  h.put.mockResolvedValue({ data: {} })
+  h.put.mockImplementation(async (url) => url.endsWith('/configuration/settings') ? settingsAck : { data: {} })
   h.del.mockResolvedValue({ data: {} })
 })
 
@@ -217,7 +219,7 @@ describe('editor secrets in managed mode', () => {
     expect(h.put).toHaveBeenCalledTimes(1)
     expect(h.put.mock.calls[0]).toEqual([
       '/functions/fn-a/configuration/secrets',
-      { expected: settings(5).data.expected, current_artifact: ARTIFACT, secret: { key: 'STRIPE_KEY', value: 'sk_live_1' } },
+      { expected: settings(6).data.expected, current_artifact: ARTIFACT, secret: { key: 'STRIPE_KEY', value: 'sk_live_1' } },
     ])
   })
 
@@ -227,10 +229,10 @@ describe('editor secrets in managed mode', () => {
     await saveSecret('FIRST', 'v1')
     await saveSecret('SECOND', 'v2')
 
-    expect(configurationCalls()).toHaveLength(2)
+    expect(configurationCalls()).toHaveLength(3)
     expect(h.put).toHaveBeenCalledTimes(2)
     const revisions = h.put.mock.calls.map(([, payload]) => payload.expected.policy_revision)
-    expect(revisions).toEqual(['5', '6'])
+    expect(revisions).toEqual(['6', '7'])
   })
 
   it('deletes through the configuration service with the key only', async () => {
@@ -243,7 +245,7 @@ describe('editor secrets in managed mode', () => {
     expect(h.del).toHaveBeenCalledTimes(1)
     expect(h.del.mock.calls[0]).toEqual([
       '/functions/fn-a/configuration/secrets',
-      { data: { expected: settings(5).data.expected, current_artifact: ARTIFACT, secret: { key: 'API_TOKEN' } } },
+      { data: { expected: settings(6).data.expected, current_artifact: ARTIFACT, secret: { key: 'API_TOKEN' } } },
     ])
   })
 
@@ -257,7 +259,7 @@ describe('editor secrets in managed mode', () => {
     expect(confirm.notify).toHaveBeenCalledTimes(1)
     expect(confirm.notify.mock.calls[0][0].message).toBe('Configuration changed elsewhere; reload to continue.')
     expect(h.put).toHaveBeenCalledTimes(1)
-    expect(configurationCalls()).toHaveLength(1)
+    expect(configurationCalls()).toHaveLength(2)
   })
 
   it('reports that an administrator must change secrets on 403', async () => {
@@ -290,11 +292,12 @@ describe('editor secrets in legacy mode', () => {
 })
 
 describe('editor deploy in managed mode', () => {
-  it('does not publish a configuration an unchanged redeploy did not change', async () => {
+  it('can deploy code without settings CAS when the configuration is unchanged', async () => {
+    h.configuration = () => ({ data: { ...settings(5).data, current_artifact: '' } })
     await boot({ managed: true })
     await deploy()
 
-    expect(configurationCalls()).toHaveLength(0)
+    expect(configurationCalls()).toHaveLength(1)
     expect(h.put).not.toHaveBeenCalled()
     expect(postCalls('/functions/fn-a')).toHaveLength(0)
     expect(deployInlineCalls()).toHaveLength(1)
@@ -337,6 +340,61 @@ describe('editor deploy in managed mode', () => {
 
     expect(deployInlineCalls()).toHaveLength(0)
     expect(body().textContent).toContain('Configuration changed elsewhere; reload to continue.')
+  })
+
+  it.each(['during load', 'after load'])('never pairs stale environment with settings expectations refreshed %s', async (when) => {
+    const latest = settings(6, '2')
+    const observation = deferred()
+    if (when === 'during load') h.configuration = () => observation.promise
+    const { editor } = await boot({ managed: true })
+    h.configuration = () => latest
+    editor.form.memory_mb = 128
+    // The server now has a different environment at version 2.
+    h.put.mockImplementation(async (_url, { expected }) => {
+      if (expected.function_version === '2') return { data: { function_version: '3' } }
+      throw { response: { status: 409 } }
+    })
+
+    const building = editor.runDeploy()
+    if (when === 'during load') {
+      await settle()
+      noMutations()
+      observation.resolve(latest)
+    }
+    await building
+
+    expect(configurationCalls()).toHaveLength(1)
+    expect(deployInlineCalls()).toHaveLength(0)
+    if (when === 'during load') {
+      expect(h.put).not.toHaveBeenCalled()
+      expect(editor.buildError).toContain('reload')
+    } else {
+      expect(h.put).toHaveBeenCalledTimes(1)
+      expect(h.put.mock.calls[0][1]).toMatchObject({ expected: settings(5).data.expected, environment: FN.env_vars })
+      expect(editor.buildError).toBe('Configuration changed elsewhere; reload to continue.')
+    }
+  })
+
+  it('does not publish acknowledged settings again when retrying a failed code upload', async () => {
+    const { editor } = await boot({ managed: true })
+    editor.envVars = [{ key: 'EXISTING', value: 'changed' }]
+    editor.form.memory_mb = 128
+    h.post.mockRejectedValueOnce(new Error('build submission failed'))
+
+    await deploy()
+    expect(editor.buildError).toBe('build submission failed')
+    await deploy()
+
+    expect(putCalls('/functions/fn-a/configuration/settings')).toHaveLength(1)
+    expect(deployInlineCalls()).toHaveLength(2)
+    expect(configurationCalls()).toHaveLength(1)
+    expect(editor.buildError).toBe('')
+
+    editor.form.memory_mb = 256
+    await deploy()
+    expect(putCalls('/functions/fn-a/configuration/settings')).toHaveLength(1)
+    expect(deployInlineCalls()).toHaveLength(2)
+    expect(editor.buildError).toContain('reload')
   })
 })
 
@@ -405,7 +463,7 @@ describe('editor mutation ownership', () => {
       await router.push('/functions/alpha?mode=edit')
     }
     await settle()
-    put.resolve({ data: {} })
+    put.resolve(settingsAck)
     await building
     await settle()
 
@@ -428,7 +486,7 @@ describe('editor mutation ownership', () => {
     editor.dependencyText = 'later'
     editor.templateEntrypoint = 'later.py'
     editor.templateExtras = { 'later.txt': 'later' }
-    put.resolve({ data: {} })
+    put.resolve(settingsAck)
     await building
 
     expect(h.put.mock.calls[0][1].environment).toEqual({ EXISTING: 'original' })
@@ -451,7 +509,7 @@ describe('editor mutation ownership', () => {
     await deleting
 
     noMutations()
-    expect(configurationCalls()).toHaveLength(0)
+    expect(configurationCalls()).toHaveLength(managed ? 2 : 0)
     expect(confirm.notify).not.toHaveBeenCalled()
   })
 
@@ -476,7 +534,9 @@ describe('editor mutation ownership', () => {
     editor.secretForm = { name: 'A_SECRET', value: 'a draft' }
     const saving = editor.saveSecret()
     await settle()
-    expect(configurationCalls().map(([url]) => url)).toEqual(['/functions/fn-a/configuration'])
+    expect(configurationCalls().map(([url]) => url)).toEqual([
+      '/functions/fn-a/configuration', '/functions/fn-a/configuration',
+    ])
     await router.push('/functions/beta?mode=edit')
     await settle()
     editor.secretForm = { name: 'B_SECRET', value: 'b draft' }

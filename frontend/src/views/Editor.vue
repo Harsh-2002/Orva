@@ -1676,6 +1676,7 @@ const loadedEntrypoint = ref('')
 // The record the editor loaded, so a managed redeploy can publish settings with
 // the fields the form does not edit (timeout) and detect a real change.
 const loadedFunction = ref(null)
+let managedSettingsCAS = null
 
 const fileName = computed(() => {
   if (templateEntrypoint.value) return templateEntrypoint.value
@@ -2006,6 +2007,7 @@ const resetEditorState = () => {
   invalidateBuild()
   fnId.value = ''
   loadedFunction.value = null
+  managedSettingsCAS = null
   loadedEntrypoint.value = ''
   secrets.value = []
   secretForm.value = { name: '', value: '' }
@@ -2067,6 +2069,7 @@ const loadRouteData = async () => {
 
       fnId.value = fn.id
       loadedFunction.value = fn
+      managedSettingsCAS = { owner: fn.id, read: readManagedSettingsCAS(fn, current), used: false }
       form.value.name = fn.name
       form.value.description = fn.description || ''
       form.value.runtime = fn.runtime
@@ -2095,7 +2098,6 @@ const loadRouteData = async () => {
       if (!current()) return
       markFormClean()
 
-      void iam.checkMode()
       void loadSecrets()
       // Load deployment history so the Versions card can render.
       await loadVersions(fn, current)
@@ -2389,6 +2391,7 @@ const runDeploy = async () => {
   const expectedSettings = loadedManagedSettings()
   const loadedEnvironment = loadedFunction.value?.env_vars
   const loadedDescription = loadedFunction.value?.description || ''
+  const settingsCAS = managedSettingsCAS
   deploying.value = true
   buildError.value = ''
   lastBuild.value = null
@@ -2448,7 +2451,7 @@ const runDeploy = async () => {
       const changed = JSON.stringify(settings) !== JSON.stringify(expectedSettings)
         || !sameEnvironment(envVarsMap, loadedEnvironment)
       if (changed) {
-        await publishManagedSettings(id, current, settings, envVarsMap)
+        await publishManagedSettings(id, current, settings, envVarsMap, settingsCAS)
         if (!current()) return
         buildLogs.value.push('Updated function configuration')
       }
@@ -2805,6 +2808,7 @@ const rollbackToVersion = async (v) => {
   if (!ok) return
   rollingBack.value = true
   try {
+    managedSettingsCAS = null
     await rollbackFunction(fnId.value, { deployment_id: v.deployment_id })
     // Re-pull function metadata, source, AND versions so the Active
     // pill moves AND the editor buffer reflects the rolled-back code.
@@ -2912,25 +2916,46 @@ const loadedManagedSettings = () => ({
 const sameEnvironment = (current, loaded) => JSON.stringify(Object.entries(current || {}).sort())
   === JSON.stringify(Object.entries(loaded || {}).sort())
 
-// Managed mode publishes configuration through the CAS-checked service; the
-// legacy PUT /functions/{id} is not mounted there.
-const publishManagedSettings = async (id, current, settings, environment) => {
+const readManagedSettingsCAS = async (fn, current) => {
+  const mode = await iam.checkMode()
+  const ownsLoad = () => current() && fnId.value === fn.id && iam.mode === 'managed'
+  if (mode !== 'managed' || !ownsLoad()) return
+  if (!Number.isSafeInteger(fn.version) || fn.version < 1) return
+  const config = await loadManagedConfiguration(fn.id).catch(() => null)
+  if (!ownsLoad()) return
+  // Settings and environment advance the function version in the same DB transaction.
+  if (config?.expected?.function_version !== String(fn.version)
+    || typeof config.current_artifact !== 'string' || !config.current_artifact) return
+  return {
+    expected: { ...config.expected },
+    current_artifact: config.current_artifact,
+  }
+}
+
+const publishManagedSettings = async (id, current, settings, environment, captured) => {
   try {
-    if (!Number.isInteger(settings.timeout_ms) || settings.timeout_ms < 1) {
-      throw new Error('Configuration is unavailable; reload to continue.')
-    }
-    const config = await loadManagedConfiguration(id)
+    const config = await captured?.read
     if (!current()) return
     requireEditorMode('managed')
-    if (!config?.expected || !config?.current_artifact) {
-      throw new Error('Configuration is unavailable; reload to continue.')
+    if (!config || captured !== managedSettingsCAS || captured.owner !== id || captured.used
+      || !Number.isInteger(settings.timeout_ms) || settings.timeout_ms < 1) {
+      throw new Error('Configuration is unavailable; reload after installing the current artifact if needed.')
     }
-    await apiClient.put(`/functions/${id}/configuration/settings`, {
+    captured.used = true
+    const res = await apiClient.put(`/functions/${id}/configuration/settings`, {
       expected: config.expected,
       current_artifact: config.current_artifact,
       environment,
       settings,
     })
+    if (!current()) return
+    requireEditorMode('managed')
+    const version = res?.data?.function_version
+    if (captured !== managedSettingsCAS || version !== String(BigInt(config.expected.function_version) + 1n)) {
+      throw new Error('Configuration update could not be verified; reload to continue.')
+    }
+    managedSettingsCAS = null
+    loadedFunction.value = { ...loadedFunction.value, ...settings, env_vars: environment, version }
   } catch (err) {
     throw new Error(managedConfigurationError(err, 'Failed to update configuration', 'An administrator must change the configuration.'), { cause: err })
   }
