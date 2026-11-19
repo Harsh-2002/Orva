@@ -24,9 +24,27 @@ func TestInitialRuntimeReusesUnrecordedSeal(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("runtime"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	for _, rel := range []string{"tmp", "var/tmp"} {
+		p := filepath.Join(src, rel)
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, os.ModeSticky|0777); err != nil {
+			t.Fatal(err)
+		}
+	}
 	check := func(path string) error {
 		if path == "" || path == src {
 			t.Fatalf("validated mutable source instead of store: %q", path)
+		}
+		for _, rel := range []string{"tmp", "var/tmp"} {
+			info, err := os.Stat(filepath.Join(path, rel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode() & (os.ModeSticky | os.ModePerm); got != os.ModeSticky|0777 {
+				t.Fatalf("%s permissions = %v, want sticky and 0777", rel, got)
+			}
 		}
 		return nil
 	}
@@ -49,8 +67,26 @@ func TestInitialRuntimeReusesUnrecordedSeal(t *testing.T) {
 	if err := os.Chmod(bin, 0777); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := seal(); !errors.Is(err, ErrUnsupported) {
+	if _, err := seal(); !errors.Is(err, ErrUnsupported) || !errors.Is(err, ErrOwnership) {
 		t.Fatalf("writable runtime accepted: %v", err)
+	}
+}
+
+func TestRuntimeXattrListFailure(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "file"), []byte("runtime"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := scanTree(t.Context(), src, testLimits(), 1024, func(rel string, _ os.FileInfo) error {
+		if rel == "file" {
+			return os.Remove(filepath.Join(src, rel))
+		}
+		return nil
+	})
+	if !errors.Is(err, ErrIO) || !errors.Is(err, syscall.ENOENT) ||
+		errors.Is(err, ErrUnsupported) || errors.Is(err, ErrOwnership) ||
+		!strings.Contains(err.Error(), "file: ") || !strings.Contains(err.Error(), "llistxattr failed") {
+		t.Fatalf("list failure = %v, want path and filesystem error", err)
 	}
 }
 
@@ -143,18 +179,22 @@ func TestInitialRuntimeEntryRules(t *testing.T) {
 	cases := []struct {
 		name, rel, want string
 		info            fakeInfo
+		ownership       bool
 	}{
-		{"foreign-owner", "usr/bin/node", ownerRule, fakeInfo{mode: 0755, stat: syscall.Stat_t{Uid: other}}},
-		{"group-writable", "var/lib", "var/lib: group/other-writable (mode 0775)", fakeInfo{mode: os.ModeDir | 0775, stat: syscall.Stat_t{Uid: euid}}},
-		{"other-writable-file", "bin/node", "bin/node: group/other-writable (mode 0666)", fakeInfo{mode: 0666, stat: syscall.Stat_t{Uid: euid}}},
-		{"tmp-entry", "tmp/sock", "tmp/sock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}},
-		{"var-tmp-entry", "var/tmp/lock", "var/tmp/lock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}},
+		{"foreign-owner", "usr/bin/node", ownerRule, fakeInfo{mode: 0755, stat: syscall.Stat_t{Uid: other}}, true},
+		{"group-writable", "var/lib", "var/lib: group/other-writable (mode 0775)", fakeInfo{mode: os.ModeDir | 0775, stat: syscall.Stat_t{Uid: euid}}, true},
+		{"other-writable-file", "bin/node", "bin/node: group/other-writable (mode 0666)", fakeInfo{mode: 0666, stat: syscall.Stat_t{Uid: euid}}, true},
+		{"tmp-entry", "tmp/sock", "tmp/sock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}, false},
+		{"var-tmp-entry", "var/tmp/lock", "var/tmp/lock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkInitialRuntimeEntry(tc.rel, tc.info)
 			if !errors.Is(err, ErrUnsupported) {
 				t.Fatalf("refusal = %v, want ErrUnsupported", err)
+			}
+			if errors.Is(err, ErrOwnership) != tc.ownership {
+				t.Fatalf("refusal = %v, want ownership category %v", err, tc.ownership)
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("refusal %q does not name %q", err, tc.want)

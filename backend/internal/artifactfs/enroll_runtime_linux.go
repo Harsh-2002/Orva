@@ -54,15 +54,25 @@ func checkInitialRuntimeEntry(rel string, info os.FileInfo) error {
 	uid, euid := info.Sys().(*syscall.Stat_t).Uid, uint32(os.Geteuid())
 	if uid != 0 && uid != euid {
 		if euid == 0 {
-			return refuse(rel, fmt.Sprintf("owned by uid %d, want root (the server user)", uid))
+			return refuseOwnership(rel, fmt.Sprintf("owned by uid %d, want root (the server user)", uid))
 		}
-		return refuse(rel, fmt.Sprintf("owned by uid %d, want root or the server user (uid %d)", uid, euid))
+		return refuseOwnership(rel, fmt.Sprintf("owned by uid %d, want root or the server user (uid %d)", uid, euid))
 	}
 	if info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0022 != 0 &&
 		!(info.IsDir() && info.Mode()&os.ModeSticky != 0 && (rel == "tmp" || rel == "var/tmp")) {
-		return refuse(rel, fmt.Sprintf("group/other-writable (mode %04o)", info.Mode().Perm()))
+		return refuseOwnership(rel, fmt.Sprintf("group/other-writable (mode %04o)", info.Mode().Perm()))
 	}
 	return nil
+}
+
+// installedRuntimeMode is the mode the sealed copy carries. Special bits are
+// stripped except a directory's sticky bit, which runtime images use to protect
+// shared scratch trees.
+func installedRuntimeMode(e Entry) uint32 {
+	if e.Type == TypeDirectory {
+		return e.Mode & 01777
+	}
+	return e.Mode & 0777
 }
 
 func importInstalledRuntime(ctx context.Context, store *Store, owner, source string, check func(string, os.FileInfo) error, validate func(string) error) (_ Identity, err error) {
@@ -151,7 +161,12 @@ func importInstalledRuntime(ctx context.Context, store *Store, owner, source str
 		e := tree[name].entry
 		to := filepath.Join(root, name)
 		if e.Type == TypeDirectory {
-			if err := os.Chmod(to, os.FileMode(e.Mode&0777)); err != nil {
+			mode := installedRuntimeMode(e)
+			permissions := os.FileMode(mode & 0777)
+			if mode&syscall.S_ISVTX != 0 {
+				permissions |= os.ModeSticky
+			}
+			if err := os.Chmod(to, permissions); err != nil {
 				return Identity{}, err
 			}
 		}
@@ -219,8 +234,8 @@ func sameInstalledRuntime(m Manifest, tree map[string]observed) bool {
 	for _, sealed := range m.Entries {
 		item, ok := tree[sealed.Path]
 		e := item.entry
-		// The copy strips special bits and is owned by the store writer, not the source.
-		e.Mode, e.UID, e.GID = e.Mode&0777, sealed.UID, sealed.GID
+		// The copy is owned by the store writer, not the source.
+		e.Mode, e.UID, e.GID = installedRuntimeMode(e), sealed.UID, sealed.GID
 		if !ok || e != sealed {
 			return false
 		}

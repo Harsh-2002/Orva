@@ -19,11 +19,13 @@ var (
 	ErrInvalid     = errors.New("artifactfs: invalid input or state")
 	ErrIntegrity   = errors.New("artifactfs: integrity mismatch")
 	ErrUnsupported = errors.New("artifactfs: unsupported tree")
-	ErrCapacity    = errors.New("artifactfs: capacity exhausted")
-	ErrRetired     = errors.New("artifactfs: generation retired")
-	ErrClosed      = errors.New("artifactfs: store closed")
-	ErrBusy        = errors.New("artifactfs: operation in progress")
-	ErrIO          = errors.New("artifactfs: filesystem operation failed")
+	// ErrOwnership matches owner and writable-mode refusals, which also match ErrUnsupported.
+	ErrOwnership = errors.New("artifactfs: runtime tree ownership or permissions refused")
+	ErrCapacity  = errors.New("artifactfs: capacity exhausted")
+	ErrRetired   = errors.New("artifactfs: generation retired")
+	ErrClosed    = errors.New("artifactfs: store closed")
+	ErrBusy      = errors.New("artifactfs: operation in progress")
+	ErrIO        = errors.New("artifactfs: filesystem operation failed")
 )
 
 type Kind string

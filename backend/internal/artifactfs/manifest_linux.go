@@ -151,17 +151,28 @@ type observed struct {
 	stamp stamp
 }
 
-func noXattrs(p string) error {
+// treeXattrs reports whether p carries extended attributes. A list that cannot
+// be read is a filesystem refusal, not an attribute finding; conflating the two
+// told operators to strip attributes from a tree that had none.
+func treeXattrs(p string) (bool, error) {
 	ptr, err := syscall.BytePtrFromString(p)
 	if err != nil {
-		return ErrInvalid
+		return false, ErrInvalid
 	}
 	// llistxattr must not follow a runtime's chroot-relative absolute link.
 	n, _, errno := syscall.Syscall(syscall.SYS_LLISTXATTR, uintptr(unsafe.Pointer(ptr)), 0, 0)
-	if errno != 0 || n != 0 {
+	if errno != 0 {
+		return false, fmt.Errorf("%w: llistxattr failed: %w", ErrIO, errno)
+	}
+	return n != 0, nil
+}
+
+func noXattrs(p string) error {
+	present, err := treeXattrs(p)
+	if present {
 		return ErrUnsupported
 	}
-	return nil
+	return err
 }
 
 func openNoFollow(p string, directory bool) (*os.File, error) {
@@ -222,6 +233,15 @@ func (e *treeRule) Unwrap() error { return ErrUnsupported }
 
 func refuse(path, rule string) error { return &treeRule{path, rule} }
 
+// ownershipRule adds ErrOwnership to a tree refusal without changing its text.
+type ownershipRule struct{ treeRule }
+
+func (e *ownershipRule) Unwrap() []error { return []error{ErrUnsupported, ErrOwnership} }
+
+func refuseOwnership(path, rule string) error {
+	return &ownershipRule{treeRule{path, rule}}
+}
+
 func specialFileRule(mode uint32) string {
 	switch mode & syscall.S_IFMT {
 	case syscall.S_IFCHR, syscall.S_IFBLK:
@@ -263,11 +283,10 @@ func scanTree(ctx context.Context, root string, limits Limits, reserved int64, c
 		st := info.Sys().(*syscall.Stat_t)
 		before := metadata(st)
 		e := Entry{Path: rel, Mode: st.Mode & 07777, UID: st.Uid, GID: st.Gid}
-		if err := noXattrs(p); err != nil {
-			if errors.Is(err, ErrUnsupported) {
-				return refuse(rel, "extended attributes present")
-			}
-			return err
+		if present, err := treeXattrs(p); err != nil {
+			return fmt.Errorf("%s: %w", rel, err)
+		} else if present {
+			return refuse(rel, "extended attributes present")
 		}
 		switch st.Mode & syscall.S_IFMT {
 		case syscall.S_IFDIR:
