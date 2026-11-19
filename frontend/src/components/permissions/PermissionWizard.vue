@@ -107,27 +107,19 @@
             </span>
             <span
               v-if="invalidAtStartup(id)"
-              class="block text-xs text-danger-fg"
-            >{{ form.actions.includes(id) ? 'Not allowed at startup. Untick it, or choose While handling a request.' : 'Not available at startup. Startup access is read only.' }}</span>
-            <span
-              v-else
-              class="block text-xs text-foreground-muted"
-            >{{ ACTION_HELP[id] }}</span>
+              class="block text-xs text-warning-fg"
+            >Not available at startup</span>
+            <template v-else>
+              <span class="block text-xs text-foreground-muted">{{ ACTION_HELP[id] }}</span>
+              <span
+                v-if="needsGetFor(id)"
+                class="block text-xs text-warning-fg"
+              >Also needs Read a key (kv.get)</span>
+            </template>
           </span>
         </label>
       </fieldset>
 
-      <p
-        v-if="needsGet"
-        role="note"
-        class="flex items-start gap-2 rounded-md border border-warning-ring bg-warning-tint px-3 py-2 text-xs text-warning-fg"
-      >
-        <TriangleAlert
-          class="mt-0.5 h-3.5 w-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        <span>Increment and Compare and set also need Read a key (kv.get) on the same keys. Read is not added for you. Tick it here, or this permission will be incomplete.</span>
-      </p>
     </div>
 
     <!-- 3. Resources -->
@@ -416,6 +408,7 @@ const listPicked = computed(() => form.value.actions.includes('kv.list'))
 const needsGet = computed(() => form.value.service === 'storage'
   && (form.value.actions.includes('kv.incr') || form.value.actions.includes('kv.cas'))
   && !form.value.actions.includes('kv.get'))
+const needsGetFor = (id) => (id === 'kv.incr' || id === 'kv.cas') && needsGet.value
 const storageModes = [
   { value: 'key', label: 'Exact key' },
   { value: 'prefix', label: 'Prefix' },
