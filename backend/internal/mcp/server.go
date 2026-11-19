@@ -73,6 +73,11 @@ type Deps struct {
 
 	WorkloadLifecycle *builder.PublicationQueue // explicit scratch-only lifecycle tools
 
+	// ReplayExecution re-runs a captured execution through the managed pool
+	// (the same handler as POST /api/v1/executions/{id}/replay). Managed only;
+	// nil leaves the replay tool unregistered.
+	ReplayExecution http.HandlerFunc
+
 	// NsjailBin is the sandbox binary path, so system_health can report
 	// whether this host can actually run functions rather than assuming it.
 	NsjailBin string
@@ -321,7 +326,9 @@ func NewHandler(deps Deps) http.Handler {
 				"missing or invalid bearer token")
 			return
 		}
-		if deps.ManagedServer && principal.Kind == authpkg.KindChannel {
+		// Channel tokens are served in managed mode only as the invoke-only
+		// catalog, which dispatches through the managed proxy and pool.
+		if deps.ManagedServer && principal.Kind == authpkg.KindChannel && deps.Proxy == nil {
 			writeAuthError(w, http.StatusUnauthorized, "UNAUTHORIZED", "channel credentials unavailable on the managed tool surface")
 			return
 		}

@@ -16,13 +16,17 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
+	"github.com/Harsh-2002/Orva/backend/internal/version"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
@@ -38,13 +42,44 @@ const managedMaxBodyBytes = 6 << 20
 
 func managedRoutes(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler) (http.Handler, error) {
-	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil, nil)
+	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil, nil, nil)
+}
+
+// managedRouteDeps carries the process-level services the operator surfaces
+// share with the legacy router. Every field is optional; nil/zero disables the
+// matching feature rather than falling back to a legacy equivalent.
+type managedRouteDeps struct {
+	Hub       *events.Hub
+	Metrics   *metrics.Metrics
+	StartTime time.Time
+	NsjailBin string
+	// InvalidateKey evicts an API key hash from any authentication cache. The
+	// managed authenticator reads keys live, so the default is a no-op, but
+	// the REST and MCP key surfaces must share this one closure.
+	InvalidateKey func(keyHash string)
+	// InvalidateSession evicts a revoked browser-session token from any cache.
+	// Managed authentication rereads sessions live; nil is a no-op.
+	InvalidateSession func(token string)
+
+	// recordRoute, when set (tests), is told every tier-gated route as it is
+	// registered, so a table test can compare the whole surface to the legacy tiers.
+	recordRoute func(pattern string, tier managedTier)
+}
+
+func (d *managedRouteDeps) invalidateKey() func(string) {
+	if d == nil || d.InvalidateKey == nil {
+		return func(string) {}
+	}
+	return d.InvalidateKey
 }
 
 func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler,
-	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps), downloadBackup http.HandlerFunc,
+	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps), downloadBackup http.HandlerFunc, ops *managedRouteDeps,
 ) (http.Handler, error) {
+	if ops == nil {
+		ops = &managedRouteDeps{}
+	}
 	if db == nil || reg == nil || authority == nil || !manager.ManagedBy(authority) {
 		return nil, errManagedServerUnavailable
 	}
@@ -67,9 +102,9 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	}
 	mux := http.NewServeMux()
 	if downloadBackup != nil {
-		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, true, downloadBackup))
+		gateRoute(mux, db, ops, "GET /api/v1/backup", managedAdmin, downloadBackup)
 	}
-	authenticate := managedOperator(db)
+	authenticate := managedActivityOperator(db)
 	(&workloadpolicy.ManagedHTTPAdapter{Service: policy, Authenticate: authenticate}).Register(mux)
 	if invoke != nil {
 		if invoke.Registry != reg || invoke.DB != db || invoke.Proxy == nil || invoke.Proxy.Pool != manager || invoke.Proxy.DB != db {
@@ -78,6 +113,10 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}", invoke.ServeManagedHTTP)
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
+	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
+	mountManagedFixtures(mux, db, reg, ops)
+	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
+	mountManagedAccess(mux, db, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service
 	if publication != nil {
@@ -100,63 +139,178 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
 		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
 		mux.Handle("GET /web/", uiHandler())
-		mux.HandleFunc("GET /api/v1/iam/capabilities", requireManagedOperator(db, false, func(w http.ResponseWriter, _ *http.Request) {
+		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})
-		}))
+		})
 		(&workloadconfig.HTTPAdapter{Service: configuration, Authenticate: authenticate}).Register(mux)
 		(&handlers.WorkloadLifecycleHandler{Publication: publication, Authenticate: authenticate}).Register(mux)
 		deploy := &handlers.FunctionHandler{Registry: reg, DB: db, DataDir: dataDir, DeployIAM: publication, RequireDeployIAM: true}
 		deployments := &handlers.DeploymentHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/functions", requireManagedOperator(db, false, deploy.List))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}", requireManagedOperator(db, false, deploy.Get))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", requireManagedOperator(db, false, readManagedSource(db, publication)))
-		mux.HandleFunc("POST /api/v1/functions", requireManagedOperator(db, false, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/iam/functions", requireManagedOperator(db, false, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy", requireManagedOperator(db, false, deploy.Deploy))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy-inline", requireManagedOperator(db, false, deploy.DeployInline))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", requireManagedOperator(db, false, deploy.Rollback))
+		gateRoute(mux, db, ops, "GET /api/v1/functions", managedRead, deploy.List)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}", managedRead, deploy.Get)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/source", managedRead, readManagedSource(db, publication))
+		gateRoute(mux, db, ops, "POST /api/v1/functions", managedWrite, createManagedFunction(publication))
+		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy-inline", managedWrite, deploy.DeployInline)
+		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/rollback", managedWrite, deploy.Rollback)
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}
 		reg.DeletionHook = history
 		(&workloadhistory.HTTPAdapter{Service: history, Authenticate: authenticate}).Register(mux)
-		mux.HandleFunc("DELETE /api/v1/functions/{fn_id}", requireManagedOperator(db, true, deleteManagedFunction(reg, manager)))
-		mux.HandleFunc("GET /api/v1/deployments/{id}", requireManagedOperator(db, false, deployments.Get))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/logs", requireManagedOperator(db, false, deployments.GetLogs))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/stream", requireManagedOperator(db, false, deployments.Stream))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/deployments", requireManagedOperator(db, false, deployments.ListForFunction))
-		mux.HandleFunc("POST /api/v1/deployments/{id}/install", requireManagedOperator(db, true, func(w http.ResponseWriter, r *http.Request) {
+		gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}", managedWrite, deleteManagedFunction(reg, manager))
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}", managedRead, deployments.Get)
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}/logs", managedRead, deployments.GetLogs)
+		gateRoute(mux, db, ops, "GET /api/v1/deployments/{id}/stream", managedRead, deployments.Stream)
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/deployments", managedRead, deployments.ListForFunction)
+		gateRoute(mux, db, ops, "POST /api/v1/deployments/{id}/install", managedAdmin, func(w http.ResponseWriter, r *http.Request) {
 			artifact, err := publication.Install(r.Context(), r.PathValue("id"))
 			if err != nil {
 				respond.Error(w, http.StatusConflict, "CONFLICT", "Managed deployment cannot be installed; inspect current state", "")
 				return
 			}
 			respond.JSON(w, http.StatusOK, map[string]any{"artifact": artifact, "review_required": true})
-		}))
-		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, Configuration: configuration,
+		})
+		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
-			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers}
+			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
+			InvalidateKey: ops.invalidateKey()}
+		tools.PoolMgr, tools.NsjailBin, tools.Version = manager, ops.NsjailBin, version.Version
+		if invoke != nil {
+			// Channel tokens invoke only through this managed proxy and pool.
+			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+			tools.ReplayExecution = managedReplayHandler(db, reg, manager, invoke, ops).Replay
+		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
 		if chat != nil {
 			chat(mux, tools)
 		}
 		if async != nil {
 			jobs := &handlers.JobsHandler{DB: db, Registry: reg, AsyncEnabled: true, AsyncIAM: async}
-			mux.HandleFunc("POST /api/v1/jobs", requireManagedOperator(db, true, jobs.Enqueue))
-			mux.HandleFunc("GET /api/v1/jobs", requireManagedOperator(db, false, jobs.List))
-			mux.HandleFunc("GET /api/v1/jobs/{id}", requireManagedOperator(db, false, jobs.Get))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/retry", requireManagedOperator(db, true, jobs.Retry))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/resume", requireManagedOperator(db, true, jobs.Resume))
-			mux.HandleFunc("DELETE /api/v1/jobs/{id}", requireManagedOperator(db, true, jobs.Delete))
+			gateRoute(mux, db, ops, "POST /api/v1/jobs", managedWrite, jobs.Enqueue)
+			gateRoute(mux, db, ops, "GET /api/v1/jobs", managedRead, jobs.List)
+			gateRoute(mux, db, ops, "GET /api/v1/jobs/{id}", managedRead, jobs.Get)
+			gateRoute(mux, db, ops, "POST /api/v1/jobs/{id}/retry", managedWrite, jobs.Retry)
+			gateRoute(mux, db, ops, "POST /api/v1/jobs/{id}/resume", managedWrite, jobs.Resume)
+			gateRoute(mux, db, ops, "DELETE /api/v1/jobs/{id}", managedWrite, jobs.Delete)
 			cron := &handlers.CronHandler{DB: db, Registry: reg, CronEnabled: true, CronIAM: async}
-			mux.HandleFunc("GET /api/v1/cron", requireManagedOperator(db, false, cron.ListAll))
-			mux.HandleFunc("GET /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, false, cron.List))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, true, cron.Create))
-			mux.HandleFunc("PUT /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, true, cron.Update))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron/{id}/resume", requireManagedOperator(db, true, cron.Resume))
-			mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, true, cron.Delete))
+			gateRoute(mux, db, ops, "GET /api/v1/cron", managedRead, cron.ListAll)
+			gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/cron", managedRead, cron.List)
+			gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/cron", managedWrite, cron.Create)
+			gateRoute(mux, db, ops, "PUT /api/v1/functions/{fn_id}/cron/{id}", managedWrite, cron.Update)
+			gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/cron/{id}/resume", managedWrite, cron.Resume)
+			gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}/cron/{id}", managedWrite, cron.Delete)
 		}
 	}
-	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, dispatch)), nil
+	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, managedActivityMiddleware(db, ops.Hub, dispatch))), nil
+}
+
+// mountManagedExecutions mounts execution history, captured requests and
+// replay. Reads need read; deletion and replay need admin. Replay dispatches
+// only through the managed pool and re-checks the current Factory version.
+func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
+) {
+	exec := &handlers.ExecutionHandler{DB: db}
+	gateRoute(mux, db, ops, "GET /api/v1/executions", managedRead, exec.List)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}", managedRead, exec.Get)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}/logs", managedRead, exec.GetLogs)
+	gateRoute(mux, db, ops, "GET /api/v1/executions/{exec_id}/request", managedRead, exec.GetRequest)
+	gateRoute(mux, db, ops, "DELETE /api/v1/executions/{exec_id}", managedWrite, exec.Delete)
+	gateRoute(mux, db, ops, "POST /api/v1/executions/bulk-delete", managedWrite, exec.BulkDelete)
+	if invoke == nil {
+		return
+	}
+	replay := managedReplayHandler(db, reg, manager, invoke, ops)
+	gateRoute(mux, db, ops, "POST /api/v1/executions/{exec_id}/replay", managedWrite, replay.Replay)
+}
+
+// mountManagedObservability mounts traces, the activity feed, the SSE event
+// stream, the system endpoints and the static runtime/syscall inventory with
+// the legacy permission tiers: read for views, admin for storage and vacuum.
+// Health and the Prometheus /metrics alias stay unauthenticated, as on the
+// legacy router, for probes and scrapers.
+func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	dataDir string, ops *managedRouteDeps,
+) {
+	met := ops.Metrics
+	if met == nil {
+		met = metrics.New()
+	}
+	traces := &handlers.TracesHandler{DB: db, Registry: reg, Metrics: met}
+	gateRoute(mux, db, ops, "GET /api/v1/traces", managedRead, traces.ListTraces)
+	gateRoute(mux, db, ops, "GET /api/v1/traces/{trace_id}", managedRead, traces.GetTrace)
+	gateRoute(mux, db, ops, "GET /api/v1/functions/{id}/baseline", managedRead, traces.GetFunctionBaseline)
+	activity := &handlers.ActivityHandler{DB: db}
+	gateRoute(mux, db, ops, "GET /api/v1/activity", managedRead, activity.List)
+	if ops.Hub != nil {
+		gateRoute(mux, db, ops, "GET /api/v1/events", managedRead, ops.Hub.Handler())
+	}
+	started := ops.StartTime
+	if started.IsZero() {
+		started = time.Now()
+	}
+	system := &handlers.SystemHandler{Metrics: met, DB: db, PoolMgr: manager, Registry: reg,
+		StartTime: started, NsjailBin: ops.NsjailBin}
+	mux.HandleFunc("GET /api/v1/system/health", system.Health)
+	mux.HandleFunc("GET /metrics", system.GetMetrics)
+	gateRoute(mux, db, ops, "GET /api/v1/system/metrics", managedRead, system.GetMetrics)
+	gateRoute(mux, db, ops, "GET /api/v1/system/metrics.json", managedRead, system.GetMetricsJSON)
+	if dataDir != "" {
+		storage := &handlers.SystemStorageHandler{DB: db, Cfg: &config.Config{Data: config.DataConfig{Dir: dataDir}}}
+		gateRoute(mux, db, ops, "GET /api/v1/system/storage", managedAdmin, storage.GetStorage)
+		gateRoute(mux, db, ops, "POST /api/v1/system/vacuum", managedAdmin, storage.Vacuum)
+	}
+	// Static inventory only: no owner, artifact or dispatch. `orva login --test`
+	// probes /api/v1/runtimes before saving a key and shell completion lists
+	// runtimes, so both must answer here at the legacy read tier.
+	runtime := &handlers.RuntimeHandler{}
+	gateRoute(mux, db, ops, "GET /api/v1/runtimes", managedRead, runtime.List)
+	syscalls := &handlers.SyscallHandler{}
+	gateRoute(mux, db, ops, "GET /api/v1/syscalls", managedRead, syscalls.List)
+}
+
+// mountManagedAccess mounts API keys, OAuth connected applications, browser
+// sessions and agent channels. Keys and channels need admin, as on the legacy
+// router; revoking a grant or a session needs write. The OAuth authorization
+// server itself is not mounted: only existing grants can be listed and revoked.
+func mountManagedAccess(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps) {
+	keys := &handlers.KeyHandler{DB: db, InvalidateKey: ops.invalidateKey()}
+	gateRoute(mux, db, ops, "POST /api/v1/keys", managedAdmin, keys.Create)
+	gateRoute(mux, db, ops, "GET /api/v1/keys", managedAdmin, keys.List)
+	gateRoute(mux, db, ops, "DELETE /api/v1/keys/{key_id}", managedAdmin, keys.Delete)
+
+	apps := &handlers.OAuthAppsHandler{DB: db}
+	gateSessionRoute(mux, db, ops, "GET /api/v1/oauth/connected-apps", managedRead, apps.List)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/oauth/connected-apps/{id}", managedWrite, apps.Revoke)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/oauth/clients/{client_id}", managedWrite, apps.RemoveApplication)
+
+	sessions := &handlers.AuthHandler{DB: db}
+	if ops.InvalidateSession != nil {
+		sessions.InvalidateSession = ops.InvalidateSession
+	}
+	gateSessionRoute(mux, db, ops, "GET /api/v1/auth/sessions", managedRead, sessions.Sessions)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/auth/sessions/{prefix}", managedWrite, sessions.RevokeSession)
+
+	channels := &handlers.ChannelHandler{DB: db}
+	gateRoute(mux, db, ops, "GET /api/v1/channels", managedAdmin, channels.List)
+	gateRoute(mux, db, ops, "POST /api/v1/channels", managedAdmin, channels.Create)
+	gateRoute(mux, db, ops, "GET /api/v1/channels/{id}", managedAdmin, channels.Get)
+	gateRoute(mux, db, ops, "PATCH /api/v1/channels/{id}", managedAdmin, channels.Update)
+	gateRoute(mux, db, ops, "PUT /api/v1/channels/{id}/functions", managedAdmin, channels.SetFunctions)
+	gateRoute(mux, db, ops, "POST /api/v1/channels/{id}/rotate", managedAdmin, channels.Rotate)
+	gateRoute(mux, db, ops, "DELETE /api/v1/channels/{id}", managedAdmin, channels.Delete)
+}
+
+func managedReplayHandler(db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
+) *handlers.ReplayHandler {
+	replay := &handlers.ReplayHandler{DB: db, Registry: reg, Pool: manager, Metrics: invoke.Metrics,
+		SDKAuth: invoke.Proxy.SDKAuth, Managed: true}
+	if ops.Hub != nil {
+		replay.PublishEvent = ops.Hub.Publish
+	}
+	return replay
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,
@@ -295,16 +449,7 @@ func managedOperator(db *database.Database) func(*http.Request) (*auth.Principal
 			}
 		}
 		if key == "" {
-			cookie, err := r.Cookie("session_token")
-			if err != nil || !managedSessionOrigin(r) {
-				return nil, database.ErrOperatorDenied
-			}
-			session, err := db.ResolveSessionIdentityByToken(r.Context(), cookie.Value)
-			if err != nil {
-				return nil, database.ErrOperatorDenied
-			}
-			return &auth.Principal{Kind: auth.KindSession, ID: session.ID, Label: session.Username,
-				Perms: auth.PermSet{"read": true, "write": true, "invoke": true, "admin": true}}, nil
+			return managedSessionOperator(db)(r)
 		}
 		if !strings.HasPrefix(key, "orva_") || strings.HasPrefix(key, "orva_chn_") ||
 			strings.HasPrefix(key, "orva_oat_") || strings.HasPrefix(key, "orva_ort_") || len(key) > 128 {
@@ -323,6 +468,49 @@ func managedOperator(db *database.Database) func(*http.Request) (*auth.Principal
 	}
 }
 
+// managedSessionOperator authenticates only the session cookie, with the
+// same-origin proof for mutations. Routes whose handlers authorise by cookie
+// (sessions, connected applications) must authenticate and attribute the same
+// credential: a bearer header is never consulted, as legacy never lets one
+// stand in for the cookie.
+func managedSessionOperator(db *database.Database) func(*http.Request) (*auth.Principal, error) {
+	return func(r *http.Request) (*auth.Principal, error) {
+		cookie, err := r.Cookie("session_token")
+		if err != nil || !managedSessionOrigin(r) {
+			return nil, database.ErrOperatorDenied
+		}
+		session, err := db.ResolveSessionIdentityByToken(r.Context(), cookie.Value)
+		if err != nil {
+			return nil, database.ErrOperatorDenied
+		}
+		return &auth.Principal{Kind: auth.KindSession, ID: session.ID, Label: session.Username,
+			Perms: auth.PermSet{"read": true, "write": true, "invoke": true, "admin": true}}, nil
+	}
+}
+
+func managedActor(principal *auth.Principal) *Actor {
+	source := "api"
+	if principal.Kind == auth.KindSession {
+		source = "web"
+	}
+	return &Actor{Source: source, ID: principal.ID, Type: string(principal.Kind), Label: principal.Label}
+}
+
+// managedActivityOperator is managedOperator for adapters that authenticate
+// themselves: it also attributes the request in the activity log.
+func managedActivityOperator(db *database.Database) func(*http.Request) (*auth.Principal, error) {
+	inner := managedOperator(db)
+	return func(r *http.Request) (*auth.Principal, error) {
+		principal, err := inner(r)
+		if err == nil {
+			if slot, ok := r.Context().Value(actorSlotKey{}).(*actorSlot); ok {
+				slot.set(managedActor(principal))
+			}
+		}
+		return principal, err
+	}
+}
+
 func managedSessionOrigin(r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true
@@ -332,20 +520,56 @@ func managedSessionOrigin(r *http.Request) bool {
 	return err == nil && origin == urlhint.BaseURL(r) && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-func requireManagedOperator(db *database.Database, mutation bool, next http.HandlerFunc) http.HandlerFunc {
-	authenticate := managedOperator(db)
+// managedTier is the permission a route requires, exactly as the legacy
+// router's requiredPermission defines it: GET needs read, other routes write,
+// and keys, channels, the AI assistant, backup, storage and vacuum admin.
+// Services that enforce stricter authority internally (deploy, deletion, jobs,
+// cron, IAM, history) keep doing so at commit; the tier is only the front gate.
+type managedTier string
+
+const (
+	managedRead  managedTier = "read"
+	managedWrite managedTier = "write"
+	managedAdmin managedTier = "admin"
+)
+
+// gateRoute registers a route behind requireManagedOperator.
+func gateRoute(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps, pattern string, tier managedTier, next http.HandlerFunc) {
+	if ops != nil && ops.recordRoute != nil {
+		ops.recordRoute(pattern, tier)
+	}
+	mux.HandleFunc(pattern, requireManagedOperator(db, tier, next))
+}
+
+func requireManagedOperator(db *database.Database, tier managedTier, next http.HandlerFunc) http.HandlerFunc {
+	return requireManagedPrincipal(db, managedOperator(db), tier, next)
+}
+
+// gateSessionRoute registers a cookie-authorised route; see managedSessionOperator.
+func gateSessionRoute(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps, pattern string, tier managedTier, next http.HandlerFunc) {
+	if ops != nil && ops.recordRoute != nil {
+		ops.recordRoute(pattern, tier)
+	}
+	mux.HandleFunc(pattern, requireManagedPrincipal(db, managedSessionOperator(db), tier, next))
+}
+
+func requireManagedPrincipal(db *database.Database, authenticate func(*http.Request) (*auth.Principal, error), tier managedTier, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// A GET pattern also serves HEAD. The legacy router assigns every
+		// non-GET method on an ordinary route `write`, so HEAD there needs write.
+		effective := tier
+		if r.Method == http.MethodHead && tier == managedRead {
+			effective = managedWrite
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		principal, err := authenticate(r)
 		if err != nil {
 			respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Operator authentication required", "")
 			return
 		}
-		ctx := auth.WithOperator(WithActor(r.Context(), &Actor{
-			ID: principal.ID, Type: string(principal.Kind), Label: principal.Label,
-		}), principal)
+		ctx := auth.WithOperator(WithActor(r.Context(), managedActor(principal)), principal)
 		ref, ok := auth.OperatorFromContext(ctx)
-		if !ok || db.CheckIAMOperator(ctx, ref, mutation) != nil {
+		if !ok || db.CheckOperatorPermission(ctx, ref, string(effective)) != nil {
 			respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Current operator authority required", "")
 			return
 		}

@@ -59,3 +59,87 @@ func TestManagedServerToolsShareRestrictedCatalog(t *testing.T) {
 		t.Fatal("external MCP catalog did not use the shared managed registration")
 	}
 }
+
+// The managed catalog carries the shared operator surfaces at the legacy
+// tiers, and none of the tools that dispatch function code except replay.
+func TestManagedCatalogOperatorSurfaces(t *testing.T) {
+	f := iamSurfaceSetup(t)
+	base := Deps{ManagedServer: true, DB: f.db, Registry: f.registry, IAM: f.service}
+	withReplay := base
+	withReplay.ReplayExecution = func(http.ResponseWriter, *http.Request) {}
+	admin := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
+	read := permSet{permRead: true}
+	write := permSet{permWrite: true}
+
+	names := func(deps Deps, perms permSet) map[string]bool {
+		out := map[string]bool{}
+		for _, tool := range BuildAgentRegistry(deps, perms).Tools() {
+			out[tool.Name] = true
+		}
+		return out
+	}
+	tiers := map[string][]string{
+		"read": {"list_executions", "get_execution", "get_execution_logs", "list_traces", "get_trace",
+			"get_function_baseline", "system_health", "system_metrics", "list_activity", "list_fixtures"},
+		"write": {"delete_execution", "bulk_delete_executions", "replay_execution", "save_fixture", "delete_fixture"},
+		"admin": {"system_storage", "system_vacuum", "list_api_keys", "create_api_key", "delete_api_key",
+			"list_channels", "get_channel"},
+	}
+	all, readOnly, writeOnly := names(withReplay, admin), names(withReplay, read), names(withReplay, write)
+	for tier, tools := range tiers {
+		for _, tool := range tools {
+			if !all[tool] {
+				t.Fatalf("managed catalog is missing %s", tool)
+			}
+			if got := readOnly[tool]; got != (tier == "read") {
+				t.Fatalf("%s tier %s visible to a read-only key: %v", tool, tier, got)
+			}
+			if got := writeOnly[tool]; got != (tier == "write") {
+				t.Fatalf("%s tier %s visible to a write-only key: %v", tool, tier, got)
+			}
+		}
+	}
+	if names(base, admin)["replay_execution"] {
+		t.Fatal("replay is registered without a managed replay path")
+	}
+	for _, prohibited := range []string{"invoke_function", "test_function_with_fixture", "list_runtimes", "update_function"} {
+		if all[prohibited] {
+			t.Fatalf("legacy tool %q leaked into the managed catalog", prohibited)
+		}
+	}
+}
+
+// The replayed function's own status is a result, not a tool failure; only
+// refusals before or during dispatch (no replay headers) are errors.
+func TestManagedReplayToolReportsTheFunctionStatus(t *testing.T) {
+	f := iamSurfaceSetup(t)
+	run := func(status int, replayed bool, body string) (any, error) {
+		deps := Deps{ManagedServer: true, DB: f.db, Registry: f.registry, IAM: f.service,
+			ReplayExecution: func(w http.ResponseWriter, _ *http.Request) {
+				if replayed {
+					w.Header().Set("X-Orva-Execution-ID", "new-exec")
+					w.Header().Set("X-Orva-Replay-Of", "old-exec")
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
+			}}
+		reg := BuildAgentRegistry(deps, permSet{permRead: true, permWrite: true, permAdmin: true})
+		return reg.Dispatch(f.ctx, "replay_execution", json.RawMessage(`{"execution_id":"old-exec"}`))
+	}
+	for _, status := range []int{200, 201, 204, 404, 500} {
+		out, err := run(status, true, "fn-body")
+		if err != nil {
+			t.Fatalf("function status %d was reported as a tool failure: %v", status, err)
+		}
+		view, ok := out.(ReplayExecutionOutput)
+		if !ok || view.StatusCode != status || view.ExecutionID != "new-exec" || view.ReplayOf != "old-exec" {
+			t.Fatalf("function status %d lost in the result: %#v", status, out)
+		}
+	}
+	for _, status := range []int{404, 409, 410, 502, 503, 504} {
+		if _, err := run(status, false, `{"error":{"code":"X","message":"denied by admission"}}`); err == nil ||
+			!strings.Contains(err.Error(), "denied by admission") {
+			t.Fatalf("refusal %d was not a tool error: %v", status, err)
+		}
+	}
+}

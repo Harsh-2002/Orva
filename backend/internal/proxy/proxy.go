@@ -37,6 +37,11 @@ var redactHeaders = map[string]bool{
 	"x-orva-api-key":        true,
 	"x-orva-internal-token": true,
 	"proxy-authorization":   true,
+	// Signed invocation (auth_mode "signed"): the HMAC is a bearer proof for its
+	// timestamp window, so it is never persisted, and the timestamp it pairs
+	// with goes with it.
+	"x-orva-signature": true,
+	"x-orva-timestamp": true,
 }
 
 const redactedValue = "[REDACTED]"
@@ -508,17 +513,7 @@ func (p *Proxy) Forward(
 	if acq.ColdStart {
 		coldStartStr = "true"
 	}
-	for k, v := range dres.Headers {
-		if hopByHopResponseHeader(k) {
-			// The adapter copies every header off its fetch Response, so an
-			// idiomatic proxy handler forwards content-length (compressed)
-			// and content-encoding: gzip alongside a body Go has already
-			// decoded. Go honours the explicit length and truncates.
-			continue
-		}
-		w.Header().Set(k, v)
-	}
-	applyFunctionResponseGuards(w)
+	CopyFunctionResponseHeaders(w, dres.Headers)
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
 
@@ -681,6 +676,24 @@ func truncate(s string, n int) string {
 	return s[:n] + "…(truncated)"
 }
 
+// redactCapturedHeaders lower-cases the inbound headers and replaces every
+// credential in redactHeaders with "[REDACTED]".
+func redactCapturedHeaders(hdr http.Header) map[string]string {
+	redacted := make(map[string]string, len(hdr))
+	for k, v := range hdr {
+		if len(v) == 0 {
+			continue
+		}
+		lower := strings.ToLower(k)
+		if redactHeaders[lower] {
+			redacted[lower] = redactedValue
+			continue
+		}
+		redacted[lower] = v[0]
+	}
+	return redacted
+}
+
 // captureRequest builds the captured-request envelope for the dashboard's
 // Replay button (v0.4 A3) and queues it via the async writer. Sensitive
 // header values (see redactHeaders) are replaced with "[REDACTED]" before
@@ -696,19 +709,7 @@ func (p *Proxy) captureRequest(fnID, execID, method, path string, hdr http.Heade
 		maxBytes = 1 << 20 // 1MiB safety floor
 	}
 
-	redacted := make(map[string]string, len(hdr))
-	for k, v := range hdr {
-		if len(v) == 0 {
-			continue
-		}
-		lower := strings.ToLower(k)
-		if redactHeaders[lower] {
-			redacted[lower] = redactedValue
-			continue
-		}
-		redacted[lower] = v[0]
-	}
-	headersJSON, err := json.Marshal(redacted)
+	headersJSON, err := json.Marshal(redactCapturedHeaders(hdr))
 	if err != nil {
 		// JSON of a string-string map can only fail on memory pressure;
 		// give up rather than corrupt the row.
@@ -737,6 +738,24 @@ func (p *Proxy) captureRequest(fnID, execID, method, path string, hdr http.Heade
 		Truncated:   truncated,
 		CapturedAt:  time.Now().UnixMilli(),
 	})
+}
+
+// CopyFunctionResponseHeaders relays a function's response headers and then
+// applies the isolation guards. Every entrypoint that returns function output
+// to a client (invocation, replay) must use it, so none can serve a handler's
+// bytes without the sandbox CSP and nosniff.
+func CopyFunctionResponseHeaders(w http.ResponseWriter, headers map[string]string) {
+	for k, v := range headers {
+		if hopByHopResponseHeader(k) {
+			// The adapter copies every header off its fetch Response, so an
+			// idiomatic proxy handler forwards content-length (compressed)
+			// and content-encoding: gzip alongside a body Go has already
+			// decoded. Go honours the explicit length and truncates.
+			continue
+		}
+		w.Header().Set(k, v)
+	}
+	applyFunctionResponseGuards(w)
 }
 
 // hopByHopResponseHeader reports whether a header the adapter handed back

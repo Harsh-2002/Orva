@@ -10,22 +10,25 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
-func TestManagedShutdownOrder(t *testing.T) {
+func TestManagedShutdownRunsEveryStage(t *testing.T) {
 	for failed := range 4 {
 		var got []int
 		wantErr := errors.New("cannot close")
@@ -39,11 +42,7 @@ func TestManagedShutdownOrder(t *testing.T) {
 			}
 		}
 		err := closeManaged(t.Context(), step(1), step(2), step(3))
-		expected := []int{1, 2, 3}
-		if failed > 0 {
-			expected = expected[:failed]
-		}
-		if !slices.Equal(got, expected) || (failed > 0) != errors.Is(err, wantErr) {
+		if !slices.Equal(got, []int{1, 2, 3}) || (failed > 0) != errors.Is(err, wantErr) {
 			t.Fatalf("failure at %d: ran %v, err %v", failed, got, err)
 		}
 	}
@@ -187,6 +186,19 @@ func TestManagedDaemonKernel(t *testing.T) {
 		}
 		mustManagedBoot(t, installAdapter(target, lang))
 	}
+	managedDir := filepath.Join(data, servingmode.Managed)
+	const blockedIP = "192.0.2.10"
+	func() {
+		db, err := database.New(filepath.Join(managedDir, "orva.db"))
+		mustManagedBoot(t, err)
+		defer func() { mustManagedBoot(t, db.Close()) }()
+		mustManagedBoot(t, db.Migrate())
+		_, err = db.InsertCustomBlocklistRule("cidr", blockedIP+"/32", "fixture", true)
+		mustManagedBoot(t, err)
+	}()
+	// Prevent initial publication without changing the database or the daemon's dependencies.
+	fwDir := filepath.Dir(firewall.PolicyDir(managedDir))
+	mustManagedBoot(t, os.WriteFile(fwDir, nil, 0600))
 	client := &http.Client{Timeout: 250 * time.Millisecond}
 	awaitHTTP := func() {
 		t.Helper()
@@ -230,6 +242,8 @@ func TestManagedDaemonKernel(t *testing.T) {
 	}
 	first := start(daemonLeaf, "serve")
 	awaitHTTP()
+	checkChat := managedDaemonChat(t, "http://"+addr, blockedIP)
+	checkChat(false)
 	if realRootfs != "" {
 		t.Run("fresh-deploy-invoke", func(t *testing.T) {
 			checkFreshManagedDeploy(t, "http://"+addr)
@@ -253,8 +267,10 @@ func TestManagedDaemonKernel(t *testing.T) {
 	assertExit(first, -1)
 	populated(old, true)
 	mustManagedBoot(t, os.Rename(filepath.Join(data, "rootfs"), filepath.Join(data, "offline-rootfs")))
+	mustManagedBoot(t, os.Remove(fwDir))
 	second := start(daemonLeaf, "serve")
 	awaitHTTP()
+	checkChat(true)
 	after, err := os.Stat(old)
 	mustManagedBoot(t, err)
 	if !os.SameFile(before, after) || epochGroup() == old {
@@ -360,7 +376,8 @@ func checkFreshManagedDeploy(t *testing.T, base string) {
 		}
 		return data
 	}
-	call(t, "POST", "/api/v1/auth/onboard", map[string]string{"username": "scratch-admin", "password": "scratch-only-password"}, 200)
+	// managedDaemonChat onboarded the only operator; a second onboard is refused.
+	call(t, "POST", "/api/v1/auth/login", map[string]string{"username": "fixture", "password": "scratch-only"}, 200)
 	for _, tc := range []struct{ lang, filename, code string }{
 		{"node", "handler.js", `exports.handler=()=>({statusCode:200,body:"fresh-node"})`},
 		{"python", "handler.py", "def handler(event):\n    return {'statusCode': 200, 'body': 'fresh-python'}\n"},
@@ -395,5 +412,117 @@ func checkFreshManagedDeploy(t *testing.T, base string) {
 				t.Fatalf("invocation returned %q", got)
 			}
 		})
+	}
+}
+
+// Exercise the dashboard's session-authenticated API against ordinary daemon
+// startup; both the model catalog and the turn use only this offline fixture.
+func managedDaemonChat(t *testing.T, origin, blockedIP string) func(bool) {
+	t.Helper()
+	var modelRequests, turnRequests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			modelRequests.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"data":[{"id":"daemon-fixture"}]}`)
+		case "/v1/chat/completions":
+			turnRequests.Add(1)
+			var req struct {
+				Tools []struct{ Function struct{ Name string } }
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&req); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid fixture request", http.StatusBadRequest)
+				return
+			}
+			var tools []string
+			for _, tool := range req.Tools {
+				tools = append(tools, tool.Function.Name)
+			}
+			if !slices.Contains(tools, "create_iam_policy") || !slices.Contains(tools, "install_managed_deployment") ||
+				slices.Contains(tools, "update_function") || slices.Contains(tools, "invoke_function") {
+				t.Errorf("unexpected Chat tool catalog: %v", tools)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"daemon-fixture\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"managed daemon fixture reply\"},\"finish_reason\":null}]}\n\n"+
+				"data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"daemon-fixture\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"+
+				"data: [DONE]\n\n")
+		default:
+			t.Errorf("unexpected provider request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(provider.Close)
+	jar, err := cookiejar.New(nil)
+	mustManagedBoot(t, err)
+	client := &http.Client{Jar: jar, Timeout: 12 * time.Second}
+	call := func(method, path, body string, status int) string {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), method, origin+path, strings.NewReader(body))
+		mustManagedBoot(t, err)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := client.Do(req)
+		mustManagedBoot(t, err)
+		defer res.Body.Close()
+		raw, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		mustManagedBoot(t, err)
+		if res.StatusCode != status {
+			t.Fatalf("%s %s: HTTP %d, want %d: %s", method, path, res.StatusCode, status, raw)
+		}
+		return string(raw)
+	}
+	call("GET", "/api/v1/ai/settings", "", 401)
+	call("POST", "/api/v1/auth/onboard", `{"username":"fixture","password":"scratch-only"}`, 200)
+	call("GET", "/api/v1/ai/settings", "", 200)
+	call("GET", "/api/v1/ai/conversations", "", 200)
+	save := func(endpoint string) string {
+		t.Helper()
+		raw := call("POST", "/api/v1/ai/providers", fmt.Sprintf(`{"provider":"openai","api_key":"synthetic-loopback-only","base_url":%q}`, endpoint), 200)
+		var result struct{ Provider struct{ ID string } }
+		mustManagedBoot(t, json.Unmarshal([]byte(raw), &result))
+		if result.Provider.ID == "" || strings.Contains(raw, "synthetic-loopback-only") {
+			t.Fatal("provider configuration missing ID or exposed key")
+		}
+		return "/api/v1/ai/providers/" + result.Provider.ID + "/models"
+	}
+	models := save(provider.URL + "/v1")
+	call("PUT", "/api/v1/ai/settings", `{"provider":"openai","model":"daemon-fixture","approval_policy":"all_writes"}`, 200)
+	turn := func() string { return call("POST", "/api/v1/ai/chat", `{"content":"Say hello"}`, 200) }
+	expectFailure := func(needle string) {
+		t.Helper()
+		var result struct {
+			Error  string
+			Models []json.RawMessage
+		}
+		mustManagedBoot(t, json.Unmarshal([]byte(call("GET", models, "", 200)), &result))
+		if !strings.Contains(result.Error, needle) || result.Models == nil || len(result.Models) != 0 {
+			t.Fatalf("model probe was not refused for %q: %+v", needle, result)
+		}
+		if raw := turn(); !strings.Contains(raw, "event: error\n") || !strings.Contains(raw, needle) {
+			t.Fatalf("Chat turn was not refused for %q: %s", needle, raw)
+		}
+	}
+	return func(available bool) {
+		t.Helper()
+		if !available {
+			expectFailure(firewall.ErrPolicyUnavailable.Error())
+			if modelRequests.Load() != 0 || turnRequests.Load() != 0 {
+				t.Fatal("unavailable policy still contacted provider")
+			}
+			return
+		}
+		if raw := call("GET", models, "", 200); !strings.Contains(raw, `"id":"daemon-fixture"`) {
+			t.Fatalf("allowed model probe: %s", raw)
+		}
+		if raw := turn(); !strings.Contains(raw, "managed daemon fixture reply") || strings.Contains(raw, "event: error\n") {
+			t.Fatalf("allowed Chat turn: %s", raw)
+		}
+		models = save("http://" + blockedIP + ":8080/v1")
+		expectFailure(firewall.ErrBlockedByEgressPolicy.Error())
+		if modelRequests.Load() != 1 || turnRequests.Load() != 1 {
+			t.Fatalf("provider requests: models=%d, turns=%d; want one of each", modelRequests.Load(), turnRequests.Load())
+		}
 	}
 }

@@ -177,11 +177,23 @@ func runServeManaged(ctx context.Context, cfg *config.Config) (err error) {
 	defer func() {
 		stop, cancel := context.WithTimeout(context.Background(), managedShutdownTimeout)
 		defer cancel()
-		closeErr := closeManaged(stop, func(ctx context.Context) error {
+		closeErr := closeManaged(stop, func(context.Context) error {
+			// An SSE stream never idles, so http.Server.Shutdown would wait out the
+			// whole budget on one open dashboard tab. End the streams first.
+			if instance != nil {
+				instance.StopEventStreams()
+			}
+			return nil
+		}, func(ctx context.Context) error {
 			if httpServer == nil {
 				return nil
 			}
-			return httpServer.Shutdown(ctx)
+			err := httpServer.Shutdown(ctx)
+			if err != nil {
+				// Do not leave handlers running against the instance closed next.
+				err = errors.Join(err, httpServer.Close())
+			}
+			return err
 		}, func(ctx context.Context) error {
 			if instance == nil {
 				return nil
@@ -243,11 +255,13 @@ func runServeManaged(ctx context.Context, cfg *config.Config) (err error) {
 
 var strandedManagedLayout *servingmode.Lock // Retained only until the command exits 78.
 
+// closeManaged runs every stage in order and joins their errors: a failed HTTP
+// drain must not skip the instance and Owner cleanup that follow it. Any error
+// still leaves the layout lock held (the caller strands it).
 func closeManaged(ctx context.Context, stages ...func(context.Context) error) error {
+	var err error
 	for _, stage := range stages {
-		if err := stage(ctx); err != nil {
-			return err
-		}
+		err = errors.Join(err, stage(ctx))
 	}
-	return nil
+	return err
 }

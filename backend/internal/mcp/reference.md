@@ -1,6 +1,7 @@
 # Orva — Documentation
 
-> The internal managed server composition is not the default Orva server.
+> On Linux, `orva serve` selects the managed server from a durable mode record;
+> legacy instances stay legacy.
 > It exposes authenticated capability discovery at `GET /api/v1/iam/capabilities`,
 > fresh unbound creation at `POST /api/v1/iam/functions`, and exact Factory
 > installation at `POST /api/v1/deployments/{id}/install`. The managed
@@ -21,8 +22,20 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 39 on this
-> composition; read-only keys see 28 and 10 respectively.
+> An all-permissions key sees 73 tools on the normal server and 69 on this
+> composition; read-only keys see 28 and 23 respectively. This composition also
+> mounts executions (with replay through managed admission), traces, activity,
+> events, system, API-key, OAuth-app, session, channel and Chat routes at the same
+> permission tiers as the normal server, and accepts channel tokens at `/mcp`
+> as an invoke-only catalog dispatched through the managed pool. See
+> `docs/API.md` "Managed operator surfaces".
+> Managed runtime and syscall inventory use the same read tier as legacy.
+> `orva login --test` and runtime shell completion use the runtime catalog.
+> Dashboard Chat requires admin and uses only the managed tool catalog,
+> scoped to the caller. A missing compiled egress policy stops provider calls
+> without disabling Chat settings or history. Model discovery checks the
+> actual connection address; a Chat turn checks the provider endpoint before
+> the turn, not at dial time.
 
 > Internal configuration qualification: optional `workloadconfig` HTTP and
 > MCP/shared-AI adapters publish environment, execution settings and encrypted
@@ -284,6 +297,16 @@ print(r.json())
 > dashboard's function settings → "Custom routes" section (it
 > collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
+
+### Saved request fixtures (managed)
+
+Use a function name or UUID in `/api/v1/functions/{id}/fixtures`. `GET` on
+the collection lists presets and `GET /{name}` retrieves one; both require
+`read`. `POST` on the collection creates a preset, `PUT /{name}` creates or
+replaces one, and `DELETE /{name}` removes one; all three require `write`.
+These routes only store or read presets; they do not invoke functions.
+Managed MCP and Chat can also list, save, and delete presets; see “Fixture
+tools” below for tool names and permission tiers.
 
 ### Check response latency
 
@@ -984,7 +1007,12 @@ call directly. API key permissions scope the available tool set.
 
 > **`invoke_function` diagnostic hints.** When the handler crashes with a network-shaped error (`ENETUNREACH`, `ECONNREFUSED`, `fetch failed`, `OrvaUnavailableError`) AND the function's `network_mode` is `"none"`, the response carries an `orva_hint` field telling the agent exactly what to fix (`network_mode='egress'` via `update_function`). Always check this field before doing your own root-cause analysis on a network error.
 
-> **Fixture tools** (`list_fixtures`, `save_fixture`, `delete_fixture`, `test_function_with_fixture`) let you save Postman-style request envelopes per function and replay them — useful for debugging and regression checks. The `test_function_with_fixture` tool accepts a shallow-merge `override` object so a single fixture can be parameterised per call without mutating the saved row.
+> **Fixture tools.** `list_fixtures` (`read`), `save_fixture` and `delete_fixture`
+> (both `write`) manage saved request presets by function name or UUID without
+> invoking code. In managed MCP and Chat, each tool rechecks the operator's live
+> credential and required tier at call time, and works for inactive functions.
+> Only the normal catalog also offers `test_function_with_fixture` to run a
+> preset; its shallow-merge `override` does not change the stored fixture.
 
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 
