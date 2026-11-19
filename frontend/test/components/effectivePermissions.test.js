@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { KeepAlive, h, ref } from 'vue'
 import { useConfirmStore } from '@/stores/confirm.js'
 import FunctionPermissionSources from '@/views/FunctionPermissionSources.vue'
 import FunctionPermissions from '@/views/FunctionPermissions.vue'
@@ -266,6 +267,40 @@ describe('source-aware current access', () => {
     dialog.answer(true)
     await flushPromises()
     expect(api.review).not.toHaveBeenCalled()
+  })
+
+  it('discards a dialog from a previous visit even when the same owner and expectations return', async () => {
+    setActivePinia(createPinia())
+    const api = apiFor(unapproved())
+    const open = ref(true)
+    const w = make({
+      render: () => h(KeepAlive, null, {
+        default: () => open.value ? h(FunctionPermissionSources, { functionId: FN_ID, api }) : null,
+      }),
+    })
+    await flushPromises()
+    const dialog = pending()
+    useConfirmStore().ask = dialog.ask
+    const approve = () => w.get('[data-testid="permissions-approve"]')
+    await approve().trigger('click')
+    expect(dialog.ask).toHaveBeenCalledTimes(1)
+    open.value = false
+    await flushPromises()
+    expect(w.find('[data-testid="permissions-approve"]').exists()).toBe(false)
+    open.value = true
+    await flushPromises()
+    dialog.answer(true)
+    await flushPromises()
+    expect(api.review).not.toHaveBeenCalled()
+
+    await approve().trigger('click')
+    expect(dialog.ask).toHaveBeenCalledTimes(2)
+    dialog.answer(true)
+    await flushPromises()
+    expect(api.review).toHaveBeenCalledTimes(1)
+    expect(api.review.mock.calls[0].slice(0, 2)).toEqual([
+      FN_ID, { expected: { revision: '2', current_artifact: DIGEST_A, approved_artifact: null } },
+    ])
   })
 
   it('opens one confirmation and sends one approval for a double click', async () => {

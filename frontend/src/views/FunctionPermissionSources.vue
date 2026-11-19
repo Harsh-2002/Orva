@@ -228,7 +228,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import Button from '@/components/common/Button.vue'
 import StatementList from '@/components/permissions/StatementList.vue'
 import InboundCallers from '@/components/permissions/InboundCallers.vue'
@@ -309,6 +309,12 @@ const approveReason = computed(() => {
 })
 const approving = ref(false)
 const approveStale = ref('')
+onDeactivated(() => {
+  lifetime += 1
+  inlineOperation += 1
+  approving.value = false
+  approveStale.value = ''
+})
 // The confirmation dialog is async: approve only the owner, page lifetime and
 // exact expectations the operator saw when it opened.
 async function approve() {
