@@ -110,10 +110,14 @@ func enrollmentWitness(t *testing.T, dataDir string) string {
 }
 
 // enrollmentKillFixture is a stopped legacy instance with the keys an operator
-// would already have on disk.
+// would already have on disk. The data directory is chmod'ed to exactly 0700:
+// a directory born under a setgid temp area is 2700, and every root the managed
+// owner creates inside it then inherits that bit, which builder.NewOutputOwner
+// rejects with ErrInvalid — after owner provisioning has already succeeded.
 func enrollmentKillFixture(t *testing.T) (string, []string) {
 	t.Helper()
 	dir, first, second, _ := enrollmentFixture(t, false)
+	enrollmentMust(t, os.Chmod(dir, 0700))
 	for _, name := range []string{".master.key", ".admin-key"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("legacy"+name), 0600); err != nil {
 			t.Fatal(err)
@@ -263,6 +267,27 @@ func TestManagedEnrollWitnessPlacement(t *testing.T) {
 	if filepath.IsLocal(rel) {
 		t.Fatalf("witness %s is inside the data directory", witness)
 	}
+
+	// The managed roots are created the way openManagedBootOwner creates them,
+	// and the build output owner demands an exact 0700. A data directory that
+	// inherited a setgid bit would fail there, long after the fixture looked fine.
+	if mode := dirMode(t, dir); mode != os.ModeDir|0700 {
+		t.Fatalf("data directory is %v, want a plain 0700 directory", mode)
+	}
+	for _, name := range []string{"sealed-owner", "sealed-code", "sealed-runtime", "managed-build"} {
+		path := filepath.Join(dir, name)
+		enrollmentMust(t, os.Mkdir(path, 0700))
+		if mode := dirMode(t, path); mode != os.ModeDir|0700 {
+			t.Fatalf("%s is %v, want a plain 0700 directory", name, mode)
+		}
+	}
+}
+
+func dirMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(path)
+	enrollmentMust(t, err)
+	return st.Mode()
 }
 
 // TestManagedEnrollProcessKill stops the real offline apply at each
