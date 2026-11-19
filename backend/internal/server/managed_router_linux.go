@@ -272,16 +272,16 @@ func mountManagedAccess(mux *http.ServeMux, db *database.Database, ops *managedR
 	gateRoute(mux, db, ops, "DELETE /api/v1/keys/{key_id}", managedAdmin, keys.Delete)
 
 	apps := &handlers.OAuthAppsHandler{DB: db}
-	gateRoute(mux, db, ops, "GET /api/v1/oauth/connected-apps", managedRead, apps.List)
-	gateRoute(mux, db, ops, "DELETE /api/v1/oauth/connected-apps/{id}", managedWrite, apps.Revoke)
-	gateRoute(mux, db, ops, "DELETE /api/v1/oauth/clients/{client_id}", managedWrite, apps.RemoveApplication)
+	gateSessionRoute(mux, db, ops, "GET /api/v1/oauth/connected-apps", managedRead, apps.List)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/oauth/connected-apps/{id}", managedWrite, apps.Revoke)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/oauth/clients/{client_id}", managedWrite, apps.RemoveApplication)
 
 	sessions := &handlers.AuthHandler{DB: db}
 	if ops.InvalidateSession != nil {
 		sessions.InvalidateSession = ops.InvalidateSession
 	}
-	gateRoute(mux, db, ops, "GET /api/v1/auth/sessions", managedRead, sessions.Sessions)
-	gateRoute(mux, db, ops, "DELETE /api/v1/auth/sessions/{prefix}", managedWrite, sessions.RevokeSession)
+	gateSessionRoute(mux, db, ops, "GET /api/v1/auth/sessions", managedRead, sessions.Sessions)
+	gateSessionRoute(mux, db, ops, "DELETE /api/v1/auth/sessions/{prefix}", managedWrite, sessions.RevokeSession)
 
 	channels := &handlers.ChannelHandler{DB: db}
 	gateRoute(mux, db, ops, "GET /api/v1/channels", managedAdmin, channels.List)
@@ -440,16 +440,7 @@ func managedOperator(db *database.Database) func(*http.Request) (*auth.Principal
 			}
 		}
 		if key == "" {
-			cookie, err := r.Cookie("session_token")
-			if err != nil || !managedSessionOrigin(r) {
-				return nil, database.ErrOperatorDenied
-			}
-			session, err := db.ResolveSessionIdentityByToken(r.Context(), cookie.Value)
-			if err != nil {
-				return nil, database.ErrOperatorDenied
-			}
-			return &auth.Principal{Kind: auth.KindSession, ID: session.ID, Label: session.Username,
-				Perms: auth.PermSet{"read": true, "write": true, "invoke": true, "admin": true}}, nil
+			return managedSessionOperator(db)(r)
 		}
 		if !strings.HasPrefix(key, "orva_") || strings.HasPrefix(key, "orva_chn_") ||
 			strings.HasPrefix(key, "orva_oat_") || strings.HasPrefix(key, "orva_ort_") || len(key) > 128 {
@@ -465,6 +456,26 @@ func managedOperator(db *database.Database) func(*http.Request) (*auth.Principal
 			perms[perm] = true
 		}
 		return &auth.Principal{Kind: auth.KindAPIKey, ID: row.ID, Label: row.Name, Perms: perms}, nil
+	}
+}
+
+// managedSessionOperator authenticates only the session cookie, with the
+// same-origin proof for mutations. Routes whose handlers authorise by cookie
+// (sessions, connected applications) must authenticate and attribute the same
+// credential: a bearer header is never consulted, as legacy never lets one
+// stand in for the cookie.
+func managedSessionOperator(db *database.Database) func(*http.Request) (*auth.Principal, error) {
+	return func(r *http.Request) (*auth.Principal, error) {
+		cookie, err := r.Cookie("session_token")
+		if err != nil || !managedSessionOrigin(r) {
+			return nil, database.ErrOperatorDenied
+		}
+		session, err := db.ResolveSessionIdentityByToken(r.Context(), cookie.Value)
+		if err != nil {
+			return nil, database.ErrOperatorDenied
+		}
+		return &auth.Principal{Kind: auth.KindSession, ID: session.ID, Label: session.Username,
+			Perms: auth.PermSet{"read": true, "write": true, "invoke": true, "admin": true}}, nil
 	}
 }
 
@@ -522,7 +533,18 @@ func gateRoute(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps,
 }
 
 func requireManagedOperator(db *database.Database, tier managedTier, next http.HandlerFunc) http.HandlerFunc {
-	authenticate := managedOperator(db)
+	return requireManagedPrincipal(db, managedOperator(db), tier, next)
+}
+
+// gateSessionRoute registers a cookie-authorised route; see managedSessionOperator.
+func gateSessionRoute(mux *http.ServeMux, db *database.Database, ops *managedRouteDeps, pattern string, tier managedTier, next http.HandlerFunc) {
+	if ops != nil && ops.recordRoute != nil {
+		ops.recordRoute(pattern, tier)
+	}
+	mux.HandleFunc(pattern, requireManagedPrincipal(db, managedSessionOperator(db), tier, next))
+}
+
+func requireManagedPrincipal(db *database.Database, authenticate func(*http.Request) (*auth.Principal, error), tier managedTier, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A GET pattern also serves HEAD. The legacy router assigns every
 		// non-GET method on an ordinary route `write`, so HEAD there needs write.

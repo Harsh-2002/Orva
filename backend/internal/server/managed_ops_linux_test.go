@@ -626,3 +626,91 @@ func TestManagedHeadRequiresTheLegacyWriteTier(t *testing.T) {
 		t.Fatalf("HEAD storage refused an admin key: %d", rec.Code)
 	}
 }
+
+// Sessions and connected applications authorise by cookie in their handlers, so
+// the gate must authenticate and attribute that same cookie, never a bearer.
+func TestManagedSessionOnlyRoutesUseTheCookieAlone(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	_, err := f.db.WriteDB().Exec(`ALTER TABLE sessions ADD COLUMN id TEXT; CREATE UNIQUE INDEX idx_sessions_identity ON sessions(id)`)
+	managedMust(t, err)
+	user, err := f.db.CreateUser("cookie-user", "test-only-password")
+	managedMust(t, err)
+	current, err := f.db.CreateSession(user.ID, time.Hour)
+	managedMust(t, err)
+	other, err := f.db.CreateSession(user.ID, time.Hour)
+	managedMust(t, err)
+	admin, keyID := f.key("admin", `["read","write","admin"]`)
+
+	type request struct{ method, path string }
+	routes := []request{
+		{http.MethodGet, "/api/v1/auth/sessions"},
+		{http.MethodDelete, "/api/v1/auth/sessions/" + other.Token[:16]},
+		{http.MethodGet, "/api/v1/oauth/connected-apps"},
+		{http.MethodDelete, "/api/v1/oauth/connected-apps/" + ids.New()},
+		{http.MethodDelete, "/api/v1/oauth/clients/" + ids.New()},
+	}
+	do := func(r request, bearer, cookie, origin string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(r.method, r.path, nil)
+		if bearer != "" {
+			req.Header.Set("X-Orva-API-Key", bearer)
+		}
+		if cookie != "" {
+			req.AddCookie(&http.Cookie{Name: "session_token", Value: cookie})
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		f.router.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, r := range routes {
+		// A key, however powerful, is not a session.
+		if rec := do(r, admin, "", "http://"+httptest.NewRequest("GET", "/", nil).Host); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s accepted a bearer without a cookie: %d", r.method, r.path, rec.Code)
+		}
+		// A key cannot rescue an invalid cookie either.
+		if rec := do(r, admin, "not-a-session", "http://example.com"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s accepted a bearer alongside an invalid cookie: %d", r.method, r.path, rec.Code)
+		}
+		if r.method != http.MethodGet {
+			// The cookie that authorises a mutation must carry same-origin proof.
+			for _, bearer := range []string{"", admin} {
+				if rec := do(r, bearer, current.Token, "https://evil.example"); rec.Code != http.StatusUnauthorized {
+					t.Fatalf("%s %s accepted a cross-origin cookie mutation (bearer=%v): %d", r.method, r.path, bearer != "", rec.Code)
+				}
+				if rec := do(r, bearer, current.Token, ""); rec.Code != http.StatusUnauthorized {
+					t.Fatalf("%s %s accepted a cookie mutation with no origin: %d", r.method, r.path, rec.Code)
+				}
+			}
+		}
+	}
+	// Cookie only, and cookie plus a bearer, both act as the cookie's user.
+	for _, bearer := range []string{"", admin} {
+		if rec := do(routes[0], bearer, current.Token, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"current":true`) {
+			t.Fatalf("session list with bearer=%v: %d %s", bearer != "", rec.Code, rec.Body.String())
+		}
+		if rec := do(routes[2], bearer, current.Token, ""); rec.Code != http.StatusOK {
+			t.Fatalf("connected apps with bearer=%v: %d", bearer != "", rec.Code)
+		}
+	}
+	// Attribution follows the cookie, not the bearer that rode along.
+	deadline := time.Now().Add(5 * time.Second)
+	var rows []database.ActivityRow
+	for time.Now().Before(deadline) {
+		rows, _, _, err = f.db.ListActivity(database.ActivityFilter{Search: "/api/v1/oauth/connected-apps", StatusMax: 399})
+		managedMust(t, err)
+		if len(rows) >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("expected two successful connected-apps rows, got %d", len(rows))
+	}
+	for _, row := range rows {
+		if row.ActorType != "session" || row.Source != "web" || row.ActorID == keyID || row.ActorLabel != "cookie-user" {
+			t.Fatalf("activity attributed to the wrong credential: %+v", row)
+		}
+	}
+}
