@@ -508,17 +508,7 @@ func (p *Proxy) Forward(
 	if acq.ColdStart {
 		coldStartStr = "true"
 	}
-	for k, v := range dres.Headers {
-		if hopByHopResponseHeader(k) {
-			// The adapter copies every header off its fetch Response, so an
-			// idiomatic proxy handler forwards content-length (compressed)
-			// and content-encoding: gzip alongside a body Go has already
-			// decoded. Go honours the explicit length and truncates.
-			continue
-		}
-		w.Header().Set(k, v)
-	}
-	applyFunctionResponseGuards(w)
+	CopyFunctionResponseHeaders(w, dres.Headers)
 	w.Header().Set("X-Orva-Execution-ID", execID)
 	w.Header().Set("X-Orva-Cold-Start", coldStartStr)
 
@@ -737,6 +727,24 @@ func (p *Proxy) captureRequest(fnID, execID, method, path string, hdr http.Heade
 		Truncated:   truncated,
 		CapturedAt:  time.Now().UnixMilli(),
 	})
+}
+
+// CopyFunctionResponseHeaders relays a function's response headers and then
+// applies the isolation guards. Every entrypoint that returns function output
+// to a client (invocation, replay) must use it, so none can serve a handler's
+// bytes without the sandbox CSP and nosniff.
+func CopyFunctionResponseHeaders(w http.ResponseWriter, headers map[string]string) {
+	for k, v := range headers {
+		if hopByHopResponseHeader(k) {
+			// The adapter copies every header off its fetch Response, so an
+			// idiomatic proxy handler forwards content-length (compressed)
+			// and content-encoding: gzip alongside a body Go has already
+			// decoded. Go honours the explicit length and truncates.
+			continue
+		}
+		w.Header().Set(k, v)
+	}
+	applyFunctionResponseGuards(w)
 }
 
 // hopByHopResponseHeader reports whether a header the adapter handed back

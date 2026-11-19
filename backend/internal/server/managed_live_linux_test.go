@@ -298,6 +298,9 @@ func TestManagedServingLive(t *testing.T) {
 			return res
 		}
 		res := replay(200)
+		if res.Header.Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(res.Header.Get("Content-Security-Policy"), "sandbox ") {
+			t.Fatalf("replay response lacks the function isolation guards: %v", res.Header)
+		}
 		replayed := res.Header.Get("X-Orva-Execution-ID")
 		if replayed == "" || res.Header.Get("X-Orva-Replay-Of") != original {
 			t.Fatal("replay did not report the new execution it created")

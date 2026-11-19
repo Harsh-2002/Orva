@@ -89,3 +89,28 @@ func TestHopByHopResponseHeadersAreNotRelayed(t *testing.T) {
 		}
 	}
 }
+
+// Replay and invocation share one helper: a handler cannot opt out of the
+// guards by sending its own policy, and transfer headers are not relayed.
+func TestCopyFunctionResponseHeadersGuardsEveryEntrypoint(t *testing.T) {
+	rec := httptest.NewRecorder()
+	CopyFunctionResponseHeaders(rec, map[string]string{
+		"Content-Type":            "text/html",
+		"Content-Security-Policy": "default-src *",
+		"X-Content-Type-Options":  "sniff",
+		"Content-Length":          "999",
+		"Content-Encoding":        "gzip",
+		"X-Custom":                "kept",
+	})
+	h := rec.Header()
+	if h.Get("X-Content-Type-Options") != "nosniff" || !strings.HasPrefix(h.Get("Content-Security-Policy"), "sandbox ") ||
+		strings.Contains(h.Get("Content-Security-Policy"), "allow-same-origin") {
+		t.Fatalf("handler overrode the isolation guards: %v", h)
+	}
+	if h.Get("Content-Length") != "" || h.Get("Content-Encoding") != "" {
+		t.Fatalf("transfer headers were relayed: %v", h)
+	}
+	if h.Get("Content-Type") != "text/html" || h.Get("X-Custom") != "kept" {
+		t.Fatalf("ordinary headers were dropped: %v", h)
+	}
+}

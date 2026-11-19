@@ -321,9 +321,7 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	// Pass the worker's headers through verbatim so a JSON function
 	// stays JSON, plus an Orva-prefixed metadata pair so the dashboard
 	// can swap the open drawer to the new execution without polling.
-	for k, v := range resp.Headers {
-		w.Header().Set(k, v)
-	}
+	proxy.CopyFunctionResponseHeaders(w, resp.Headers)
 	w.Header().Set("X-Orva-Execution-ID", newExecID)
 	w.Header().Set("X-Orva-Replay-Of", origID)
 	w.Header().Set("X-Orva-Duration-MS", strconv.FormatInt(duration.Milliseconds(), 10))
