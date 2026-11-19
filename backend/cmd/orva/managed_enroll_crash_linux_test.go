@@ -65,6 +65,9 @@ func enrollKillChild(dir, stage, planPath, exclude string) int {
 			if s == stage {
 				os.Exit(enrollKillExit)
 			}
+			// Progress marker: a boundary that is never reached names the step
+			// that failed even when the child's own error is not visible.
+			fmt.Fprintf(os.Stderr, "enrollment kill child: passed %s\n", s)
 			return nil
 		})
 	})
@@ -73,6 +76,21 @@ func enrollKillChild(dir, stage, planPath, exclude string) int {
 		return 1
 	}
 	return 0
+}
+
+// enrollmentChildOutput keeps a failing child's own explanation in the test log.
+// The apply knows which stage it failed at and why; without this the parent only
+// reports "exit status 1".
+func enrollmentChildOutput(t *testing.T, out []byte) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) > 40 {
+		lines = lines[len(lines)-40:]
+	}
+	t.Logf("child output (last %d lines):", len(lines))
+	for _, line := range lines {
+		t.Logf("  %s", line)
+	}
 }
 
 // enrollmentWitness provisions the host witness the way production does: a
@@ -326,10 +344,12 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 			var status *exec.ExitError
 			if tc.stage == "" {
 				if err != nil {
-					t.Fatalf("uninterrupted apply failed: %v\n%s", err, out)
+					enrollmentChildOutput(t, out)
+					t.Fatalf("uninterrupted apply failed: %v", err)
 				}
 			} else if !errors.As(err, &status) || status.ExitCode() != enrollKillExit {
-				t.Fatalf("apply did not stop at %q: %v\n%s", tc.stage, err, out)
+				enrollmentChildOutput(t, out)
+				t.Fatalf("apply did not stop at %q: %v", tc.stage, err)
 			}
 
 			if _, err := os.Lstat(filepath.Join(dir, servingmode.MarkerName)); (err == nil) != (tc.stage == "") {
@@ -376,7 +396,8 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 			serve.Dir = t.TempDir()
 			serveOut, serveErr := serve.CombinedOutput()
 			if !errors.As(serveErr, &status) || status.ExitCode() != exitConfig {
-				t.Fatalf("serve exited %v, want %d\n%s", serveErr, exitConfig, serveOut)
+				enrollmentChildOutput(t, serveOut)
+				t.Fatalf("serve exited %v, want %d", serveErr, exitConfig)
 			}
 			if !strings.Contains(string(serveOut), "refusing legacy startup") {
 				t.Fatalf("serve did not report a layout refusal:\n%s", serveOut)
