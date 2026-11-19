@@ -141,6 +141,11 @@ func TestManagedServingLive(t *testing.T) {
 		}
 		return b
 	}
+	fixtureRan := false
+	t.Run("fixture-invoke", func(t *testing.T) {
+		fixtureRan = true
+		managedFixtureInvoke(t, db, call)
+	})
 	egressRan := false
 	t.Run("egress-rotation", func(t *testing.T) {
 		egressRan = true
@@ -239,8 +244,8 @@ func TestManagedServingLive(t *testing.T) {
 			})
 		})
 	}
-	// An isolated egress run does not create the Node fixture used below.
-	if egressRan && !nodeRan {
+	// The standalone journeys do not create the Node owner used below.
+	if (egressRan || fixtureRan) && !nodeRan {
 		return
 	}
 	node, err := db.GetFunctionByName("managed-node")

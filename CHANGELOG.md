@@ -65,15 +65,16 @@ unreleased range, and the sections below as the record for everything before it.
   dispatches through managed admission. Admission is not approval: an installed
   but unreviewed function still runs its handler (protected SDK operations stay
   denied until review), so bundle only functions agents should be able to run.
-  The managed MCP and Chat catalog grows from 47/13 to 75/25 tools
+  The managed MCP and Chat catalog grows from 47/13 to 76/25 tools
   (all-permissions / read-only key); it adds `replay_execution`,
   `list_activity` and read-only `list_channels` and `get_channel`, and now
   includes the API-key and operator KV tools. Managed KV tools recheck their
   required read or write tier on every call. The normal catalog is unchanged
   (73/28).
-- Managed MCP and Chat can list, save and delete saved request fixtures. Each
-  call rechecks live `read` or `write` permission. Running a fixture through
-  `test_function_with_fixture` remains unavailable in managed mode.
+- Managed MCP and Chat can list, save, delete, and run saved request fixtures.
+  Each call rechecks its live permission tier. `test_function_with_fixture`
+  requires `invoke` and dispatches only the installed managed function. It
+  does not approve permissions or change the saved preset.
 - Managed Chat uses only the managed tool catalog. Model discovery and Chat
   turns do not contact providers until the instance has a compiled egress
   policy. Settings and conversation history remain available.
@@ -89,7 +90,7 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST and `orva functions purge-cache` can clear a function's
   dependency cache without touching its installed deployment.
 - Not yet on the managed composition: pool configuration, secrets,
-  fixture execution, outbound webhook delivery, account password change, and
+  outbound webhook delivery, account password change, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 
