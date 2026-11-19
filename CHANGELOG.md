@@ -21,6 +21,13 @@ unreleased range, and the sections below as the record for everything before it.
   dependencies; portable restore rebuilds them from the retained source and
   needs access to their registries.
 
+### Fixed
+
+- Managed mode now applies the egress policy to function workers; egress
+  functions previously could not start. Rule changes publish a new generation
+  and retire warm egress pools, and the dashboard's Egress page is mounted
+  (admin) instead of returning 404.
+
 ### Managed operator parity
 
 - The managed composition now mounts the operator surfaces the normal server
@@ -58,7 +65,7 @@ unreleased range, and the sections below as the record for everything before it.
 - `invoke_function` and channel tools now return an error when the invocation
   failed before any response was written, instead of an empty `200` result.
   This applies to the normal server too.
-- Not yet on the managed composition: pool and firewall configuration, secrets,
+- Not yet on the managed composition: pool configuration, secrets,
   KV, fixtures, webhooks, runtimes and syscalls, account password change, and the
   OAuth authorization server. `GET /api/v1/system/storage` reports the plain data
   directory only, not sealed artifact stores.

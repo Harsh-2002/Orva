@@ -45,8 +45,8 @@ on this composition.
 The managed composition is intended to become the only serving mode, so it
 mounts the operator surfaces of the normal server. Every route requires exactly
 the permission the normal server's `requiredPermission` assigns it: `read` for
-GET, `write` for other methods, `admin` for keys, channels, `/ai/*`, backup,
-storage and vacuum. A key holding a different permission gets `403`; no
+GET, `write` for other methods, `admin` for keys, channels, firewall, `/ai/*`,
+backup, storage and vacuum. A key holding a different permission gets `403`; no
 credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
@@ -68,6 +68,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
+| Egress / firewall | `GET/POST /api/v1/firewall/rules`, `PUT/DELETE /api/v1/firewall/rules/{rule_id}`, `GET /api/v1/firewall/status`, `POST /api/v1/firewall/resolve`, `GET/PUT /api/v1/firewall/dns` | admin |
 | Chat | `/api/v1/ai/*` (see [AI assistant](#ai-assistant)) | admin |
 
 The OAuth authorization server endpoints are not mounted: existing grants can
