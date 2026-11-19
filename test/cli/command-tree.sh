@@ -8,7 +8,7 @@
 #
 # Builds both binaries fresh, walks every subcommand via `--help`, captures
 # leaf command paths, and diffs them. Server binary additionally has
-# serve, setup and managed enroll — those are filtered out before the diff.
+# serve, setup and managed offline commands are filtered out before the diff.
 
 set -uo pipefail
 
@@ -96,10 +96,10 @@ for required in activity deploy functions invoke login system upgrade; do
     grep -qx "$required" "$OUT/slim.txt" || die "required top-level command missing from snapshot: $required"
 done
 
-for required in serve setup managed 'managed enroll'; do
+for required in serve setup managed 'managed enroll' 'managed restore'; do
     grep -qx "$required" "$OUT/server.txt" || die "server-only command missing: $required"
 done
-grep -vxE 'serve|setup|managed|managed enroll' "$OUT/server.txt" > "$OUT/server-client-only.txt"
+grep -vxE 'serve|setup|managed|managed enroll|managed restore' "$OUT/server.txt" > "$OUT/server-client-only.txt"
 
 log "slim CLI commands: $slim_count"
 log "server CLI commands (server-only filtered): $(wc -l < "$OUT/server-client-only.txt")"

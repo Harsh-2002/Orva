@@ -28,8 +28,11 @@ gates; legacy `orva serve` does not select this composition on its own.
 
 Managed startup verifies the sealed Owner identity against SQLite before
 migration; in-place managed restore checks the same binding before archive
-promotion. This prevents enrolling legacy data or serving a foreign archive
-by accident. It does not make a managed backup portable.
+promotion. The separate cut-over slice 3 portable restore accepts strict
+managed v2 source archives offline, rebuilds only current code into a new
+host-bound Owner and publishes managed mode last. Policy text remains
+inspectable, but approval is cleared; route/webhook publication and standing
+work do not resume. The same-Owner restore path is not relaxed.
 
 Cut-over slice 2 adds explicit Linux server-only offline enrollment. Its scope
 is current plain Node/Python deployment rebuild under the Owner, empty grants,

@@ -1150,7 +1150,16 @@
             every client command; only the full build adds
             <code class="doc-chip">serve</code>,
             <code class="doc-chip">setup</code>, and
-            <code class="doc-chip">init</code>.
+            <code class="doc-chip">managed</code>.
+          </p>
+          <p class="doc-lede">
+            For managed mode, <code class="doc-chip">orva backup download</code>
+            saves the database, available keys and current source, not the witness
+            or sealed stores. On the stopped destination, run
+            <code class="doc-chip">orva managed restore --archive FILE</code>
+            to check the archive; add <code class="doc-chip">--confirm</code>
+            to rebuild it into a fresh local Owner. Review restored permissions
+            before re-enabling protected work.
           </p>
         </div>
       </div>

@@ -6,7 +6,9 @@ The daemon selects managed serving only from `.orva-serving-mode`, under the
 same outer lock as legacy serving. It requires an exclusive, verified sealed
 Owner and matching database. Startup does not enroll legacy functions. Use the
 separate [offline enrollment procedure](OPERATIONS.md#offline-legacy-enrollment)
-to convert an existing instance. Portable restore is not supported. Keep the
+to convert an existing instance. For managed [portable restore](OPERATIONS.md#managed-mode-portable-recovery),
+independently provision the destination witness, rootfs trees, adapters and
+delegated cgroup. Do not clone the witness or mount the source's sealed stores. Keep the
 first listener private during operator onboarding.
 
 Prepare an owned cgroup-v2 service/container budget with CPU, memory and PID

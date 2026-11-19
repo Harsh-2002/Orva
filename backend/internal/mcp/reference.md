@@ -16,6 +16,10 @@
 > its replacement generation; it returns `409 NOT_ACTIVE`.
 > The managed Editor reads authored source from the seal, not from a legacy
 > `current` symlink. Reading source neither installs nor approves it.
+> An admin `GET /api/v1/backup` returns a portable v2 archive of SQLite, available
+> keys and current authored source, never the host witness or sealed stores.
+> Restore managed archives with the stopped server binary's `orva managed restore`
+> command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
 > An all-permissions key sees 73 tools on the normal server and 39 on this
 > composition; read-only keys see 28 and 10 respectively.

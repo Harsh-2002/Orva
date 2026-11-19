@@ -945,7 +945,11 @@ the firewall **reads** (`GET /firewall/rules`, `/firewall/status`,
 > sandbox's resolver. Breaking for write-scoped automation touching these
 > endpoints.
 
-- `GET /api/v1/backup` and `POST /api/v1/restore` — download or restore an instance backup.
+- `GET /api/v1/backup` — admin gzip-tar download. Managed mode returns v2
+  (SQLite, available keys and current authored source; no host-bound stores
+  or witness). Legacy mode keeps the existing archive format.
+- `POST /api/v1/restore` — legacy only. Managed v2 restore is
+  [offline](OPERATIONS.md#managed-mode-portable-recovery).
 - `GET /api/v1/system/storage` — inspect disk/database usage.
 - `POST /api/v1/system/vacuum` — compact the SQLite database.
 - `GET|POST /api/v1/firewall/rules`

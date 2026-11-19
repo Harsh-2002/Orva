@@ -17,8 +17,11 @@ only valid exact associations; restore gets a deny evaluator before dispatch.
 `scheduler.RunManaged` starts only shared-authority job/cron loops and drains
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. The authenticated final boot run selects same-boot exact fencing
-or typed epoch-and-parent removal, or a true kernel-cold opener. Portable
-restore remains a separate gate.
+or typed epoch-and-parent removal, or a true kernel-cold opener.
+Managed v2 downloads project source from exact current code leases. The
+offline restore command reseals under a fresh local Owner, commits rebinding
+and quarantine in staged SQLite, and publishes managed mode last. Same-Owner
+replay retains the guarded store-preserving path.
 
 Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
 over `workload_inbound_publications` (triggers unpublish any non-managed write;

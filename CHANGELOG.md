@@ -16,6 +16,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- Managed backups use portable v2. Download with `orva backup download`
+  and use the stopped server binary's `orva managed restore --archive FILE
+  --confirm` on the independently provisioned destination, not the legacy
+  online restore command. Old approvals and public exposures never carry over.
 - Legacy instances remain legacy on upgrade. To opt in to managed serving,
   back up and stop the instance, run `orva managed enroll --dry-run`, then
   apply the reviewed plan explicitly. No SDK grants or standing authority

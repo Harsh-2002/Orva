@@ -1,5 +1,13 @@
 # Security model
 
+Managed v2 backups export the database, available keys and authored current
+source only. The writer checks witness placement against backup roots and
+rejects witness aliases among archive inputs. Integrity checks are not
+producer authentication; trust the archive's transport and custody. Portable
+restore creates a new local Owner, keeps old policy text for review but clears
+artifact approval, quarantines standing work, and removes route/webhook
+publication. An incomplete layout denies both serving paths.
+
 The opt-in managed server uses the same Authority for the sealed pool,
 private SDK, job/cron admission, and protected writes. Startup holds admission
 closed while verifying the exact committed pair and pause state. Restore

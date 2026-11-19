@@ -722,6 +722,59 @@ it every removal fails with `EACCES` and is skipped.
 
 ## Backup and restore
 
+### Managed mode: portable recovery
+
+`orva backup download -f /safe/path/orva-managed.tar.gz` uses the admin-only
+managed backup endpoint. Keep the archive private: it contains SQLite,
+available encryption/bootstrap keys, and current plain Node/Python source.
+The v2 file hashes detect corruption, not the identity of the producer;
+confirm only archives received through a trusted channel. No sealed trees,
+Owner records, cgroup epochs, runtime rootfs trees or witness are exported.
+
+On the destination, stop all Orva writers and prepare a fresh, service-owned
+instance directory with locally installed Node/Python rootfs trees, current
+adapters, nsjail, and [delegated cgroups](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
+Independently provision B's external witness with
+`orva setup --managed-witness /private/b/witness`. Keep the archive outside the
+data directory and the witness outside the data and configured backup roots.
+You can start with an unopened provisioning marker, but not initialized Owner
+stores. Unset `ORVA_MANAGED_NODE_GENERATION` and
+`ORVA_MANAGED_PYTHON_GENERATION` so boot uses the newly sealed runtime IDs.
+
+```bash
+orva managed restore --data-dir /srv/orva-b --archive /safe/path/orva-managed.tar.gz
+orva managed restore --data-dir /srv/orva-b --archive /safe/path/orva-managed.tar.gz --confirm
+```
+
+The first command verifies the archive, destination layout, witness and local
+runtime prerequisites without changing the destination; it does not run a
+build or prove the destination can create cgroups. Run the confirmed command
+as the daemon user from its delegated cgroup. It rebuilds the exact current
+managed deployments, preserves active/inactive and pause state, reseals local
+runtimes, and records the previous Owner in the SQLite restore audit. The
+source tarballs are regenerated from verified authored files, not byte-for-byte
+copies of deployment uploads. Historical deployment rows remain for inspection,
+but their old sealed outputs are unavailable on B. Explicitly excluded
+enrollment entries remain inactive and their legacy source is not carried.
+
+Managed mode is published last. Start the daemon with `ORVA_SERVING_MODE`
+unset or set to `managed`. Direct invocation of previously active functions
+can run, but all policies require fresh review; protected SDK and standing
+work is denied, and custom routes and inbound webhooks are unpublished.
+Review policy, jobs, cron and exposures separately before re-enabling them.
+If confirmation was interrupted, preserve the archive and destination
+evidence, including the staging directory, intent or tombstone. Both boot
+paths refuse an incomplete layout with exit 78. Do not edit or remove control
+files to retry; use a separate fresh destination for a new restore attempt.
+
+To replay on A with the same witness, Owner and sealed outputs still present,
+stop the daemon and use `orva managed restore --same-owner --archive
+/safe/path/orva-managed.tar.gz --confirm`. This uses guarded same-Owner recovery
+and its existing quarantine; it does not rebuild or overwrite sealed stores.
+The legacy HTTP upload and online restart path below do not apply to managed mode.
+
+### Legacy mode
+
 `orva backup download` writes an archive containing the SQLite database,
 every deployed function version, the secrets master key, and the bootstrap
 admin API key. It is written mode `0600` — treat it as the credential it is.

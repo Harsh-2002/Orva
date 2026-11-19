@@ -508,6 +508,14 @@ orva backup download -f /backups/orva-$(date +%F).tar.gz
 orva backup restore /backups/orva-2026-05-15.tar.gz --yes
 ```
 
+`backup download` also works against a managed instance with admin authority
+and writes a managed v2 archive. The online `backup restore` command is legacy
+only. With the **server binary** on a stopped destination, run
+`orva managed restore --archive FILE [--data-dir DIR]` for a dry run and add
+`--confirm` to rebuild into a fresh local Owner. Add `--same-owner` only when
+replaying on the original instance with its sealed stores intact. See the
+[managed backup and restore runbook](OPERATIONS.md#managed-mode-portable-recovery).
+
 After a successful restore the server exits with status **70** so its supervisor
 (systemd / OpenRC / `docker restart: unless-stopped`) reopens
 the new files. The CLI sees a connection reset — that's the expected happy-path

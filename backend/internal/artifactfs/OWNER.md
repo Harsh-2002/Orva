@@ -85,6 +85,14 @@ must spawn with this Domain or its typed child. These are trusted-host ownership
 contracts, not confinement of a malicious host that deliberately bypasses them.
 Do not independently Close the returned stores or Domain.
 
+Managed v2 archive production checks the open Owner's witness placement and
+input file identities, then projects only authored files and modes from
+verified code leases. The build queue discards the original upload after use;
+the deterministic source archive is rebuilt from the dependency-free code
+profile, not copied from a retained tarball. UID/GID and seal metadata are
+never projected. Portable restore uses a newly provisioned local witness and
+fresh store roots; it never adopts or clones these host-bound records.
+
 `PreparePaths` rejects pairs from different lifecycle owners, and bound/unbound
 mixes; two unbound stores retain their previous profile. This does not authorize
 an arbitrary host-selected spawn Domain. Trusted builder/runtime/spawn wiring
