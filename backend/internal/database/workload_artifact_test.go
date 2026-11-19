@@ -86,7 +86,7 @@ func TestWorkloadArtifactSchemaInert(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(f, got) {
 		t.Fatal("initializer changed function or SDK")
 	}
-	if n := iamTestCount(t, db, "system_config"); n != 18 {
+	if n := iamTestCount(t, db, "system_config"); n != 19 {
 		t.Fatal("initializer changed boot markers")
 	}
 	r, err := db.NewWorkloadArtifact(ctx, f.ID, iamTestActor)

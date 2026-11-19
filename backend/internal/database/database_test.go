@@ -37,12 +37,12 @@ func TestMigrate(t *testing.T) {
 	// Verify seed data — bump this when migrations.go gains new rows.
 	var count int
 	db.read.QueryRow("SELECT COUNT(*) FROM system_config").Scan(&count)
-	// 16 seed rows + 2 marker rows written on first boot (MigrateToUUIDv7 and
-	// the orphan reclaim).
+	// 16 seed rows + 3 marker rows written on first boot (MigrateToUUIDv7, the
+	// orphan reclaim and the Chat credential scrub).
 	// (8 phantom keys that duplicated config.Config fields and were never read
 	// were dropped from the seed — see migrations.go.)
-	if count != 18 {
-		t.Errorf("expected 18 system config rows, got %d", count)
+	if count != 19 {
+		t.Errorf("expected 19 system config rows, got %d", count)
 	}
 }
 

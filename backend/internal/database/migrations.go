@@ -504,6 +504,7 @@ CREATE TABLE IF NOT EXISTS ai_tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_tc_conv   ON ai_tool_calls(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_ai_tc_status ON ai_tool_calls(status);
+CREATE INDEX IF NOT EXISTS idx_ai_tc_tool   ON ai_tool_calls(tool_name);
 
 CREATE TABLE IF NOT EXISTS ai_provider_configs (
     id                TEXT PRIMARY KEY,
@@ -918,6 +919,10 @@ PRAGMA foreign_keys = ON;
 	// envelope legitimately precedes its executions row, so a sweep running
 	// against live traffic would delete it as an orphan.
 	db.reclaimOrphanedExecutionRows()
+
+	// One-shot scrub of one-time credentials that Chat stored before it redacted
+	// them at the source. Resumable; see ai_credential_scrub.go.
+	db.scrubChatCredentials()
 
 	// Kick off the batched async writer now that the schema exists. Safe
 	// to call multiple times — Migrate is idempotent and we only start the
