@@ -139,13 +139,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			mux.Handle("/webhook/", &handlers.InboundTriggerHandler{DB: db, Registry: reg, Pool: manager,
 				Metrics: invoke.Metrics, SDKAuth: invoke.Proxy.SDKAuth, Managed: true})
 		}
-		webAuth := &handlers.AuthHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/auth/status", webAuth.Status)
-		mux.HandleFunc("POST /api/v1/auth/onboard", webAuth.Onboard)
-		mux.HandleFunc("POST /api/v1/auth/login", webAuth.Login)
-		mux.HandleFunc("POST /api/v1/auth/logout", webAuth.Logout)
-		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
-		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
+		mountManagedWebAuth(mux, db, ops)
 		mux.Handle("GET /web/", uiHandler())
 		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})

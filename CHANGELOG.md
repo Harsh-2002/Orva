@@ -92,8 +92,10 @@ unreleased range, and the sections below as the record for everything before it.
   send them. The MCP and Chat catalogs are unchanged.
 - Managed REST and `orva functions purge-cache` can clear a function's
   dependency cache without touching its installed deployment.
+- The managed dashboard can change the current account password with a
+  same-origin session. The calling session stays signed in.
 - Not yet on the managed composition: pool configuration, secrets,
-  outbound webhook delivery, account password change, and
+  outbound webhook delivery, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 

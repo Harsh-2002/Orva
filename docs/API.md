@@ -73,6 +73,7 @@ and replaces the complete settings together.
 | | `DELETE /api/v1/oauth/connected-apps/{id}`, `DELETE /api/v1/oauth/clients/{client_id}` | write, session cookie |
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
+| | `POST /api/v1/auth/change-password` | write, same-origin session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
 | Outbound webhooks | `GET /api/v1/webhooks`, `GET .../{id}`, `GET .../{id}/deliveries` | read |
 | | `POST /api/v1/webhooks`, `PUT/DELETE .../{id}`, `POST .../{id}/test`, `POST .../deliveries/{id}/retry` | write |
@@ -351,6 +352,10 @@ Invalidates the session.
 ### Account and session management
 
 - `POST /api/v1/auth/change-password` — change the current user's password.
+  On a managed server use a current browser session and same-origin proof;
+  an API key alone cannot change a password. The caller stays signed in and
+  other sessions are revoked. If revocation fails after the password write,
+  the response includes a warning.
 - `GET /api/v1/auth/sessions` — list active login sessions.
 - `DELETE /api/v1/auth/sessions/{prefix}` — revoke a session by token prefix.
 - `GET /api/v1/oauth/connected-apps` — list authorized OAuth clients.
