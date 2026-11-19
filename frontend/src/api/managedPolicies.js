@@ -12,16 +12,22 @@ const defaultRequest = async (url, { body, ...options } = {}) => {
   catch (error) { throw Object.assign(new Error(error.response?.data?.error?.message || 'Permissions request failed.'), { status: error.response?.status }) }
 }
 
-export async function readManagedIAMCapability(request = defaultRequest) {
+export async function readManagedIAMMode(request = defaultRequest) {
   try {
     const result = await request('/api/v1/iam/capabilities', {
       quietStatuses: [401, 403, 404],
       headers: { 'Cache-Control': 'no-cache' },
     })
-    return result?.managed === true
-  } catch {
-    return false
+    if (result?.managed === true) return 'managed'
+    if (result?.managed === false) return 'legacy'
+    return 'unknown'
+  } catch (error) {
+    return error?.status === 404 ? 'legacy' : 'unknown'
   }
+}
+
+export async function readManagedIAMCapability(request = defaultRequest) {
+  return (await readManagedIAMMode(request)) === 'managed'
 }
 
 export function managedPoliciesAPI(request = defaultRequest) {

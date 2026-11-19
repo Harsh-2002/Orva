@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { readManagedIAMCapability } from '@/api/managedPolicies.js'
+import { readManagedIAMCapability, readManagedIAMMode } from '@/api/managedPolicies.js'
 import client from '@/api/client.js'
 import router from '@/router/index.js'
 import { useAuthStore } from '@/stores/auth'
@@ -57,6 +57,20 @@ describe('managed IAM capability', () => {
     const request = vi.fn().mockRejectedValue({ status })
     expect(await readManagedIAMCapability(request)).toBe(false)
   })
+
+  it.each([[true, 'managed'], [false, 'legacy'], ['false', 'unknown'], [undefined, 'unknown']])(
+    'distinguishes an explicit mode from an invalid response (%s)',
+    async (managed, expected) => {
+      expect(await readManagedIAMMode(async () => ({ managed }))).toBe(expected)
+    },
+  )
+
+  it.each([[404, 'legacy'], [401, 'unknown'], [403, 'unknown'], [500, 'unknown'], [undefined, 'unknown']])(
+    'does not infer legacy from probe failures (%s)',
+    async (status, expected) => {
+      expect(await readManagedIAMMode(vi.fn().mockRejectedValue({ status }))).toBe(expected)
+    },
+  )
 })
 
 describe('function permissions route', () => {
