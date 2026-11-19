@@ -9,14 +9,16 @@ remove the recovery marker to force serving.
 
 ## Serving startup exits 78
 
-Read the startup log before retrying. A data directory can be opened by only
-one cooperating daemon or recovery coordinator at a time. Use the outer,
-service-owned directory, with no symlinked components or group/world write
-access. Leave `ORVA_SERVING_MODE` unset unless you intend to assert the durable
-mode. An absent mode file is legacy; a malformed file is an error, not legacy.
+Read the startup log before retrying. The daemon and recovery coordinator
+take the same exclusive lock in the outer data directory. Legacy serving
+follows symlinked directory paths and allows group-writable directories.
+Managed startup and offline relocation require a service-owned outer
+directory with no symlinked components or group/world write access.
 
-`orva serve` does not start in `provisioning` or `managed` mode. Managed mode
-stores SQLite under `managed/orva.db` and keeps an empty mode-0500 directory
+Legacy `orva serve` requires no `.orva-serving-mode` entry and
+`ORVA_SERVING_MODE` unset or exactly `legacy`. Any marker, including a malformed
+one, causes refusal. Managed mode stores SQLite under `managed/orva.db` and
+keeps an empty mode-0500 directory
 at `orva.db` so older binaries cannot open the original path. Do not remove
 the tombstone, edit the marker, or point a legacy binary at `managed/`. There
 is no public enrollment, downgrade, or interrupted-relocation command in this

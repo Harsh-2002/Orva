@@ -139,11 +139,11 @@ func TestRelocationProcessExit(t *testing.T) {
 			record, err := l.Read()
 			must(t, err)
 			if step == "staged" {
-				must(t, l.RequireLegacy())
+				must(t, checkLegacyStart(int(l.root.Fd())))
 				assertFile(t, db, "database fixture")
 				assertFile(t, filepath.Join(dir, ".master.key"), "key fixture")
 			} else {
-				if err := l.RequireLegacy(); err == nil {
+				if err := checkLegacyStart(int(l.root.Fd())); err == nil {
 					t.Fatal("legacy accepted after tombstone installation")
 				}
 				if step == "exchanged" {
@@ -162,7 +162,7 @@ func TestRelocationProcessExit(t *testing.T) {
 				}
 				assertFile(t, filepath.Join(keyRoot, ".master.key"), "key fixture")
 			}
-			if other, err := Acquire(inner); err == nil {
+			if other, err := AcquireLegacy(inner); err == nil {
 				other.Close()
 				t.Fatal("accepted managed subdirectory as data root")
 			}
@@ -186,6 +186,68 @@ func TestRelocationProcessExit(t *testing.T) {
 				t.Fatalf("wrong completed layout: %+v, %s", got, f.Name())
 			}
 		})
+	}
+}
+
+func TestLegacyLockRechecksAfterRelocation(t *testing.T) {
+	t.Setenv(Env, Legacy)
+	dir := t.TempDir()
+	fd, err := unix.Open(dir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	must(t, err)
+	defer unix.Close(fd)
+	must(t, checkLegacyStart(fd))
+
+	l := acquire(t, dir)
+	must(t, l.RelocateToManaged(ids.New(), ids.New()))
+	must(t, l.Close())
+
+	if other, err := lockLegacy(fd); err == nil {
+		other.Close()
+		t.Fatal("legacy passed a check made before relocation")
+	} else if !strings.Contains(err.Error(), MarkerName) {
+		t.Fatalf("expected mode-file refusal after acquiring flock: %v", err)
+	}
+}
+
+func TestLegacyAndManagedShareFlock(t *testing.T) {
+	t.Setenv(Env, Legacy)
+	dir := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	must(t, os.Symlink(dir, alias))
+	legacy, err := AcquireLegacy(alias)
+	must(t, err)
+	if other, err := Acquire(dir); !errors.Is(err, unix.EWOULDBLOCK) {
+		if other != nil {
+			other.Close()
+		}
+		legacy.Close()
+		t.Fatalf("strict acquisition while legacy holds lock: %v", err)
+	}
+	must(t, legacy.Close())
+	strict := acquire(t, dir)
+	defer strict.Close()
+	if other, err := AcquireLegacy(alias); !errors.Is(err, unix.EWOULDBLOCK) {
+		if other != nil {
+			other.Close()
+		}
+		t.Fatalf("legacy acquisition through alias while strict holds lock: %v", err)
+	}
+}
+
+func TestRelocationLockRejectsLegacyOnlyLayouts(t *testing.T) {
+	root := t.TempDir()
+	groupWritable, real := filepath.Join(root, "shared"), filepath.Join(root, "real")
+	must(t, os.Mkdir(groupWritable, 0700))
+	must(t, os.Chmod(groupWritable, 0775))
+	must(t, os.Mkdir(real, 0700))
+	must(t, os.Mkdir(filepath.Join(real, "data"), 0700))
+	alias := filepath.Join(root, "alias")
+	must(t, os.Symlink(real, alias))
+	for _, dir := range []string{groupWritable, alias, filepath.Join(alias, "data")} {
+		if l, err := Acquire(dir); err == nil {
+			l.Close()
+			t.Fatalf("accepted unsafe managed root %s", dir)
+		}
 	}
 }
 

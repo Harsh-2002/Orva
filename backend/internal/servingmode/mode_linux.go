@@ -88,26 +88,92 @@ func Acquire(dataDir string) (*Lock, error) {
 	} else if st != nil {
 		return fail(errors.New("use the instance data directory, not its managed subdirectory"))
 	}
+	file, err := flock(fd, true)
+	if err != nil {
+		return fail(err)
+	}
+	return &Lock{root: root, file: file}, nil
+}
+
+// AcquireLegacy follows the configured directory path, as legacy SQLite does.
+// It returns only the flock handle, not a handle that can publish managed mode.
+func AcquireLegacy(dataDir string) (*os.File, error) {
+	if strings.ContainsRune(dataDir, '?') {
+		return nil, errors.New("data directory must not contain a SQLite query delimiter")
+	}
+	fd, err := unix.Open(dataDir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open legacy data directory: %w", err)
+	}
+	defer unix.Close(fd)
+	if err := checkLegacyStart(fd); err != nil {
+		return nil, err
+	}
+	return lockLegacy(fd)
+}
+
+func lockLegacy(fd int) (*os.File, error) {
+	file, err := flock(fd, false)
+	if err != nil {
+		return nil, err
+	}
+	// A relocation could have completed after the first check but before flock.
+	if err := checkLegacyStart(fd); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+func checkLegacyStart(fd int) error {
+	for _, name := range []string{managedGuard, MarkerName, dbName} {
+		st, err := statAt(fd, name)
+		if err != nil {
+			return fmt.Errorf("check %s: %w", name, err)
+		}
+		if st == nil {
+			continue
+		}
+		switch {
+		case name == managedGuard:
+			return errors.New("use the instance data directory, not its managed subdirectory")
+		case name == MarkerName:
+			return errors.New("legacy serve requires no .orva-serving-mode file")
+		case st.Mode&unix.S_IFMT == unix.S_IFDIR:
+			return errors.New("legacy SQLite path orva.db is a directory; leaving the tombstone intact")
+		}
+	}
+	return (Record{Mode: Legacy}).CheckEnvironment()
+}
+
+func flock(fd int, strict bool) (*os.File, error) {
 	lfd, err := unix.Openat(fd, lockName, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0600)
 	if err != nil {
-		return fail(fmt.Errorf("open data-directory lock: %w", err))
+		return nil, fmt.Errorf("open data-directory lock: %w", err)
 	}
 	file := os.NewFile(uintptr(lfd), lockName)
-	if err = controlFile(lfd, 0); err == nil {
+	if strict {
+		err = controlFile(lfd, 0)
+	} else {
+		var st unix.Stat_t
+		err = unix.Fstat(lfd, &st)
+		if err == nil && (st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1) {
+			err = errors.New("invalid data-directory lock file")
+		}
+	}
+	if err == nil {
 		err = unix.Flock(lfd, unix.LOCK_EX|unix.LOCK_NB)
 	}
 	if err != nil {
 		file.Close()
-		return fail(fmt.Errorf("acquire exclusive data-directory lock: %w", err))
+		return nil, fmt.Errorf("acquire exclusive data-directory lock: %w", err)
 	}
-	return &Lock{root: root, file: file}, nil
+	return file, nil
 }
 
 func (l *Lock) Close() error {
 	return errors.Join(l.root.Close(), l.file.Close())
 }
-
-func (l *Lock) Path() string { return l.root.Name() }
 
 func checkDir(fd int) error {
 	var st unix.Stat_t
@@ -163,20 +229,6 @@ func (r Record) CheckEnvironment() error {
 		return fmt.Errorf("%s must match durable mode %q (it cannot change the mode)", Env, r.Mode)
 	}
 	return nil
-}
-
-func (l *Lock) RequireLegacy() error {
-	r, err := l.Read()
-	if err != nil {
-		return err
-	}
-	if err := r.CheckEnvironment(); err != nil {
-		return err
-	}
-	if r.Mode != Legacy {
-		return fmt.Errorf("legacy serve is not permitted in durable mode %q", r.Mode)
-	}
-	return l.checkLegacyDB()
 }
 
 func (l *Lock) checkLegacyDB() error {

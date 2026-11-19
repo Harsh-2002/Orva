@@ -20,7 +20,7 @@ names that stopped doing anything are deleted rather than deprecated.
 | env | default | what |
 |-----|---------|------|
 | `ORVA_DATA_DIR` | `~/.orva` (dev) / `/var/lib/orva` (Docker) | Root for SQLite DB, function code, and rootfs trees. DB and rootfs paths are derived automatically. |
-| `ORVA_SERVING_MODE` | (unset; direct startup assertion) | When set, must exactly match the durable `.orva-serving-mode` value (`legacy` when absent). An empty value is a mismatch. It cannot enable managed mode or resume provisioning. `orva serve` only starts in legacy mode and exits 78 on refusal. |
+| `ORVA_SERVING_MODE` | (unset; direct startup assertion) | If set, must exactly match the durable mode (`legacy` when `.orva-serving-mode` is absent). An empty value is a mismatch. Normal `orva serve` requires the mode file to be absent and exits 78 on refusal. The variable cannot enable managed mode or resume provisioning. |
 | `ORVA_HOST` | `0.0.0.0` | Bind address for the HTTP listener. Set to `127.0.0.1` to listen on loopback only (recommended behind a reverse proxy). |
 | `ORVA_PORT` | `8443` | Listen port — plain HTTP, no TLS. Set to `8080` when a reverse proxy owns 8443. |
 | `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` for **buffered** responses, or Orva will cut them off. It does **not** bound streaming responses: the write deadline is cleared on the streaming path, which is governed by `stream_max_seconds` (default 300) instead. |

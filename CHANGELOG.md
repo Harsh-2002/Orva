@@ -16,11 +16,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
-- `orva serve` holds an exclusive data-directory lock and exits 78 (`EX_CONFIG`)
-  before opening SQLite if the layout cannot be used for legacy serving or
-  `ORVA_SERVING_MODE` does not match. Without a mode file, the existing layout
-  remains legacy. Managed serving is internal opt-in only; the environment does
-  not enable it. New systemd units do not restart on exit 78.
+- `orva serve` holds an exclusive data-directory lock. Legacy directories
+  without a mode file still support group write access and symlinked directory
+  paths. Startup exits 78 (`EX_CONFIG`) before opening SQLite if it finds a
+  mode file or tombstone, cannot take the lock, or `ORVA_SERVING_MODE` is set
+  to anything but `legacy`. Managed serving remains internal opt-in only;
+  its stricter directory checks do not apply to legacy serving. New systemd
+  units do not restart on exit 78.
 
 ### Internal queued IAM publication (not activated)
 

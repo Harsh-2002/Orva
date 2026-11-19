@@ -72,22 +72,21 @@ func runServe(cmd *cobra.Command, _ []string) int {
 
 	setupLogger(cfg.Logging)
 
-	cfg.Data.Dir = filepath.Clean(cfg.Data.Dir)
+	cfg.Data.Dir, err = filepath.Abs(cfg.Data.Dir)
+	if err != nil {
+		slog.Error("cannot resolve data directory", "error", err)
+		return exitConfig
+	}
 	if err := os.MkdirAll(cfg.Data.Dir, 0755); err != nil {
 		slog.Error("cannot prepare data directory", "error", err)
 		return exitConfig
 	}
-	layout, err := servingmode.Acquire(cfg.Data.Dir)
+	lock, err := servingmode.AcquireLegacy(cfg.Data.Dir)
 	if err != nil {
-		slog.Error("cannot lock data directory for legacy serving", "error", err)
-		return exitConfig
-	}
-	defer layout.Close()
-	if err := layout.RequireLegacy(); err != nil {
 		slog.Error("refusing legacy startup", "error", err)
 		return exitConfig
 	}
-	cfg.Data.Dir = layout.Path()
+	defer lock.Close()
 	cfg.Database.Path = filepath.Join(cfg.Data.Dir, "orva.db")
 	cfg.Sandbox.RootfsDir = filepath.Join(cfg.Data.Dir, "rootfs")
 
