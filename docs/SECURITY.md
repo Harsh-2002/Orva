@@ -1143,7 +1143,14 @@ transactional publication for their version, owner and methods. A version
 high-water mark alone is not proof: legacy updates and recreations remove
 publication, and preexisting rows are not adopted. Selection precedes method
 checking. Reserved control-plane paths stay in the platform mux on all methods.
-Managed restore removes route publications in the durable quarantine
+Inbound webhooks on the managed listener follow the same rule. `/webhook/{id}`
+dispatches only a row whose publication matches its exposure version, owner,
+signature format and header, active flag and the SHA-256 of its stored secret;
+triggers on any non-managed write (insert or update) delete the publication, so
+legacy, raw-edited and restored rows return 404 until a managed `PUT` republishes
+them. Signature failure runs no code and logs only the failure reason. Secrets are
+returned once on create and never logged.
+Managed restore removes route and webhook publications in the durable quarantine
 transaction before admission opens; a backed-up grant is not a fresh decision
 to expose a function publicly. Inspection and explicit CAS republication do
 not change SDK policy or target admission.

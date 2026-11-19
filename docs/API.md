@@ -1214,13 +1214,37 @@ separate unimplemented/unqualified boundaries; see the package README.
 
 ## Custom routes on the internal managed listener
 
-`StartManaged` mounts only the route subset above: `GET /api/v1/exposures`
-requires `kind=route` and a literal `key`; `POST /api/v1/routes` and
+`StartManaged` mounts the staged route and inbound-webhook REST subset above:
+`GET /api/v1/exposures` takes `kind=route` with a literal `key`, or
+`kind=inbound` with a literal owner `function_id` (omit `key` to obtain the
+create-time expectations). `POST /api/v1/routes` and
 `DELETE /api/v1/routes?path=...` require the staged CAS bodies. Inspection
-returns `route_published` separately from the stored `route` (which may be
-`null`). It describes publication only, not the target's runtime readiness.
-There is no managed route-list endpoint, inbound-webhook wiring, or route
-management through the managed MCP catalog or Chat. Normal serving is unchanged.
+returns `route_published` / `inbound_published` separately from the stored
+mapping (which may be `null`). They describe publication only, not the target's
+runtime readiness. `GET /api/v1/routes` lists up to 256 mappings, each with its
+`version` (decimal string) and `published`, and a `truncated` flag; it needs
+live READ. Normal serving is unchanged. Managed MCP/Chat route and webhook
+tools are not part of this slice.
+
+Inbound webhooks use `/api/v1/functions/{fn_id}/inbound-webhooks` with exact
+owner and trigger UUIDs (names are rejected with `400 VALIDATION`):
+`GET` lists one owner's triggers plus its `expected` tokens (secret-free, each
+with `version` and `published`); `GET .../{id}` returns `inbound_webhook`,
+`published`, `version` and `expected`; `POST`, `PUT` and `DELETE` use the staged
+CAS bodies above, with `confirm:true` for delete. Create's body `version` is
+`"0"`; each create mints a fresh trigger UUID. There is no managed `/sign`
+endpoint: the secret is returned once on create and the caller signs.
+
+`POST /webhook/{id}` is served only for a published mapping: the stored row must
+match its publication on exposure version, owner, signature format, header,
+active flag and secret digest. Unknown, unpublished, legacy, raw-edited and
+restored rows return `404 NOT_FOUND`; a published but disabled trigger returns
+`410 INACTIVE`. Signatures use the existing formats (`hmac_sha256_hex`,
+`hmac_sha256_base64`, `github`, `stripe`, `slack`); a mismatch is
+`401 SIGNATURE_INVALID` and no function runs. A verified request runs only on the
+current managed Factory generation (the same pool, SDK policy and function
+status checks as `/fn/`), and never reaches a legacy fallback. `405` for
+non-POST. Secrets appear only in the create response.
 
 Custom invocation resolves one published mapping: exact path, then longest
 literal `/prefix/*`. A method mismatch returns `405 METHOD_NOT_ALLOWED` without
@@ -1233,5 +1257,7 @@ patterns; encoded separators do not enter custom dispatch.
 
 An unattested or restored mapping is inspectable but cannot win lookup.
 Restore retains mappings and their version counters while clearing public
-publication. Reinspect and explicitly republish via the same CAS API to
-reactivate a route. This does not install or review the target workload.
+publication, for routes and inbound webhooks alike. Reinspect and explicitly
+republish via the same CAS API to reactivate a route (`POST /api/v1/routes`) or
+a webhook (`PUT` with no field changes). Any non-managed write to a webhook row
+also unpublishes it without changing its counter. This does not install or review the target workload.

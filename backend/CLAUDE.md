@@ -8,6 +8,10 @@ only valid exact associations; restore gets a deny evaluator before dispatch.
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. Cold boot, legacy enrollment and recovery tooling remain gates.
 
+Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
+over `workload_inbound_publications` (triggers unpublish any non-managed write;
+restore clears them), the existing signature verifiers, and only the managed
+Factory path; `InboundTriggerHandler.Managed` has no legacy fallback.
 Managed custom routes use one published-mapping lookup in `InvokeHandler`.
 Route-only REST changes use `workloadtrigger` CAS; legacy rows do not dispatch.
 Restore clears publications before admission; managed MCP/Chat and webhooks

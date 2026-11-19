@@ -386,7 +386,8 @@ func TestManagedServingLive(t *testing.T) {
 		if hookID == "" || len(hookSecret) != 64 {
 			t.Fatal("create did not return the trigger and its one-time secret")
 		}
-		call(t, http.MethodPost, hookCollection, request, 409)
+		// Each create mints a fresh trigger ID; only a stale exposure counter conflicts.
+		call(t, http.MethodPost, hookCollection, map[string]any{"name": "stale", "version": "1", "expected": fresh.Expected}, 409)
 		for _, path := range []string{hookCollection, hookCollection + "/" + hookID} {
 			if strings.Contains(string(call(t, http.MethodGet, path, nil, 200)), hookSecret) {
 				t.Fatal("inspection returned the signature secret")

@@ -67,12 +67,21 @@ Unknown/duplicate fields, invalid UTF-8/unpaired UTF-16, null fields, oversize
 requests and operator/artifact claims are rejected. Maximum body: 32 KiB.
 
 `StartManaged` initializes the opt-in schema and mounts route-only REST
-inspection and mutations. The same InvokeHandler selects an exact or longest
+inspection and mutations, a bounded route list, and the inbound-webhook REST
+(list/get/create/update/delete, exact UUID owners and triggers, no `/sign`).
+The same InvokeHandler selects an exact or longest
 published prefix with one version/owner/method-attested lookup. Publication
 does not authorize invocation on its own. Raw rows and restored mappings are
 not dispatched. Restore preserves mappings and CAS counters but clears their
-publication; inspection distinguishes these states. No inbound webhook, managed
-MCP/Chat registration, or legacy route list is added here.
+publication; inspection distinguishes these states.
+
+`/webhook/{id}` uses `database.MatchManagedInbound`: version, owner, format,
+header, active flag and secret digest must match `workload_inbound_publications`,
+which only a managed create/update writes (row triggers clear it on any other
+write, and restore clears it). An unpublished or legacy row is a 404; the
+existing signature verifiers then run, and dispatch requires the current managed
+Factory (`AcceptsManagedVersion`). Republish after restore with `PUT` carrying no
+field changes. Managed MCP/Chat route/webhook tools are not added here.
 
 Inbound ownership is immutable. Create generates a fresh UUID and signature
 secret outside the IAM gate and returns the secret once, preserving the existing

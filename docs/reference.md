@@ -2153,11 +2153,16 @@ plus the new signing `secret` once. Update returns only the masked
 legacy projection. Display metadata adds no READ permission requirement and is
 not authority. These projections do not change the REST envelopes or CAS core.
 
-The internal managed listener mounts only route inspection (`kind=route`),
-upsert and confirmed delete via REST. It selects the exact published route or
+The internal managed listener mounts route inspection, listing, upsert and
+confirmed delete, plus inbound-webhook inspection (`kind=inbound`), list, get,
+create, update and confirmed delete, via REST (see `docs/API.md`). `POST
+/webhook/{id}` dispatches only a published, attested mapping (otherwise 404),
+verifies the existing signature formats, and runs only on the current managed
+Factory; restore clears webhook publication like route publication, so a webhook
+needs a fresh authorized `PUT` to dispatch again. Custom routes select the exact published route or
 longest published literal `/prefix/*`; method rejection does not try a broader
 route. The same per-function auth and managed pool as `/fn/` apply. Platform
 roots and their descendants remain reserved for all methods. Inspect
 `route_published` separately from the stored mapping; after restore the mapping
-is inactive until a fresh, authorized CAS upsert. No route list, inbound
-webhook, or managed MCP/Chat route tools are installed by this slice.
+is inactive until a fresh, authorized CAS upsert. Managed MCP/Chat route and
+webhook tools are not installed by this slice.

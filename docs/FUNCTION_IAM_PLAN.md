@@ -1536,3 +1536,10 @@ Deferred: arbitrary cross-function KV, general delegation/token exchange, tenant
 RBAC inheritance, external policy engines, distributed enforcement, scoped
 secret fetching and information-flow tracking. Revisit with concrete use cases,
 not by weakening the initial service/identity boundary.
+
+Acceptance note (19 November 2026, inbound webhooks): the managed listener also
+serves attested, publication-gated `/webhook/{id}` and mounts inbound-webhook REST
+from the same exposure service. Unit and HTTP tests and the disposable-VM
+`TestManagedServingLive/inbound-webhook` run (real Node function, bad signature
+refused, restore unpublishes, explicit republish) passed. Managed MCP/Chat route
+and webhook tools, browser/CLI surfaces and production cut-over remain open.
