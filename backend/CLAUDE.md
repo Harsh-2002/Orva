@@ -81,7 +81,9 @@ Restore clears publications before admission.
 Bound configuration writes persist the same pair against the new generation
 and mark it inactive in the deny publication transaction. Explicit installation
 can recover that association after a same-boot restart; policy review remains
-separate. Managed deletion reserves metadata history and retires the Factory
+separate. Managed build-cache purge shares the builder and GC owner lock and
+rechecks live write access before removing only the dependency cache.
+Managed deletion reserves metadata history and retires the Factory
 at the same gate before deleting the row. It does not reclaim sealed outputs.
 
 `workloadconfig` is an internal opt-in environment/execution-settings/secret

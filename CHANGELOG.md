@@ -86,6 +86,8 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST now supports outbound webhook subscription and delivery
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
+- Managed REST and `orva functions purge-cache` can clear a function's
+  dependency cache without touching its installed deployment.
 - Not yet on the managed composition: pool configuration, secrets,
   fixture execution, outbound webhook delivery, account password change, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain

@@ -61,6 +61,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Operator KV | `GET /api/v1/functions/{fn_id}/kv`, `GET .../kv/{key}` | read |
 | | `PUT/DELETE .../kv/{key}`, `POST .../kv/{key}/incr`, `POST .../kv/{key}/cas` | write |
 | Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
+| Dependency cache | `DELETE /api/v1/functions/{fn_id}/build-cache` | write, rechecked after waiting for the build lock |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
 | | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |
@@ -561,6 +562,9 @@ builds a new version re-downloads its dependencies from scratch; a redeploy of
 identical source is served from the existing version directory and is unaffected.
 Use when a cached dependency is suspect; it never touches deployed versions or
 the running function.
+On managed servers, use a function name or exact UUIDv7. UUID-shaped segments
+are always interpreted as IDs. A deleting function is unavailable. Purging an
+already empty cache succeeds.
 
 ### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
 Compares the handler source + dependency manifest between two past
