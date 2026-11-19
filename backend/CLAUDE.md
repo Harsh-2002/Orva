@@ -346,14 +346,20 @@ SQLite WAL mode. All migrations in `internal/database/migrations.go` — additiv
 
 `scrubChatCredentials` (`ai_credential_scrub.go`, run from `Migrate()` after the
 orphan reclaim) is the third explicit rewrite carve-out, best effort: one-shot
-behind `chat_credential_scrub_done`, one transaction per batch of minting rows
-with a persisted rowid cursor and a per-boot budget on rows scanned/rewritten
-(candidates via `idx_ai_tc_tool`). Values come only from succeeded calls of the
-tools in `onetime.Fields`; per conversation the union is applied in one pass that
-re-reads each row before writing it. JSON columns are rewritten through decoded
-string leaves (unparseable ones are left alone), plain text only on token
-boundaries. `onetime` is the leaf package shared by that migration, `ai/agent`
-redaction and the MCP registrations.
+behind `chat_credential_scrub_done`, hard-bounded per boot on rows read and
+rewritten (`chatScrubMaxScanned`/`chatScrubMaxRewritten`, checked before every
+read and write; point re-reads and minting rows filtered in Go count). A bound
+commits the work done and persists the minting cursor plus
+`chat_credential_scrub_pos` (conversation, phase m/t/title/f, rowid) so the next
+boot resumes without rescans. Per conversation the order is messages, tool calls,
+title, then the batch's own minting rows (their fields stay readable until then).
+Values come only from succeeded calls of the tools in `onetime.Fields`; a failed
+call is never replaced wholesale, but copies of a value inside it are scrubbed.
+JSON columns are rewritten through decoded string leaves (unparseable ones are
+left alone), plain text only on token boundaries; each row is re-read just before
+its write, and every row loop checks `rows.Err()`. Candidates use `idx_ai_tc_tool`
+and keyset ranges. `onetime` is the leaf package shared by that migration,
+`ai/agent` redaction and the MCP registrations.
 
 `KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM
 path, never serving/operator routes yet. It queries case-sensitive literal UTF-8

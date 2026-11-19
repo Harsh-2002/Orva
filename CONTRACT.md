@@ -246,12 +246,18 @@ never been executed.
   and `ai_conversations.title`: inside decoded string leaves of JSON columns
   (re-marshalled, never patched as raw text; a JSON column that does not parse is
   left alone) and, in plain text, only on token boundaries (neighbours outside
-  `[A-Za-z0-9_-]`). Rows without the value, other conversations and failed calls
-  are not written. Each batch is one transaction applying the union of its
-  conversations' values in a single pass, re-reading each row immediately before
-  writing it, and advancing the `chat_credential_scrub_cursor` rowid cursor. It is
-  one-shot behind `chat_credential_scrub_done`, with a per-boot budget on rows
-  scanned and rewritten, so a large history may take several boots. It adds
+  `[A-Za-z0-9_-]`). A failed call supplies no value and is never replaced
+  wholesale, but an exact copy of a value from a succeeded call inside its result
+  or arguments is scrubbed like any other copy. Rows without the value and other
+  conversations are not written. Each row is re-read immediately before it is
+  written. The pass is one-shot behind `chat_credential_scrub_done` and **hard
+  bounded per boot**: at most 10,000 rows read (every row a query returns,
+  including point re-reads and minting rows filtered in Go) and 10,000 rows
+  rewritten, floored at 16 reads and 1 write so every boot advances, checked
+  before every read and write. At a bound it commits what is done and persists
+  the minting-row cursor plus a conversation/phase/rowid position
+  (`chat_credential_scrub_pos`), so the next boot resumes there without rescanning
+  finished rows; a large history therefore takes several boots. It adds
   `idx_ai_tc_tool` (additive). It exists because those credentials were stored
   and re-sent to the model in clear; it does not guarantee that every copy is
   gone. The list and paths are the single shared `onetime.Fields` that live Chat

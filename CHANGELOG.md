@@ -34,9 +34,10 @@ unreleased range, and the sections below as the record for everything before it.
   after upgrading, a best-effort migration also replaces one-time credentials
   already stored in Chat history with the placeholder: the audit rows, the matching
   tool messages and exact copies of the value elsewhere in the same conversation
-  (messages, thinking, later tool arguments and results, the title; whole strings
-  only, never part of a longer token). It is resumable, bounded per boot, and a
-  large history can take several boots. It cannot reach logs, exports, backups or
+  (messages, thinking, later tool arguments and results including failed ones, the
+  title; whole strings only, never part of a longer token). Each boot is hard
+  bounded to 10,000 rows read and 10,000 rewritten and resumes where it stopped, so
+  a large history can take several boots. It cannot reach logs, exports, backups or
   provider-side logs, and does not guarantee every copy is removed: rotate any API
   key or webhook secret that was ever shown in Chat.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories

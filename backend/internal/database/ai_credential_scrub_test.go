@@ -2,6 +2,7 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -116,7 +117,7 @@ func TestScrubChatCredentialsEveryTool(t *testing.T) {
 		seedChatCall(t, db, c, secretOf(i+1))
 	}
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 
 	text := chatText(t, db)
 	for i := range cases {
@@ -157,7 +158,7 @@ func TestScrubChatCredentialsShapesAndUnparseable(t *testing.T) {
 		seedChatCall(t, db, c, "")
 	}
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 
 	if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE conversation_id = 'a'`); got !=
 		`[{"key":"`+scrubPlaceholder+`"},{"extra":{"keep":1},"key":"`+scrubPlaceholder+`"}]` {
@@ -203,7 +204,7 @@ func TestScrubChatCredentialsLeavesOtherRowsAlone(t *testing.T) {
 		"other conv user message": column(t, db, `SELECT content FROM ai_messages WHERE id = 'u1'`),
 	}
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	after := map[string]string{
 		"other tool row":          column(t, db, `SELECT result FROM ai_tool_calls WHERE tool_name = 'list_secrets'`),
 		"other tool message":      column(t, db, `SELECT content FROM ai_messages WHERE id = 'm-tool-minex1list_secrets'`),
@@ -221,69 +222,23 @@ func TestScrubChatCredentialsLeavesOtherRowsAlone(t *testing.T) {
 	}
 }
 
-func TestScrubChatCredentialsResumesAndIsAtomicPerBatch(t *testing.T) {
-	db := newTestDB(t)
-	setScrubBudget(t, 2, 1, 1_000_000) // two minting rows per batch, one batch per boot
-	for i := 1; i <= 5; i++ {
-		seedChatCall(t, db, scrubSeed{fmt.Sprintf("r%d", i), "c", "create_api_key", `{"key":"` + secretOf(i) + `"}`}, secretOf(i))
-	}
-	resetScrub(t, db)
-
-	leaked := func() int {
-		n := 0
-		for i := 1; i <= 5; i++ {
-			if strings.Contains(chatText(t, db), secretOf(i)) {
-				n++
-			}
-		}
-		return n
-	}
-	// One boot is capped at one batch of two rows: interrupted mid-way.
-	db.scrubChatCredentials()
-	if leaked() != 3 || db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
-		t.Fatalf("after first capped boot: leaked=%d marker=%q", leaked(), db.GetSystemConfigString(chatScrubMarkerKey, ""))
-	}
-	if db.GetSystemConfigString(chatScrubCursorKey, "") == "" {
-		t.Fatal("cursor not persisted for the next boot")
-	}
-	// A batch that fails rolls back whole: nothing from it is half-scrubbed.
-	if _, err := db.write.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON ai_messages WHEN NEW.id = 'm-asst-r4ccreate_api_key'
-		BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
-		t.Fatal(err)
-	}
-	db.scrubChatCredentials() // batch {r3, r4}: r3 would succeed, r4 aborts
-	if leaked() != 3 {
-		t.Fatalf("failed batch was partly committed: leaked=%d", leaked())
-	}
-	if _, err := db.write.Exec(`DROP TRIGGER boom`); err != nil {
-		t.Fatal(err)
-	}
-	// Reboots finish the walk.
-	for range 4 {
-		db.scrubChatCredentials()
-	}
-	if leaked() != 0 || db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
-		t.Fatalf("resume did not complete: leaked=%d marker=%q", leaked(), db.GetSystemConfigString(chatScrubMarkerKey, ""))
-	}
-}
-
 func TestScrubChatCredentialsIdempotentAndMarkerGated(t *testing.T) {
 	db := newTestDB(t)
 	seedChatCall(t, db, scrubSeed{"i", "c", "create_webhook", `{"secret":"` + secretOf(1) + `","n":1}`}, secretOf(1))
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	first := chatText(t, db)
 
 	// A second pass with no marker changes nothing.
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	if chatText(t, db) != first {
 		t.Fatal("second pass changed already scrubbed rows")
 	}
 
 	// With the marker set the pass is skipped, even for a row it would match.
 	seedChatCall(t, db, scrubSeed{"late", "c", "create_api_key", `{"key":"` + secretOf(2) + `"}`}, "")
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	if !strings.Contains(chatText(t, db), secretOf(2)) {
 		t.Fatal("scrub ran although the marker was set")
 	}
@@ -341,7 +296,7 @@ func TestScrubChatCredentialsEveryCopyInTheConversation(t *testing.T) {
 	otherBefore := column(t, db, `SELECT content FROM ai_messages WHERE id = 'user2'`) + column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'later2'`)
 
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 
 	for _, probe := range []struct{ name, q string }{
 		{"user message", `SELECT content FROM ai_messages WHERE id = 'user1'`},
@@ -384,7 +339,7 @@ func TestScrubChatCredentialsNeverRestoresFromStaleSnapshot(t *testing.T) {
 	seedChatCall(t, db, scrubSeed{"s", "a", "create_api_key", `{"key":"` + a + `","name":"first"}`}, "")
 	seedChatCall(t, db, scrubSeed{"s", "b", "create_webhook", `{"subscription":{"id":"s1","name":"copy of ` + a + `"},"secret":"` + b + `"}`}, "")
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	text := chatText(t, db)
 	for _, v := range []string{a, b} {
 		if strings.Contains(text, v) {
@@ -433,7 +388,7 @@ func TestScrubChatCredentialsJSONIntegrityAndBoundaries(t *testing.T) {
 	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('bad1','j','x2','set_secret','{"v":"` + secret + `" broken','not json ` + secret + `', 'failed')`)
 
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 
 	args := column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'a1'`)
 	var doc map[string]any
@@ -481,7 +436,7 @@ func TestScrubChatCredentialsOnlySucceededCallsAreSources(t *testing.T) {
 	seedChatCallStatus(t, db, scrubSeed{"f", "bad2", "create_webhook", `plain failure text`}, "", "failed")
 	seedChatCallStatus(t, db, scrubSeed{"f", "bad3", "create_webhook", `{"error":"dup of ` + good + `"}`}, "", "failed")
 	resetScrub(t, db)
-	db.scrubChatCredentials()
+	_ = db.scrubChatCredentials()
 	if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'bad1'`); !strings.Contains(got, failedSecret) {
 		t.Errorf("value taken from a failed call: %s", got)
 	}
@@ -496,71 +451,265 @@ func TestScrubChatCredentialsOnlySucceededCallsAreSources(t *testing.T) {
 	}
 }
 
-// Work per boot is bounded on rows scanned and rewritten, from an indexed query,
-// and the marker waits for completion across sparse and dense histories.
-func TestScrubChatCredentialsBoundedWorkAcrossBoots(t *testing.T) {
-	db := newTestDB(t)
-	var plan []string
-	rows, err := db.read.Query(`EXPLAIN QUERY PLAN SELECT rowid FROM ai_tool_calls WHERE tool_name = ? AND rowid > ? AND status = 'succeeded' ORDER BY rowid LIMIT 5`, "create_api_key", 0)
-	if err != nil {
-		t.Fatal(err)
+// scrubUntilDone runs boots until the marker is set, asserting the hard bounds on
+// every boot, and returns the per-boot stats.
+func scrubUntilDone(t *testing.T, db *Database, maxBoots, reads, writes int) []scrubStats {
+	t.Helper()
+	var boots []scrubStats
+	for db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+		if len(boots) >= maxBoots {
+			t.Fatalf("scrub still unfinished after %d boots", maxBoots)
+		}
+		st := db.scrubChatCredentials()
+		if st.scanned > reads || st.rewritten > writes {
+			t.Fatalf("boot %d exceeded the hard bound: read %d/%d rewritten %d/%d", len(boots)+1, st.scanned, reads, st.rewritten, writes)
+		}
+		if st.scanned == 0 && db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+			t.Fatalf("boot %d made no progress", len(boots)+1)
+		}
+		boots = append(boots, st)
 	}
-	for rows.Next() {
-		var a, b, c int
-		var detail string
-		_ = rows.Scan(&a, &b, &c, &detail)
-		plan = append(plan, detail)
-	}
-	rows.Close()
-	if !strings.Contains(strings.Join(plan, " "), "idx_ai_tc_tool") {
-		t.Fatalf("candidate query does not use the tool-name index: %v", plan)
-	}
+	return boots
+}
 
-	// Sparse: many unrelated tool calls with a few minting rows among them.
-	for i := 0; i < 60; i++ {
+func rowsHolding(t *testing.T, db *Database, secret string) int {
+	t.Helper()
+	n := 0
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM ai_messages WHERE instr(content, ?1) > 0 OR instr(parts, ?1) > 0`,
+		`SELECT COUNT(*) FROM ai_tool_calls WHERE instr(args, ?1) > 0 OR instr(COALESCE(result,''), ?1) > 0`,
+		`SELECT COUNT(*) FROM ai_conversations WHERE instr(title, ?1) > 0`,
+	} {
+		var c int
+		if err := db.read.QueryRow(q, secret).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		n += c
+	}
+	return n
+}
+
+// One conversation three times the budget finishes over several boots; no boot
+// exceeds the budget and nothing is rewritten or scanned twice.
+func TestScrubChatCredentialsHardBoundLargeConversation(t *testing.T) {
+	db := newTestDB(t)
+	const readBudget, writeBudget = 40, 25
+	setScrubBudget(t, 50, readBudget, writeBudget)
+	secret := secretOf(30)
+	seedChatCall(t, db, scrubSeed{"big", "c1", "create_api_key", `{"key":"` + secret + `"}`}, secret)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 90; i++ { // 90 echoes: well over three budgets of writes
+		exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, 'big', 'assistant', ?, '[]', ?)`,
+			fmt.Sprintf("echo%03d", i), "again "+secret, 1000+i)
+	}
+	for i := 0; i < 60; i++ { // and clean rows, which are only read
+		exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, 'big', 'user', 'hello', '[]', ?)`, fmt.Sprintf("clean%03d", i), 2000+i)
+	}
+	for i := 0; i < 30; i++ {
+		exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES (?, 'big', ?, 'set_secret', ?, '{}', 'succeeded')`,
+			fmt.Sprintf("later%03d", i), fmt.Sprintf("l%d", i), `{"value":"`+secret+`"}`)
+	}
+	exec(`UPDATE ai_conversations SET title = ? WHERE id = 'big'`, "k "+secret)
+	holding := rowsHolding(t, db, secret) // rows that must each be written exactly once
+	var rowsInConv int
+	for _, q := range []string{`SELECT COUNT(*) FROM ai_messages WHERE conversation_id = 'big'`, `SELECT COUNT(*) FROM ai_tool_calls WHERE conversation_id = 'big'`} {
+		var c int
+		if err := db.read.QueryRow(q).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		rowsInConv += c
+	}
+	if holding < 3*writeBudget {
+		t.Fatalf("seed too small to need several boots: %d rows", holding)
+	}
+	resetScrub(t, db)
+	boots := scrubUntilDone(t, db, 60, readBudget, writeBudget)
+	if len(boots) < 4 {
+		t.Fatalf("expected several boots, got %d", len(boots))
+	}
+	reads, writes := 0, 0
+	for _, b := range boots {
+		reads += b.scanned
+		writes += b.rewritten
+	}
+	if writes != holding {
+		t.Fatalf("rewrote %d rows over %d boots, want exactly %d (each once)", writes, len(boots), holding)
+	}
+	// Each row is scanned once, each written row is read once more, and every boot
+	// pays only a few reads to re-fetch its minting row and the title.
+	if limit := rowsInConv + holding + 6*len(boots); reads > limit {
+		t.Fatalf("read %d rows over %d boots, want at most %d: rows were rescanned", reads, len(boots), limit)
+	}
+	if n := rowsHolding(t, db, secret); n != 0 {
+		t.Fatalf("%d rows still hold the credential", n)
+	}
+	for range 2 { // finished: further boots do nothing
+		if st := db.scrubChatCredentials(); st != (scrubStats{}) {
+			t.Fatalf("work after the marker: %+v", st)
+		}
+	}
+}
+
+// Sparse histories (few minting rows among many unrelated calls) and dense ones
+// (many minting rows in one conversation) both stay inside the bound.
+func TestScrubChatCredentialsHardBoundSparseAndDense(t *testing.T) {
+	db := newTestDB(t)
+	setScrubBudget(t, 3, 20, 6)
+	for i := 0; i < 70; i++ {
 		seedChatCall(t, db, scrubSeed{fmt.Sprintf("sp%d", i), "c", "list_functions", `{"items":[]}`}, "")
 	}
 	for i := 0; i < 4; i++ {
-		seedChatCall(t, db, scrubSeed{fmt.Sprintf("sp%d", i*15), "m", "create_api_key", `{"key":"` + secretOf(20+i) + `"}`}, secretOf(20+i))
+		seedChatCall(t, db, scrubSeed{fmt.Sprintf("sp%d", i*17), "m", "create_api_key", `{"key":"` + secretOf(60+i) + `"}`}, secretOf(60+i))
 	}
-	// Dense: one conversation with many minting rows, each echoed in later messages.
 	for i := 0; i < 12; i++ {
-		seedChatCall(t, db, scrubSeed{"dense", fmt.Sprintf("d%d", i), "create_webhook", `{"secret":"` + secretOf(40+i) + `"}`}, secretOf(40+i))
+		seedChatCall(t, db, scrubSeed{"dense", fmt.Sprintf("d%d", i), "create_webhook", `{"secret":"` + secretOf(70+i) + `"}`}, secretOf(70+i))
 	}
-	leaked := func() int {
-		n, text := 0, chatText(t, db)
-		for _, i := range append([]int{20, 21, 22, 23}, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51) {
-			if strings.Contains(text, secretOf(i)) {
-				n++
-			}
-		}
-		return n
-	}
-	setScrubBudget(t, 2, 1, 1) // two minting rows per batch; one batch per boot
+	// Failed and non-minting rows interleaved are read (and counted) but never sources.
+	seedChatCallStatus(t, db, scrubSeed{"dense", "bad", "create_webhook", `{"secret":"` + secretOf(99) + `"}`}, "", "failed")
 	resetScrub(t, db)
-	boots, previous := 0, leaked()
-	for db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
-		if boots++; boots > 40 {
-			t.Fatal("scrub never completed under a tiny budget")
+	boots := scrubUntilDone(t, db, 400, 20, 6)
+	if len(boots) < 6 {
+		t.Fatalf("expected several boots, got %d", len(boots))
+	}
+	text := chatText(t, db)
+	for _, i := range append([]int{60, 61, 62, 63}, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81) {
+		if strings.Contains(text, secretOf(i)) {
+			t.Fatalf("credential %d survived", i)
 		}
+	}
+	if !strings.Contains(text, secretOf(99)) {
+		t.Fatal("a failed call's value was taken as a source")
+	}
+}
+
+// An interruption stops where the work stopped, a failed batch rolls back whole,
+// and later boots complete without repeating finished conversations.
+func TestScrubChatCredentialsResumesAndIsAtomicPerBatch(t *testing.T) {
+	db := newTestDB(t)
+	setScrubBudget(t, 50, 16, 1_000_000)
+	for i := 1; i <= 5; i++ {
+		seedChatCall(t, db, scrubSeed{fmt.Sprintf("r%d", i), "c", "create_api_key", `{"key":"` + secretOf(i) + `"}`}, secretOf(i))
+	}
+	resetScrub(t, db)
+	state := func() string {
+		return db.GetSystemConfigString(chatScrubCursorKey, "") + "|" + db.GetSystemConfigString(chatScrubPosKey, "")
+	}
+	db.scrubChatCredentials()
+	if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" || state() == "|" {
+		t.Fatalf("a 16-row budget cannot finish five conversations in one boot (state %q)", state())
+	}
+	if rowsHolding(t, db, secretOf(5)) == 0 {
+		t.Fatal("the last conversation was reached too early")
+	}
+	// r4's assistant message cannot be written: its batch must roll back whole.
+	if _, err := db.write.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON ai_messages WHEN NEW.id = 'm-asst-r4ccreate_api_key'
+		BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var last string
+	for i := 0; i < 20; i++ {
+		before := state()
 		db.scrubChatCredentials()
-		if now := leaked(); now > previous {
-			t.Fatalf("leak count grew from %d to %d", previous, now)
-		} else {
-			previous = now
+		if state() == before && last == before {
+			break // stalled at the failing batch
 		}
-		if db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" && leaked() == 0 && boots < 3 {
-			t.Fatalf("finished too fast to exercise resumption (boot %d)", boots)
+		last = before
+	}
+	if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
+		t.Fatal("marker set although a batch failed")
+	}
+	for _, q := range []string{
+		`SELECT result FROM ai_tool_calls WHERE conversation_id = 'r4'`,
+		`SELECT content FROM ai_messages WHERE conversation_id = 'r4' AND role = 'tool'`,
+		`SELECT content FROM ai_messages WHERE conversation_id = 'r4' AND role = 'assistant'`,
+	} {
+		if !strings.Contains(column(t, db, q), secretOf(4)) {
+			t.Fatalf("the failed batch was partly committed: %s", q)
 		}
 	}
-	if leaked() != 0 {
-		t.Fatalf("%d credentials left after completion", leaked())
+	for i := 1; i <= 3; i++ {
+		if rowsHolding(t, db, secretOf(i)) != 0 {
+			t.Fatalf("conversation r%d, finished before the failure, was left unscrubbed", i)
+		}
 	}
-	if boots < 5 {
-		t.Fatalf("expected several boots under the tiny budget, got %d", boots)
+	if _, err := db.write.Exec(`DROP TRIGGER boom`); err != nil {
+		t.Fatal(err)
 	}
-	// Every boot but the last stopped on the budget, each doing one batch only.
-	if db.GetSystemConfigString(chatScrubCursorKey, "") == "" {
-		t.Fatal("cursor missing")
+	scrubUntilDone(t, db, 20, 16, 1_000_000)
+	for i := 1; i <= 5; i++ {
+		if rowsHolding(t, db, secretOf(i)) != 0 {
+			t.Fatalf("credential %d survived the resumed boots", i)
+		}
+	}
+}
+
+// An iteration error aborts the batch: nothing is written, the cursor does not
+// advance and the marker stays unset; clearing it lets the next boot finish.
+func TestScrubChatCredentialsIterationErrorAbortsBatch(t *testing.T) {
+	for _, stage := range []string{"mint", "messages", "tools"} {
+		t.Run(stage, func(t *testing.T) {
+			db := newTestDB(t)
+			seedChatCall(t, db, scrubSeed{"e1", "c", "create_api_key", `{"key":"` + secretOf(1) + `"}`}, secretOf(1))
+			if _, err := db.write.Exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('t-e1','e1','z','set_secret',?,'{}','succeeded')`, `{"v":"`+secretOf(1)+`"}`); err != nil {
+				t.Fatal(err)
+			}
+			resetScrub(t, db)
+			before := chatText(t, db)
+			chatScrubInjectErr = func(s string) error {
+				if s == stage {
+					return errors.New("injected iteration error")
+				}
+				return nil
+			}
+			t.Cleanup(func() { chatScrubInjectErr = nil })
+			db.scrubChatCredentials()
+			if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
+				t.Fatal("marker set after an iteration error")
+			}
+			if db.GetSystemConfigString(chatScrubCursorKey, "") != "" || db.GetSystemConfigString(chatScrubPosKey, "") != "" {
+				t.Fatal("cursor or position advanced after an iteration error")
+			}
+			if chatText(t, db) != before {
+				t.Fatal("rows were written by an aborted batch")
+			}
+			chatScrubInjectErr = nil
+			scrubUntilDone(t, db, 10, 10000, 10000)
+			if rowsHolding(t, db, secretOf(1)) != 0 {
+				t.Fatal("recovery boot did not scrub")
+			}
+		})
+	}
+}
+
+// The candidate and conversation reads are keyset ranges over existing indexes,
+// not sorts of the whole conversation.
+func TestScrubQueriesUseIndexes(t *testing.T) {
+	db := newTestDB(t)
+	for name, q := range map[string]string{
+		"mint":     `SELECT rowid FROM ai_tool_calls WHERE tool_name = 'create_api_key' AND rowid > 0 AND rowid <= 99 ORDER BY rowid LIMIT 5`,
+		"messages": `SELECT rowid, seq, id FROM ai_messages WHERE conversation_id = 'c' AND (seq, rowid) > (0, 0) ORDER BY seq, rowid LIMIT 5`,
+		"tools":    `SELECT rowid, id FROM ai_tool_calls WHERE conversation_id = 'c' AND rowid > 0 ORDER BY rowid LIMIT 5`,
+	} {
+		rows, err := db.read.Query(`EXPLAIN QUERY PLAN ` + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var a, b, c int
+			var detail string
+			_ = rows.Scan(&a, &b, &c, &detail)
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		joined := strings.Join(plan, " | ")
+		if !strings.Contains(joined, "USING INDEX") && !strings.Contains(joined, "USING COVERING INDEX") || strings.Contains(joined, "TEMP B-TREE") {
+			t.Errorf("%s: plan = %s", name, joined)
+		}
 	}
 }
