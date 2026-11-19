@@ -14,6 +14,31 @@
       :unconfirmed="unconfirmed"
     />
     <section
+      v-if="approval"
+      class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-warning-ring bg-warning-tint px-4 py-3"
+      aria-label="Approval"
+      data-testid="permissions-approval"
+    >
+      <p class="measure text-sm text-foreground">
+        <span class="font-medium text-foreground-strong">Not active yet.</span>
+        {{ approval.text }}
+        <span
+          v-if="approveStale"
+          role="alert"
+          class="block text-warning-fg"
+        >{{ approveStale }}</span>
+      </p>
+      <Button
+        v-if="approval.canApprove"
+        :disabled="!!approveReason || approving"
+        :title="approveReason"
+        data-testid="permissions-approve"
+        @click="approve"
+      >
+        Review and approve
+      </Button>
+    </section>
+    <section
       v-if="source"
       class="space-y-4"
       aria-label="Attached policies and effective access"
@@ -203,12 +228,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import Button from '@/components/common/Button.vue'
 import StatementList from '@/components/permissions/StatementList.vue'
 import InboundCallers from '@/components/permissions/InboundCallers.vue'
 import EffectiveAccess from '@/components/permissions/EffectiveAccess.vue'
-import { parseCounter, statementSummary } from '@/utils/permissionsModel.js'
+import { buildReviewPayload, parseCounter, statementSummary } from '@/utils/permissionsModel.js'
+import { useConfirmStore } from '@/stores/confirm.js'
 import FunctionPermissions from './FunctionPermissions.vue'
 import { usePermissions } from '@/composables/usePermissions.js'
 import { useIAMResource } from '@/composables/useIAMResource.js'
@@ -266,8 +292,57 @@ const changeReason = computed(() => {
   if (controller.loadError.value || controller.saveError.value || actions.error.value) return 'Refresh and review the current revision before changing sources.'
   return ''
 })
+// The approve action reviews the stored combination for the current deployment;
+// it lives here because this is where an inactive function is noticed.
+const approval = computed(() => {
+  const h = source.value?.host
+  if (!h || !h.current_artifact || !['managed', 'scratch_opt_in'].includes(h.enforcement)) return null
+  if (!h.review_required && !h.quarantined && h.current_artifact === h.approved_artifact) return null
+  const why = h.quarantined ? 'This function is quarantined' : 'This deployment\'s permissions have not been approved'
+  if (!h.can_manage) return { canApprove: false, text: `${why}. An administrator must review and approve them.` }
+  return { canApprove: true, text: `${why}. Approving turns on the stored grants below for the current deployment.` }
+})
+const approveReason = computed(() => {
+  if (changeReason.value) return changeReason.value
+  if (controller.snapshot.value?.host.revision !== source.value?.host.revision) return 'Refresh before approving.'
+  return ''
+})
+const approving = ref(false)
+const approveStale = ref('')
+onDeactivated(() => {
+  lifetime += 1
+  inlineOperation += 1
+  approving.value = false
+  approveStale.value = ''
+})
+// The confirmation dialog is async: approve only the owner, page lifetime and
+// exact expectations the operator saw when it opened.
+async function approve() {
+  if (approveReason.value || approving.value) return
+  const r = buildReviewPayload(controller.snapshot.value)
+  if (!r.ok) return
+  const seen = { epoch: lifetime, owner: props.functionId, expected: JSON.stringify(r.payload.expected) }
+  approving.value = true
+  approveStale.value = ''
+  try {
+    const ok = await useConfirmStore().ask({
+      title: `Approve ${source.value.function.name}?`,
+      message: 'The stored grants listed on this page become active for the current deployment.',
+      confirmLabel: 'Approve',
+    })
+    if (!ok || seen.epoch !== lifetime || seen.owner !== props.functionId) return
+    const now = buildReviewPayload(controller.snapshot.value)
+    if (approveReason.value || !now.ok || JSON.stringify(now.payload.expected) !== seen.expected) {
+      approveStale.value = 'Permissions changed while you were confirming. Review them again.'
+      return
+    }
+    await mutateInline('review', r.payload)
+  } finally {
+    if (seen.epoch === lifetime) approving.value = false
+  }
+}
 watch(source, () => { detach.value = null })
-watch(() => props.functionId, () => { detach.value = null })
+watch(() => props.functionId, () => { detach.value = null; approving.value = false; approveStale.value = '' })
 function refresh() { detach.value = null; void actions.refresh(); void controller.refresh() }
 async function refreshInspector(epoch = lifetime) {
   await nextTick()

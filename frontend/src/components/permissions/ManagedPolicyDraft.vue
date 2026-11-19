@@ -72,7 +72,7 @@
           :disabled="disabled"
           @click="review"
         >
-          Review policy
+          Review and save
         </Button>
         <Button
           v-if="reviewing"
@@ -80,7 +80,7 @@
           :loading="disabled"
           @click="$emit('save', { name, policy: draft })"
         >
-          {{ existing ? 'Save new version' : 'Create reusable policy' }}
+          Save policy
         </Button>
         <Button
           v-if="reviewing"

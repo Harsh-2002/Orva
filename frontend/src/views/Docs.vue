@@ -61,7 +61,11 @@
         On a managed server, each function can only use what its permissions
         allow. Grant access inline on the function's Permissions page, or attach
         a reusable policy from Policies. Editing a policy creates a new version;
-        attached functions keep theirs until you roll it out.
+        attached functions keep theirs until you roll it out. Open Permissions
+        from Functions → Permissions; a typed
+        <code class="doc-chip">/web/functions/&lt;name&gt;/permissions</code> URL
+        resolves a name, but a UUID-shaped segment is treated as a function id
+        first, so a UUID-shaped function name is ambiguous there.
       </p>
     </section>
 
