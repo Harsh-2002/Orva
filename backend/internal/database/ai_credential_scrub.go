@@ -1,58 +1,59 @@
 package database
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 )
 
-// Rows rewritten per transaction, and the ceiling for one boot; the persisted
-// cursor resumes whatever is left on the next boot. Variables so tests can force
-// several batches.
+// Minting rows read per transaction, and the work one boot may spend before it
+// stops and resumes on the next. Variables so tests can force small budgets. The
+// first batch of a boot always runs, so every boot makes progress.
 var (
-	chatScrubBatchRows  = 100
-	chatScrubMaxBatches = 200
+	chatScrubBatchRows    = 50
+	chatScrubMaxScanned   = 10000 // rows read: minting rows plus conversation rows examined
+	chatScrubMaxRewritten = 10000 // rows written
 )
 
 const (
 	chatScrubMarkerKey = "chat_credential_scrub_done"
 	chatScrubCursorKey = "chat_credential_scrub_cursor"
 
-	// Free-text copies are located by value; refuse values short enough to
-	// match ordinary prose.
+	// Copies are located by value; refuse values short enough to match prose.
 	chatScrubMinValueLen = 16
 )
 
 // scrubChatCredentials is the third explicit carve-out to additive-only
-// migrations (CONTRACT.md §9). Before Chat redacted one-time credentials at the
-// source, the result of create_api_key / create_webhook / create_inbound_webhook
-// was stored in full. This replaces, per credential-minting tool call:
+// migrations (CONTRACT.md §9): best-effort removal of one-time credentials that
+// Chat stored before it redacted them at the source.
 //
-//   - ai_tool_calls.result  (the audit row)
-//   - ai_messages.content of the role=tool message holding that same result
-//   - every other copy of the credential value in the same conversation:
-//     ai_messages.content and .parts of any role (user text, assistant text and
-//     thinking, other tool messages), ai_tool_calls.args and .result of later
-//     calls, and the conversation title
+// Credential values are taken only from the current rows of succeeded
+// create_api_key / create_webhook / create_inbound_webhook calls. Within each
+// affected conversation the exact value is then replaced with the placeholder:
 //
-// with the placeholder. Rows that do not contain the credential are never
-// written, and other conversations are never touched. Each batch
-// is one transaction that also advances a persisted rowid cursor, so an
-// interrupted boot resumes; the marker is written only after the walk completes.
-// Nothing is dropped and the schema is unchanged.
+//   - the minting call's own result (the credential field; wholesale if the
+//     result is not valid JSON) and the role=tool message holding that result
+//   - in every other ai_messages content/parts, ai_tool_calls args/result and
+//     the conversation title: inside decoded JSON string leaves for JSON
+//     columns (re-marshalled, never textually patched), and on token boundaries
+//     (neighbours not in [A-Za-z0-9_-]) for plain text. JSON columns that do not
+//     parse are left alone.
+//
+// Each batch is one transaction that applies the union of its conversations'
+// values in one pass, re-reading each row immediately before writing it, and
+// advances a persisted rowid cursor. Rows without the value, other
+// conversations and other tools' minting results are not written. A per-boot
+// budget on rows scanned and rewritten stops the pass and resumes next boot; the
+// marker is set only after the walk completes. Nothing is dropped.
 func (db *Database) scrubChatCredentials() {
 	if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
 		return
-	}
-	var names []string
-	var marks []string
-	for name := range onetime.Fields {
-		names = append(names, name)
-		marks = append(marks, "?")
 	}
 	cursor := int64(0)
 	if v := db.GetSystemConfigString(chatScrubCursorKey, ""); v != "" {
@@ -60,18 +61,24 @@ func (db *Database) scrubChatCredentials() {
 			cursor = n
 		}
 	}
-	var scrubbed int64
-	for range chatScrubMaxBatches {
-		n, next, done, err := db.scrubChatBatch(cursor, names, marks)
+	var total scrubStats
+	for first := true; ; first = false {
+		if !first && (total.scanned >= chatScrubMaxScanned || total.rewritten >= chatScrubMaxRewritten) {
+			slog.Info("Chat credential scrub continues next boot", "scanned", total.scanned, "rewritten", total.rewritten)
+			return
+		}
+		st, next, done, err := db.scrubChatBatch(cursor)
 		if err != nil {
 			slog.Warn("chat credential scrub failed", "err", err)
 			return
 		}
-		scrubbed += n
+		total.scanned += st.scanned
+		total.rewritten += st.rewritten
+		total.minted += st.minted
 		cursor = next
 		if done {
-			if scrubbed > 0 {
-				slog.Info("scrubbed stored Chat credentials", "tool_calls", scrubbed)
+			if total.rewritten > 0 {
+				slog.Info("scrubbed stored Chat credentials", "minting_calls", total.minted, "rows_rewritten", total.rewritten)
 			}
 			if err := db.SetSystemConfig(chatScrubMarkerKey, "true"); err != nil {
 				slog.Warn("chat credential scrub marker write failed", "err", err)
@@ -79,7 +86,6 @@ func (db *Database) scrubChatCredentials() {
 			return
 		}
 	}
-	slog.Info("Chat credential scrub continues next boot", "tool_calls_scrubbed", scrubbed)
 }
 
 func parseCursor(v string) (int64, bool) {
@@ -87,135 +93,376 @@ func parseCursor(v string) (int64, bool) {
 	return n, err == nil && n >= 0
 }
 
-type chatScrubRow struct {
-	rowid                                 int64
-	id, conversationID, tool, callID, res string
+type scrubStats struct{ scanned, rewritten, minted int }
+
+type mintRow struct {
+	rowid                                    int64
+	id, conversationID, tool, callID, result string
 }
 
-func (db *Database) scrubChatBatch(cursor int64, names, marks []string) (scrubbed, next int64, done bool, err error) {
-	args := []any{cursor}
-	for _, n := range names {
-		args = append(args, n)
-	}
-	args = append(args, chatScrubBatchRows)
-	rows, err := db.write.Query(`SELECT rowid, id, conversation_id, tool_name, COALESCE(call_id,''), result
-		FROM ai_tool_calls WHERE rowid > ? AND tool_name IN (`+strings.Join(marks, ",")+`)
-		AND result IS NOT NULL AND result <> '' ORDER BY rowid LIMIT ?`, args...)
-	if err != nil {
-		return 0, cursor, false, err
-	}
-	var batch []chatScrubRow
-	for rows.Next() {
-		var r chatScrubRow
-		if err := rows.Scan(&r.rowid, &r.id, &r.conversationID, &r.tool, &r.callID, &r.res); err != nil {
-			_ = rows.Close()
-			return 0, cursor, false, err
-		}
-		batch = append(batch, r)
-	}
-	if err := rows.Close(); err != nil {
-		return 0, cursor, false, err
-	}
-	if rows.Err() != nil {
-		return 0, cursor, false, rows.Err()
-	}
-	if len(batch) == 0 {
-		return 0, cursor, true, nil
-	}
+// convWork is everything one conversation's pass needs, derived from freshly
+// read minting rows before any write of the batch.
+type convWork struct {
+	values []string           // longest first
+	mints  map[string]mintRow // audit row id -> row, those whose result changes
+	corr   []resultCorrelation
+}
 
+// resultCorrelation finds the role=tool message that stores a minting result.
+type resultCorrelation struct{ orig, redacted, callPart string }
+
+func (db *Database) scrubChatBatch(cursor int64) (st scrubStats, next int64, done bool, err error) {
 	tx, err := db.write.Begin()
 	if err != nil {
-		return 0, cursor, false, err
+		return st, cursor, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	rows, err := fetchMintRows(tx, cursor, chatScrubBatchRows)
+	if err != nil {
+		return st, cursor, false, err
+	}
+	if len(rows) == 0 {
+		return st, cursor, true, nil
+	}
+	st.scanned += len(rows)
 	next = cursor
-	for _, r := range batch {
-		changed, err := scrubChatToolCall(tx, r)
-		if err != nil {
-			return 0, cursor, false, err
+	work := map[string]*convWork{}
+	for _, r := range rows {
+		if r.rowid > next {
+			next = r.rowid
 		}
-		if changed {
-			scrubbed++
+		paths := onetime.Fields[r.tool]
+		redacted, changed := onetime.Redact(r.result, paths)
+		if !changed {
+			continue // already scrubbed, or nothing to find
 		}
-		next = r.rowid
+		st.minted++
+		w := work[r.conversationID]
+		if w == nil {
+			w = &convWork{mints: map[string]mintRow{}}
+			work[r.conversationID] = w
+		}
+		w.mints[r.id] = r
+		w.corr = append(w.corr, resultCorrelation{orig: r.result, redacted: redacted, callPart: callIDPart(r.callID)})
+		if values, ok := onetime.Values(r.result, paths); ok {
+			for _, v := range values {
+				if len(v) >= chatScrubMinValueLen {
+					w.values = append(w.values, v)
+				}
+			}
+		}
+	}
+	convs := make([]string, 0, len(work))
+	for c := range work {
+		convs = append(convs, c)
+	}
+	sort.Strings(convs)
+	for _, c := range convs {
+		w := work[c]
+		w.values = uniqueLongestFirst(w.values)
+		if err := scrubConversation(tx, c, w, &st); err != nil {
+			return scrubStats{}, cursor, false, err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO system_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-		chatScrubCursorKey, formatCursor(next)); err != nil {
-		return 0, cursor, false, err
+		chatScrubCursorKey, strconv.FormatInt(next, 10)); err != nil {
+		return scrubStats{}, cursor, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, cursor, false, err
+		return scrubStats{}, cursor, false, err
 	}
-	return scrubbed, next, len(batch) < chatScrubBatchRows, nil
+	return st, next, false, nil
 }
 
-func formatCursor(n int64) string { return strconv.FormatInt(n, 10) }
+// fetchMintRows returns up to limit succeeded minting rows after the cursor in
+// rowid order, one indexed range per tool name (idx_ai_tc_tool).
+func fetchMintRows(tx *sql.Tx, cursor int64, limit int) ([]mintRow, error) {
+	names := make([]string, 0, len(onetime.Fields))
+	for n := range onetime.Fields {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var all []mintRow
+	for _, name := range names {
+		rows, err := tx.Query(`SELECT rowid, id, conversation_id, tool_name, COALESCE(call_id,''), result
+			FROM ai_tool_calls WHERE tool_name = ? AND rowid > ? AND status = 'succeeded'
+			AND result IS NOT NULL AND result <> '' ORDER BY rowid LIMIT ?`, name, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var r mintRow
+			if err := rows.Scan(&r.rowid, &r.id, &r.conversationID, &r.tool, &r.callID, &r.result); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			all = append(all, r)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].rowid < all[j].rowid })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	return all, nil
+}
+
+func uniqueLongestFirst(values []string) []string {
+	seen := map[string]bool{}
+	out := values[:0]
+	for _, v := range values {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
+}
+
+// scrubConversation applies every value of the conversation in a single pass.
+// Candidates are found by scanning; each is then re-read by id inside the
+// transaction and rewritten from that fresh copy, so no write is computed from
+// a snapshot older than another write to the same row.
+func scrubConversation(tx *sql.Tx, convID string, w *convWork, st *scrubStats) error {
+	// Messages.
+	ids, err := scanIDs(tx, `SELECT id, role, content, parts FROM ai_messages WHERE conversation_id = ?`, convID, st,
+		func(sc func(...any) error) (string, bool, error) {
+			var id, role, content, parts string
+			if err := sc(&id, &role, &content, &parts); err != nil {
+				return "", false, err
+			}
+			_, _, changed := w.message(role, content, parts)
+			return id, changed, nil
+		})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		var role, content, parts string
+		if err := tx.QueryRow(`SELECT role, content, parts FROM ai_messages WHERE id = ?`, id).Scan(&role, &content, &parts); err != nil {
+			return err
+		}
+		c, p, changed := w.message(role, content, parts)
+		if !changed {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE ai_messages SET content = ?, parts = ? WHERE id = ?`, c, p, id); err != nil {
+			return err
+		}
+		st.rewritten++
+	}
+
+	// Tool calls.
+	ids, err = scanIDs(tx, `SELECT id, tool_name, status, args, result FROM ai_tool_calls WHERE conversation_id = ?`, convID, st,
+		func(sc func(...any) error) (string, bool, error) {
+			var id, tool, status, args string
+			var result sql.NullString
+			if err := sc(&id, &tool, &status, &args, &result); err != nil {
+				return "", false, err
+			}
+			_, _, changed := w.toolCall(id, tool, status, args, result)
+			return id, changed, nil
+		})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		var tool, status, args string
+		var result sql.NullString
+		if err := tx.QueryRow(`SELECT tool_name, status, args, result FROM ai_tool_calls WHERE id = ?`, id).Scan(&tool, &status, &args, &result); err != nil {
+			return err
+		}
+		a, r, changed := w.toolCall(id, tool, status, args, result)
+		if !changed {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE ai_tool_calls SET args = ?, result = ? WHERE id = ?`, a, nullStr(r), id); err != nil {
+			return err
+		}
+		st.rewritten++
+	}
+
+	// Title.
+	var title string
+	if err := tx.QueryRow(`SELECT title FROM ai_conversations WHERE id = ?`, convID).Scan(&title); err == nil {
+		st.scanned++
+		if t, changed := w.text(title); changed {
+			if _, err := tx.Exec(`UPDATE ai_conversations SET title = ? WHERE id = ?`, t, convID); err != nil {
+				return err
+			}
+			st.rewritten++
+		}
+	} else if err != sql.ErrNoRows {
+		return err
+	}
+	return nil
+}
+
+// scanIDs drains the rows (a transaction has one connection, so nothing may run
+// while they are open) and returns the ids the callback flags as needing a write.
+func scanIDs(tx *sql.Tx, query, convID string, st *scrubStats, each func(func(...any) error) (string, bool, error)) ([]string, error) {
+	rows, err := tx.Query(query, convID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		st.scanned++
+		id, changed, err := each(rows.Scan)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if changed {
+			ids = append(ids, id)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return ids, rows.Err()
+}
+
+// message computes one message's scrubbed content and parts.
+func (w *convWork) message(role, content, parts string) (string, string, bool) {
+	c := content
+	if role == "tool" {
+		for _, k := range w.corr {
+			if c == k.orig && (k.callPart == "" || strings.Contains(parts, k.callPart)) {
+				c = k.redacted
+				break
+			}
+		}
+	}
+	if t, ok := w.text(c); ok {
+		c = t
+	}
+	p, pch := w.json(parts)
+	return c, p, c != content || pch
+}
+
+// toolCall computes one tool call's scrubbed args and result. A succeeded
+// minting call of this batch first has its credential field redacted.
+func (w *convWork) toolCall(id, tool, status, args string, result sql.NullString) (string, string, bool) {
+	a, changed := w.json(args)
+	res := result.String
+	if result.Valid {
+		if _, minted := w.mints[id]; minted && status == "succeeded" {
+			if red, ch := onetime.Redact(res, onetime.Fields[tool]); ch {
+				res, changed = red, true
+			}
+		}
+		if r, ch := w.json(res); ch {
+			res, changed = r, true
+		}
+	}
+	return a, res, changed
+}
+
+// text scrubs a text column: decoded JSON leaves when the text is valid JSON,
+// otherwise token-bounded replacement.
+func (w *convWork) text(s string) (string, bool) {
+	if s == "" || len(w.values) == 0 {
+		return s, false
+	}
+	if json.Valid([]byte(s)) {
+		return w.json(s)
+	}
+	return w.leaf(s)
+}
+
+// json scrubs a JSON column inside its decoded string leaves and re-marshals it.
+// Input that is not exactly one JSON value is returned untouched.
+func (w *convWork) json(s string) (string, bool) {
+	if s == "" || len(w.values) == 0 || !json.Valid([]byte(s)) {
+		return s, false
+	}
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return s, false
+	}
+	doc, changed := w.walk(doc)
+	if !changed {
+		return s, false
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(doc); err != nil {
+		return s, false
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), true
+}
+
+func (w *convWork) walk(node any) (any, bool) {
+	switch n := node.(type) {
+	case string:
+		return w.leaf(n)
+	case []any:
+		changed := false
+		for i, el := range n {
+			if v, ch := w.walk(el); ch {
+				n[i], changed = v, true
+			}
+		}
+		return n, changed
+	case map[string]any:
+		changed := false
+		for k, el := range n {
+			if v, ch := w.walk(el); ch {
+				n[k], changed = v, true
+			}
+		}
+		return n, changed
+	}
+	return node, false
+}
+
+// leaf replaces each value in decoded text where it stands alone: the byte
+// before and after must not be in [A-Za-z0-9_-], so a longer unrelated token
+// that merely contains the credential is left as it is.
+func (w *convWork) leaf(s string) (string, bool) {
+	changed := false
+	for _, v := range w.values {
+		var b strings.Builder
+		i, did := 0, false
+		for {
+			j := strings.Index(s[i:], v)
+			if j < 0 {
+				break
+			}
+			start, end := i+j, i+j+len(v)
+			if (start == 0 || !tokenByte(s[start-1])) && (end == len(s) || !tokenByte(s[end])) {
+				b.WriteString(s[i:start])
+				b.WriteString(onetime.Placeholder)
+				i, did = end, true
+				continue
+			}
+			b.WriteString(s[i : start+1])
+			i = start + 1
+		}
+		if did {
+			b.WriteString(s[i:])
+			s, changed = b.String(), true
+		}
+	}
+	return s, changed
+}
+
+func tokenByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+}
 
 func jsonString(v string) string {
 	b, _ := json.Marshal(v)
 	return string(b)
-}
-
-// scrubChatToolCall rewrites one minting call's stored copies. Messages are
-// handled before the audit row because the credential value is read from it.
-func scrubChatToolCall(tx *sql.Tx, r chatScrubRow) (bool, error) {
-	redacted, changed := onetime.Redact(r.res, onetime.Fields[r.tool])
-	if !changed {
-		return false, nil
-	}
-	// The tool-role message stores the identical result string, correlated by
-	// call id; matching content as well keeps a reused provider call id from
-	// reaching another tool's message. Done before the by-value pass, which would
-	// otherwise change the content this match depends on. A call id the provider
-	// never assigned is omitted from parts entirely.
-	if _, err := tx.Exec(`UPDATE ai_messages SET content = ?1
-		WHERE conversation_id = ?2 AND role = 'tool' AND content = ?3
-		AND (?4 = '' OR instr(parts, ?4) > 0)`, redacted, r.conversationID, r.res,
-		callIDPart(r.callID)); err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(`UPDATE ai_tool_calls SET result = ? WHERE id = ?`, redacted, r.id); err != nil {
-		return false, err
-	}
-	// Every other copy of the credential in the same conversation: the user's
-	// own messages, the model's replies and thinking, later tool arguments and
-	// results. Rows that do not contain the value are never written.
-	if values, ok := onetime.Values(r.res, onetime.Fields[r.tool]); ok {
-		for _, v := range values {
-			if len(v) < chatScrubMinValueLen {
-				continue
-			}
-			if err := scrubConversationCopies(tx, r.conversationID, v); err != nil {
-				return false, err
-			}
-		}
-	}
-	return true, nil
-}
-
-// scrubConversationCopies replaces one credential value, in its plain and
-// JSON-escaped forms, in all stored content of one conversation.
-func scrubConversationCopies(tx *sql.Tx, conversationID, value string) error {
-	forms := []string{value}
-	if esc := jsonString(value); esc[1:len(esc)-1] != value {
-		forms = append(forms, esc[1:len(esc)-1])
-	}
-	for _, f := range forms {
-		for _, stmt := range []string{
-			`UPDATE ai_messages SET content = replace(content, ?1, ?2), parts = replace(parts, ?1, ?2)
-			 WHERE conversation_id = ?3 AND (instr(content, ?1) > 0 OR instr(parts, ?1) > 0)`,
-			`UPDATE ai_tool_calls SET args = replace(args, ?1, ?2), result = replace(result, ?1, ?2)
-			 WHERE conversation_id = ?3 AND (instr(args, ?1) > 0 OR instr(COALESCE(result,''), ?1) > 0)`,
-			`UPDATE ai_conversations SET title = replace(title, ?1, ?2)
-			 WHERE id = ?3 AND instr(title, ?1) > 0`,
-		} {
-			if _, err := tx.Exec(stmt, f, onetime.Placeholder, conversationID); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func callIDPart(callID string) string {

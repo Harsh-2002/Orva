@@ -345,13 +345,15 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
 
 `scrubChatCredentials` (`ai_credential_scrub.go`, run from `Migrate()` after the
-orphan reclaim) is the third explicit rewrite carve-out: one-shot behind
-`chat_credential_scrub_done`, per-batch transactions with a persisted rowid
-cursor, replacing stored one-time credentials of the tools in `onetime.Fields`
-(`ai_tool_calls.result`, the matching role=tool `ai_messages.content`, and exact
-copies of the value anywhere else in the same conversation: `ai_messages`
-`content`/`parts` of any role, `ai_tool_calls.args`/`result`, the title). `onetime` is the leaf
-package shared by that migration, `ai/agent` redaction and the MCP registrations.
+orphan reclaim) is the third explicit rewrite carve-out, best effort: one-shot
+behind `chat_credential_scrub_done`, one transaction per batch of minting rows
+with a persisted rowid cursor and a per-boot budget on rows scanned/rewritten
+(candidates via `idx_ai_tc_tool`). Values come only from succeeded calls of the
+tools in `onetime.Fields`; per conversation the union is applied in one pass that
+re-reads each row before writing it. JSON columns are rewritten through decoded
+string leaves (unparseable ones are left alone), plain text only on token
+boundaries. `onetime` is the leaf package shared by that migration, `ai/agent`
+redaction and the MCP registrations.
 
 `KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM
 path, never serving/operator routes yet. It queries case-sensitive literal UTF-8

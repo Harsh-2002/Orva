@@ -31,13 +31,14 @@ unreleased range, and the sections below as the record for everything before it.
   appear only in that turn's live result; stored history and later model
   requests show a placeholder (the Markdown export never includes tool
   results). Copy the value before reloading or leaving Chat. On the first boot
-  after upgrading, a one-shot migration also replaces one-time credentials
-  already stored in Chat history with the placeholder: the audit rows, the
-  matching tool messages, and every exact copy of the value elsewhere in the same
-  conversation (your own messages, the model's replies and thinking, later tool
-  arguments and results, the title). It is resumable and runs once. Copies
-  outside the database (logs, exports, backups, provider-side prompt logs) are
-  not reached: rotate any API key or webhook secret that was ever shown in Chat.
+  after upgrading, a best-effort migration also replaces one-time credentials
+  already stored in Chat history with the placeholder: the audit rows, the matching
+  tool messages and exact copies of the value elsewhere in the same conversation
+  (messages, thinking, later tool arguments and results, the title; whole strings
+  only, never part of a longer token). It is resumable, bounded per boot, and a
+  large history can take several boots. It cannot reach logs, exports, backups or
+  provider-side logs, and does not guarantee every copy is removed: rotate any API
+  key or webhook secret that was ever shown in Chat.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
   paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it

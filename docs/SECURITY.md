@@ -1056,16 +1056,19 @@ redacted are matched only when the whole result is one valid JSON value;
 otherwise the entire result is replaced. External MCP clients still receive the
 value once, as before.
 
-Credentials stored by earlier builds are scrubbed once, on the first boot after
-upgrading (`chat_credential_scrub_done`): for the three tools above the stored
-result, the tool message holding it and every exact copy of the value (16+
-characters, plain or JSON-escaped) in the same conversation (user and assistant
-messages including thinking, other tool messages, later tool-call arguments and
-results, the title) become the placeholder. Other conversations and rows without
-the value are not touched. The rewrite is batched and resumes across boots. It
-cannot reach copies outside the database (logs, exports, backups, provider-side
-prompt logs) or altered forms of the value (truncated, re-encoded), so rotate any
-credential that was ever shown in Chat.
+Credentials stored by earlier builds are scrubbed on a best-effort basis, starting
+on the first boot after upgrading (`chat_credential_scrub_done`). The value of
+each succeeded `create_api_key`, `create_webhook` or `create_inbound_webhook` call
+is replaced by the placeholder in the stored result and its tool message, and
+exact copies (16+ characters) elsewhere in the same conversation are replaced too:
+inside the decoded strings of JSON columns, and in plain text only where the value
+stands alone (neighbours are not letters, digits, `_` or `-`). Other conversations,
+rows without the value, failed calls and JSON that does not parse are left as
+they are. The pass is batched with a per-boot work budget, so a large history can
+take several boots. It cannot reach copies outside the database (logs, exports,
+backups, provider-side prompt logs), altered forms of a value (truncated,
+re-encoded, split) or a value too short to match safely. It does not promise that
+every copy is gone: rotate any credential that was ever shown in Chat.
 
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same

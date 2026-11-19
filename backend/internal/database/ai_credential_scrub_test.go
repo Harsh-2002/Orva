@@ -20,11 +20,16 @@ type scrubSeed struct {
 // assistant reply that repeats the credential.
 func seedChatCall(t *testing.T, db *Database, s scrubSeed, echo string) {
 	t.Helper()
+	seedChatCallStatus(t, db, s, echo, "succeeded")
+}
+
+func seedChatCallStatus(t *testing.T, db *Database, s scrubSeed, echo, status string) {
+	t.Helper()
 	if _, err := db.write.Exec(`INSERT OR IGNORE INTO ai_conversations (id) VALUES (?)`, s.conv); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.write.Exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, result, status)
-		VALUES (?, ?, ?, ?, ?, 'succeeded')`, "tc-"+s.conv+"-"+s.callID+s.tool, s.conv, s.callID, s.tool, s.result); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?)`, "tc-"+s.conv+"-"+s.callID+s.tool, s.conv, s.callID, s.tool, s.result, status); err != nil {
 		t.Fatal(err)
 	}
 	parts := fmt.Sprintf(`[{"type":"tool_result","call_id":%q,"status":"succeeded"}]`, s.callID)
@@ -60,6 +65,13 @@ func resetScrub(t *testing.T, db *Database) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func setScrubBudget(t *testing.T, batch, scanned, rewritten int) {
+	t.Helper()
+	ob, os, or := chatScrubBatchRows, chatScrubMaxScanned, chatScrubMaxRewritten
+	t.Cleanup(func() { chatScrubBatchRows, chatScrubMaxScanned, chatScrubMaxRewritten = ob, os, or })
+	chatScrubBatchRows, chatScrubMaxScanned, chatScrubMaxRewritten = batch, scanned, rewritten
 }
 
 // chatText is every stored text column the scrub may touch, for leak checks.
@@ -211,9 +223,7 @@ func TestScrubChatCredentialsLeavesOtherRowsAlone(t *testing.T) {
 
 func TestScrubChatCredentialsResumesAndIsAtomicPerBatch(t *testing.T) {
 	db := newTestDB(t)
-	oldRows, oldMax := chatScrubBatchRows, chatScrubMaxBatches
-	t.Cleanup(func() { chatScrubBatchRows, chatScrubMaxBatches = oldRows, oldMax })
-	chatScrubBatchRows, chatScrubMaxBatches = 2, 1
+	setScrubBudget(t, 2, 1, 1_000_000) // two minting rows per batch, one batch per boot
 	for i := 1; i <= 5; i++ {
 		seedChatCall(t, db, scrubSeed{fmt.Sprintf("r%d", i), "c", "create_api_key", `{"key":"` + secretOf(i) + `"}`}, secretOf(i))
 	}
@@ -348,7 +358,7 @@ func TestScrubChatCredentialsEveryCopyInTheConversation(t *testing.T) {
 	}
 	// The JSON-escaped credential of the second call is gone too, structure intact.
 	if parts := column(t, db, `SELECT parts FROM ai_messages WHERE id = 'think1'`); strings.Contains(parts, "quote") ||
-		!strings.Contains(parts, `"type":"text","text":"done"`) {
+		!strings.Contains(parts, `{"text":"done","type":"text"}`) {
 		t.Errorf("JSON-escaped copy or surrounding structure mishandled: %s", parts)
 	}
 	for _, q := range []string{`SELECT parts FROM ai_messages WHERE id = 'think1'`, `SELECT args FROM ai_tool_calls WHERE id = 'later1'`, `SELECT result FROM ai_tool_calls WHERE id = 'later1'`} {
@@ -363,5 +373,194 @@ func TestScrubChatCredentialsEveryCopyInTheConversation(t *testing.T) {
 	// Another conversation holding the same string is a different conversation.
 	if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 'user2'`) + column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'later2'`); got != otherBefore {
 		t.Errorf("other conversation was modified: %s", got)
+	}
+}
+
+// A later row must never restore a credential that an earlier step removed:
+// the second result's metadata repeats the first credential.
+func TestScrubChatCredentialsNeverRestoresFromStaleSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	a, b := secretOf(1), secretOf(2)
+	seedChatCall(t, db, scrubSeed{"s", "a", "create_api_key", `{"key":"` + a + `","name":"first"}`}, "")
+	seedChatCall(t, db, scrubSeed{"s", "b", "create_webhook", `{"subscription":{"id":"s1","name":"copy of ` + a + `"},"secret":"` + b + `"}`}, "")
+	resetScrub(t, db)
+	db.scrubChatCredentials()
+	text := chatText(t, db)
+	for _, v := range []string{a, b} {
+		if strings.Contains(text, v) {
+			t.Fatalf("%s reappeared:\n%s", v, text)
+		}
+	}
+	got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'b'`)
+	if !strings.Contains(got, `"name":"copy of `+scrubPlaceholder+`"`) || !strings.Contains(got, `"secret":"`+scrubPlaceholder+`"`) {
+		t.Fatalf("second result = %s", got)
+	}
+	// Same outcome when the two calls land in different batches.
+	db2 := newTestDB(t)
+	setScrubBudget(t, 1, 1, 1_000_000)
+	seedChatCall(t, db2, scrubSeed{"s", "a", "create_api_key", `{"key":"` + a + `"}`}, "")
+	seedChatCall(t, db2, scrubSeed{"s", "b", "create_webhook", `{"subscription":{"name":"copy of ` + a + `"},"secret":"` + b + `"}`}, "")
+	resetScrub(t, db2)
+	for range 4 {
+		db2.scrubChatCredentials()
+	}
+	if t2 := chatText(t, db2); strings.Contains(t2, a) || strings.Contains(t2, b) {
+		t.Fatalf("split batches left a credential:\n%s", t2)
+	}
+}
+
+// JSON columns are rewritten through their decoded strings, and text matches
+// must sit on token boundaries.
+func TestScrubChatCredentialsJSONIntegrityAndBoundaries(t *testing.T) {
+	db := newTestDB(t)
+	secret := secretOf(3)
+	seedChatCall(t, db, scrubSeed{"j", "m1", "create_api_key", `{"key":"` + secret + `"}`}, "")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	longer := secret + "-and-more"
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('a1','j','x1','set_secret',?,?, 'succeeded')`,
+		// escaped unicode neighbours, markup characters, a number that must keep its digits, surrounding text
+		`{"note":"é\u00e9 `+secret+`\u00e9 <b>&","n":12345678901234567890,"text":"use `+secret+`, then stop","other":"`+longer+`","dash":"pre\u002d`+secret+`"}`,
+		`{"ok":true}`)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('p1','j','assistant',?,?,60)`,
+		"prefix"+secret+" and "+secret+"; and "+longer+" and x"+secret, `not json `+secret)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES ('p2','j','assistant','ok',?,61)`,
+		`[{"type":"text","text":"`+secret+`"}]  `)
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, call_id, tool_name, args, result, status) VALUES ('bad1','j','x2','set_secret','{"v":"` + secret + `" broken','not json ` + secret + `', 'failed')`)
+
+	resetScrub(t, db)
+	db.scrubChatCredentials()
+
+	args := column(t, db, `SELECT args FROM ai_tool_calls WHERE id = 'a1'`)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(args), &doc); err != nil {
+		t.Fatalf("args are no longer valid JSON: %v\n%s", err, args)
+	}
+	if !strings.Contains(args, "12345678901234567890") || !strings.Contains(args, "<b>&") {
+		t.Errorf("unrelated JSON content changed: %s", args)
+	}
+	if doc["note"] != "é\u00e9 "+scrubPlaceholder+"\u00e9 <b>&" {
+		t.Errorf("unicode-adjacent credential not replaced on its boundary: %q", doc["note"])
+	}
+	if doc["text"] != "use "+scrubPlaceholder+", then stop" {
+		t.Errorf("credential inside surrounding text: %q", doc["text"])
+	}
+	if doc["other"] != longer {
+		t.Errorf("a longer value containing the credential was altered: %q", doc["other"])
+	}
+	if doc["dash"] != "pre-"+secret {
+		t.Errorf("escaped hyphen is a token character, so this must stay: %q", doc["dash"])
+	}
+	// Plain text: boundaries decide, in the decoded text.
+	if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 'p1'`); got != "prefix"+secret+" and "+scrubPlaceholder+"; and "+longer+" and x"+secret {
+		t.Errorf("plain text boundaries wrong: %q", got)
+	}
+	// JSON columns that do not parse are left alone.
+	if got := column(t, db, `SELECT parts FROM ai_messages WHERE id = 'p1'`); got != "not json "+secret {
+		t.Errorf("unparseable parts were touched: %q", got)
+	}
+	if got := column(t, db, `SELECT parts FROM ai_messages WHERE id = 'p2'`); strings.Contains(got, secret) {
+		t.Errorf("valid JSON with trailing whitespace not scrubbed: %q", got)
+	}
+	if got := column(t, db, `SELECT args||result FROM ai_tool_calls WHERE id = 'bad1'`); !strings.Contains(got, secret) {
+		t.Errorf("unparseable non-minting JSON columns must be left untouched: %q", got)
+	}
+}
+
+// Credentials come only from succeeded minting calls, and a failed call's result
+// is never replaced wholesale.
+func TestScrubChatCredentialsOnlySucceededCallsAreSources(t *testing.T) {
+	db := newTestDB(t)
+	good, failedSecret := secretOf(4), secretOf(5)
+	seedChatCall(t, db, scrubSeed{"f", "ok", "create_api_key", `{"key":"` + good + `"}`}, "")
+	seedChatCallStatus(t, db, scrubSeed{"f", "bad1", "create_api_key", `{"key":"` + failedSecret + `"}`}, "", "failed")
+	seedChatCallStatus(t, db, scrubSeed{"f", "bad2", "create_webhook", `plain failure text`}, "", "failed")
+	seedChatCallStatus(t, db, scrubSeed{"f", "bad3", "create_webhook", `{"error":"dup of ` + good + `"}`}, "", "failed")
+	resetScrub(t, db)
+	db.scrubChatCredentials()
+	if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'bad1'`); !strings.Contains(got, failedSecret) {
+		t.Errorf("value taken from a failed call: %s", got)
+	}
+	if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'bad2'`); got != "plain failure text" {
+		t.Errorf("failed result replaced wholesale: %s", got)
+	}
+	if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'bad3'`); got != `{"error":"dup of `+scrubPlaceholder+`"}` {
+		t.Errorf("failed result copy of an extracted value: %s", got)
+	}
+	if strings.Contains(column(t, db, `SELECT result FROM ai_tool_calls WHERE call_id = 'ok'`), good) {
+		t.Error("succeeded call not scrubbed")
+	}
+}
+
+// Work per boot is bounded on rows scanned and rewritten, from an indexed query,
+// and the marker waits for completion across sparse and dense histories.
+func TestScrubChatCredentialsBoundedWorkAcrossBoots(t *testing.T) {
+	db := newTestDB(t)
+	var plan []string
+	rows, err := db.read.Query(`EXPLAIN QUERY PLAN SELECT rowid FROM ai_tool_calls WHERE tool_name = ? AND rowid > ? AND status = 'succeeded' ORDER BY rowid LIMIT 5`, "create_api_key", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a, b, c int
+		var detail string
+		_ = rows.Scan(&a, &b, &c, &detail)
+		plan = append(plan, detail)
+	}
+	rows.Close()
+	if !strings.Contains(strings.Join(plan, " "), "idx_ai_tc_tool") {
+		t.Fatalf("candidate query does not use the tool-name index: %v", plan)
+	}
+
+	// Sparse: many unrelated tool calls with a few minting rows among them.
+	for i := 0; i < 60; i++ {
+		seedChatCall(t, db, scrubSeed{fmt.Sprintf("sp%d", i), "c", "list_functions", `{"items":[]}`}, "")
+	}
+	for i := 0; i < 4; i++ {
+		seedChatCall(t, db, scrubSeed{fmt.Sprintf("sp%d", i*15), "m", "create_api_key", `{"key":"` + secretOf(20+i) + `"}`}, secretOf(20+i))
+	}
+	// Dense: one conversation with many minting rows, each echoed in later messages.
+	for i := 0; i < 12; i++ {
+		seedChatCall(t, db, scrubSeed{"dense", fmt.Sprintf("d%d", i), "create_webhook", `{"secret":"` + secretOf(40+i) + `"}`}, secretOf(40+i))
+	}
+	leaked := func() int {
+		n, text := 0, chatText(t, db)
+		for _, i := range append([]int{20, 21, 22, 23}, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51) {
+			if strings.Contains(text, secretOf(i)) {
+				n++
+			}
+		}
+		return n
+	}
+	setScrubBudget(t, 2, 1, 1) // two minting rows per batch; one batch per boot
+	resetScrub(t, db)
+	boots, previous := 0, leaked()
+	for db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+		if boots++; boots > 40 {
+			t.Fatal("scrub never completed under a tiny budget")
+		}
+		db.scrubChatCredentials()
+		if now := leaked(); now > previous {
+			t.Fatalf("leak count grew from %d to %d", previous, now)
+		} else {
+			previous = now
+		}
+		if db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" && leaked() == 0 && boots < 3 {
+			t.Fatalf("finished too fast to exercise resumption (boot %d)", boots)
+		}
+	}
+	if leaked() != 0 {
+		t.Fatalf("%d credentials left after completion", leaked())
+	}
+	if boots < 5 {
+		t.Fatalf("expected several boots under the tiny budget, got %d", boots)
+	}
+	// Every boot but the last stopped on the budget, each doing one batch only.
+	if db.GetSystemConfigString(chatScrubCursorKey, "") == "" {
+		t.Fatal("cursor missing")
 	}
 }

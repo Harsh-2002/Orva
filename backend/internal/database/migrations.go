@@ -504,6 +504,7 @@ CREATE TABLE IF NOT EXISTS ai_tool_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_tc_conv   ON ai_tool_calls(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_ai_tc_status ON ai_tool_calls(status);
+CREATE INDEX IF NOT EXISTS idx_ai_tc_tool   ON ai_tool_calls(tool_name);
 
 CREATE TABLE IF NOT EXISTS ai_provider_configs (
     id                TEXT PRIMARY KEY,
