@@ -14,6 +14,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Changed
+
+- Dashboard helper text is shorter and fills its row instead of wrapping at a
+  narrow fixed width, and the Docs page sits in one centered reading column.
+  The stale "scratch hosts only" note about named permissions is replaced with
+  a short summary of how policies, versions and rollout work in managed mode.
+
 ### Added
 
 - Managed deployments build npm and pip dependencies and compile TypeScript in
