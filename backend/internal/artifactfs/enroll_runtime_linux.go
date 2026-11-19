@@ -3,6 +3,7 @@ package artifactfs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,35 +33,48 @@ func SealInitialRuntime(ctx context.Context, store *Store, owner, source string,
 	if store == nil || store.binding == nil || store.boundKind != KindRuntime || !validOwner(KindRuntime, owner) || validate == nil {
 		return Identity{}, ErrInvalid
 	}
-	parent, err := os.Lstat(filepath.Dir(source))
+	parentPath := filepath.Dir(source)
+	parent, err := os.Lstat(parentPath)
 	if err != nil {
 		return Identity{}, err
 	}
-	if !parent.IsDir() || checkInitialRuntimeEntry(".", parent) != nil {
-		return Identity{}, ErrUnsupported
+	if !parent.IsDir() {
+		return Identity{}, refuse(parentPath, "not a directory")
+	}
+	if err := checkInitialRuntimeEntry(parentPath, parent); err != nil {
+		return Identity{}, err
 	}
 	return importInstalledRuntime(ctx, store, owner, source, checkInitialRuntimeEntry, validate)
 }
 
 func checkInitialRuntimeEntry(rel string, info os.FileInfo) error {
 	if strings.HasPrefix(rel, "tmp/") || strings.HasPrefix(rel, "var/tmp/") {
-		return ErrUnsupported
+		return refuse(rel, "runtime trees may not contain tmp/ or var/tmp/ entries")
 	}
-	uid := info.Sys().(*syscall.Stat_t).Uid
-	if uid != 0 && uid != uint32(os.Geteuid()) {
-		return ErrUnsupported
+	uid, euid := info.Sys().(*syscall.Stat_t).Uid, uint32(os.Geteuid())
+	if uid != 0 && uid != euid {
+		if euid == 0 {
+			return refuse(rel, fmt.Sprintf("owned by uid %d, want root (the server user)", uid))
+		}
+		return refuse(rel, fmt.Sprintf("owned by uid %d, want root or the server user (uid %d)", uid, euid))
 	}
 	if info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0022 != 0 &&
 		!(info.IsDir() && info.Mode()&os.ModeSticky != 0 && (rel == "tmp" || rel == "var/tmp")) {
-		return ErrUnsupported
+		return refuse(rel, fmt.Sprintf("group/other-writable (mode %04o)", info.Mode().Perm()))
 	}
 	return nil
 }
 
 func importInstalledRuntime(ctx context.Context, store *Store, owner, source string, check func(string, os.FileInfo) error, validate func(string) error) (_ Identity, err error) {
 	resolved, err := filepath.EvalSymlinks(source)
-	if err != nil || !filepath.IsAbs(source) || resolved != source {
+	if err != nil {
 		return Identity{}, errors.Join(ErrUnsupported, err)
+	}
+	if !filepath.IsAbs(source) {
+		return Identity{}, refuse(source, "source path is not absolute")
+	}
+	if resolved != source {
+		return Identity{}, refuse(source, "source path is a symlink")
 	}
 	limits := store.limits
 	const maxRuntime = 512 << 20
@@ -69,7 +83,7 @@ func importInstalledRuntime(ctx context.Context, store *Store, owner, source str
 		return Identity{}, err
 	}
 	omitMissingRuntimeManuals(tree)
-	if err := checkLinks(KindRuntime, tree, limits); err != nil {
+	if err := checkLinkRules(KindRuntime, tree, limits); err != nil {
 		return Identity{}, err
 	}
 	if tree["."].entry.Type != TypeDirectory {

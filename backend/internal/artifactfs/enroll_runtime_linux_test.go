@@ -2,9 +2,13 @@ package artifactfs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestInitialRuntimeReusesUnrecordedSeal(t *testing.T) {
@@ -65,7 +69,7 @@ func TestEnrollmentRuntimeCopy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := sealInstalledRuntime(t.Context(), base, "node", src); err != ErrUnsupported {
+	if _, err := sealInstalledRuntime(t.Context(), base, "node", src); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("non-manual dangling link accepted: %v", err)
 	}
 	if err := os.Remove(filepath.Join(d, "escape")); err != nil {
@@ -91,5 +95,194 @@ func TestEnrollmentRuntimeCopy(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(filepath.Join(lease.Path(), "etc", "alternatives", "retained")); err != nil || string(raw) != "data" {
 		t.Fatalf("unexpected retained file: %v", err)
+	}
+}
+
+// initialRuntimeStore binds a fresh store the way the managed owner does, so
+// SealInitialRuntime accepts it. Test cleanup unbinds it before closing.
+func initialRuntimeStore(t *testing.T) *Store {
+	t.Helper()
+	limits := testLimits()
+	limits.Generations, limits.Staging = 4, 1
+	s, err := NewPersistent(t.TempDir(), limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.boundKind, s.binding = KindRuntime, &ownerState{}
+	t.Cleanup(func() {
+		s.binding = nil
+		if err := s.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
+	return s
+}
+
+type fakeInfo struct {
+	mode os.FileMode
+	stat syscall.Stat_t
+}
+
+func (f fakeInfo) Name() string       { return "entry" }
+func (f fakeInfo) Size() int64        { return 0 }
+func (f fakeInfo) Mode() os.FileMode  { return f.mode }
+func (f fakeInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeInfo) Sys() any           { return &f.stat }
+
+func TestInitialRuntimeEntryRules(t *testing.T) {
+	euid := uint32(os.Geteuid())
+	other := euid + 1
+	if other == 0 {
+		other = 2
+	}
+	ownerRule := fmt.Sprintf("owned by uid %d, want root (the server user)", other)
+	if euid != 0 {
+		ownerRule = fmt.Sprintf("owned by uid %d, want root or the server user (uid %d)", other, euid)
+	}
+	cases := []struct {
+		name, rel, want string
+		info            fakeInfo
+	}{
+		{"foreign-owner", "usr/bin/node", ownerRule, fakeInfo{mode: 0755, stat: syscall.Stat_t{Uid: other}}},
+		{"group-writable", "var/lib", "var/lib: group/other-writable (mode 0775)", fakeInfo{mode: os.ModeDir | 0775, stat: syscall.Stat_t{Uid: euid}}},
+		{"other-writable-file", "bin/node", "bin/node: group/other-writable (mode 0666)", fakeInfo{mode: 0666, stat: syscall.Stat_t{Uid: euid}}},
+		{"tmp-entry", "tmp/sock", "tmp/sock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}},
+		{"var-tmp-entry", "var/tmp/lock", "var/tmp/lock: runtime trees may not contain tmp/ or var/tmp/ entries", fakeInfo{mode: 0644, stat: syscall.Stat_t{Uid: euid}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkInitialRuntimeEntry(tc.rel, tc.info)
+			if !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("refusal = %v, want ErrUnsupported", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refusal %q does not name %q", err, tc.want)
+			}
+		})
+	}
+	for name, info := range map[string]fakeInfo{
+		"sticky-tmp":     {mode: os.ModeDir | os.ModeSticky | 0777, stat: syscall.Stat_t{Uid: euid}},
+		"symlink-bits":   {mode: os.ModeSymlink | 0777, stat: syscall.Stat_t{Uid: euid}},
+		"root-owned-dir": {mode: os.ModeDir | 0755, stat: syscall.Stat_t{Uid: 0}},
+	} {
+		rel := "."
+		if name == "sticky-tmp" {
+			rel = "tmp"
+		}
+		if err := checkInitialRuntimeEntry(rel, info); err != nil {
+			t.Fatalf("%s refused: %v", name, err)
+		}
+	}
+}
+
+func TestSpecialFileRules(t *testing.T) {
+	for mode, want := range map[uint32]string{
+		syscall.S_IFCHR: "device node", syscall.S_IFBLK: "device node",
+		syscall.S_IFIFO: "named pipe", syscall.S_IFSOCK: "socket", syscall.S_IFREG: "unsupported file type",
+	} {
+		if got := specialFileRule(mode); got != want {
+			t.Fatalf("mode %#o = %q, want %q", mode, got, want)
+		}
+	}
+}
+
+func TestInitialRuntimeRefusals(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(t *testing.T, src string)
+		want  string
+	}{
+		{name: "writable-entry", build: func(t *testing.T, src string) {
+			p := filepath.Join(src, "bin")
+			if err := os.WriteFile(p, []byte("runtime"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(p, 0777); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "bin: group/other-writable (mode 0777)"},
+		{name: "tmp-entry", build: func(t *testing.T, src string) {
+			if err := os.MkdirAll(filepath.Join(src, "var", "tmp"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(src, "var", "tmp", "lock"), []byte("x"), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "var/tmp/lock: runtime trees may not contain tmp/ or var/tmp/ entries"},
+		{name: "named-pipe", build: func(t *testing.T, src string) {
+			if err := syscall.Mkfifo(filepath.Join(src, "pipe"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "pipe: named pipe"},
+		{name: "extended-attributes", build: func(t *testing.T, src string) {
+			p := filepath.Join(src, "stamped")
+			if err := os.WriteFile(p, []byte("runtime"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Setxattr(p, "user.orva-test", []byte("1"), 0); err != nil {
+				t.Skipf("filesystem does not store user xattrs: %v", err)
+			}
+		}, want: "stamped: extended attributes present"},
+		{name: "dangling-link", build: func(t *testing.T, src string) {
+			if err := os.Symlink("/usr/share/absent", filepath.Join(src, "link")); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "link: link target does not resolve inside the tree"},
+		{name: "escaping-link", build: func(t *testing.T, src string) {
+			if err := os.Symlink(".", filepath.Join(src, "loop")); err != nil {
+				t.Fatal(err)
+			}
+		}, want: "loop: link escapes the tree"},
+		{name: "hard-link-from-outside", build: func(t *testing.T, src string) {
+			outside := filepath.Join(filepath.Dir(src), "outside")
+			if err := os.WriteFile(outside, []byte("shared"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(outside, filepath.Join(src, "hard")); err != nil {
+				t.Skipf("filesystem does not support hard links: %v", err)
+			}
+		}, want: "hard: hard-link count 2, want 1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0755); err != nil {
+				t.Fatal(err)
+			}
+			src := filepath.Join(root, "node")
+			if err := os.Mkdir(src, 0755); err != nil {
+				t.Fatal(err)
+			}
+			tc.build(t, src)
+			_, err := SealInitialRuntime(t.Context(), initialRuntimeStore(t), "node", src, func(string) error { return nil })
+			if !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("refusal = %v, want ErrUnsupported", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refusal %q does not name %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestInitialRuntimeSourceSymlink(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "node"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Join(root, "node"), link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SealInitialRuntime(t.Context(), initialRuntimeStore(t), "node", link, func(string) error { return nil })
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("symlinked source accepted: %v", err)
+	}
+	if !strings.Contains(err.Error(), link+": source path is a symlink") {
+		t.Fatalf("refusal %q does not name the symlinked source", err)
 	}
 }

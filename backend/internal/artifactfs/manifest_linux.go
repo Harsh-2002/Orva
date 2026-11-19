@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -212,6 +213,27 @@ func fileHash(ctx context.Context, p string, want stamp) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// treeRule names the first entry and rule that refused a tree. It wraps
+// ErrUnsupported so every caller keeps its sentinel check.
+type treeRule struct{ path, rule string }
+
+func (e *treeRule) Error() string { return ErrUnsupported.Error() + ": " + e.path + ": " + e.rule }
+func (e *treeRule) Unwrap() error { return ErrUnsupported }
+
+func refuse(path, rule string) error { return &treeRule{path, rule} }
+
+func specialFileRule(mode uint32) string {
+	switch mode & syscall.S_IFMT {
+	case syscall.S_IFCHR, syscall.S_IFBLK:
+		return "device node"
+	case syscall.S_IFIFO:
+		return "named pipe"
+	case syscall.S_IFSOCK:
+		return "socket"
+	}
+	return "unsupported file type"
+}
+
 func scan(ctx context.Context, root string, limits Limits, reserved int64) (map[string]observed, error) {
 	return scanTree(ctx, root, limits, reserved, nil)
 }
@@ -242,6 +264,9 @@ func scanTree(ctx context.Context, root string, limits Limits, reserved int64, c
 		before := metadata(st)
 		e := Entry{Path: rel, Mode: st.Mode & 07777, UID: st.Uid, GID: st.Gid}
 		if err := noXattrs(p); err != nil {
+			if errors.Is(err, ErrUnsupported) {
+				return refuse(rel, "extended attributes present")
+			}
 			return err
 		}
 		switch st.Mode & syscall.S_IFMT {
@@ -261,15 +286,18 @@ func scanTree(ctx context.Context, root string, limits Limits, reserved int64, c
 			groups[key] = append(groups[key], rel)
 		case syscall.S_IFLNK:
 			e.Type = TypeSymlink
-			if st.Nlink != 1 || st.Size > int64(limits.LinkBytes) {
-				return ErrUnsupported
+			if st.Nlink != 1 {
+				return refuse(rel, "symlink has multiple hard links")
+			}
+			if st.Size > int64(limits.LinkBytes) {
+				return refuse(rel, "symlink target exceeds the size limit")
 			}
 			e.LinkTarget, err = os.Readlink(p)
 			if err != nil || len(e.LinkTarget) > limits.LinkBytes {
 				return ErrIntegrity
 			}
 		default:
-			return ErrUnsupported
+			return refuse(rel, specialFileRule(st.Mode))
 		}
 		out[rel] = observed{e, before}
 		if e.Type == TypeDirectory {
@@ -314,7 +342,7 @@ func scanTree(ctx context.Context, root string, limits Limits, reserved int64, c
 		for _, name := range names {
 			o := out[name]
 			if o.stamp.links != uint64(len(names)) {
-				return nil, ErrUnsupported
+				return nil, refuse(names[0], fmt.Sprintf("hard-link count %d, want %d", o.stamp.links, len(names)))
 			}
 			if len(names) > 1 {
 				o.entry.HardlinkGroup = names[0]
@@ -455,7 +483,16 @@ func resolveCodeLink(rel, target string, tree map[string]observed, limits Limits
 	return resolved, nil
 }
 
+// checkLinks keeps its bare sentinel for existing callers; the installed-tree
+// import uses checkLinkRules to name the entry an operator must inspect.
 func checkLinks(kind Kind, tree map[string]observed, limits Limits) error {
+	if checkLinkRules(kind, tree, limits) != nil {
+		return ErrUnsupported
+	}
+	return nil
+}
+
+func checkLinkRules(kind Kind, tree map[string]observed, limits Limits) error {
 	directories := make(map[string][]string)
 	indegree := make(map[string]int)
 	for rel, o := range tree {
@@ -467,22 +504,26 @@ func checkLinks(kind Kind, tree map[string]observed, limits Limits) error {
 			}
 		}
 	}
+	links := make([]string, 0)
 	for rel, o := range tree {
-		if o.entry.Type != TypeSymlink {
-			continue
+		if o.entry.Type == TypeSymlink {
+			links = append(links, rel)
 		}
+	}
+	sort.Strings(links)
+	for _, rel := range links {
 		var resolved string
 		var err error
 		if kind == KindRuntime {
 			resolved, err = resolveRuntimeLink(rel, tree, limits)
 		} else {
-			resolved, err = resolveCodeLink(rel, o.entry.LinkTarget, tree, limits)
+			resolved, err = resolveCodeLink(rel, tree[rel].entry.LinkTarget, tree, limits)
 		}
 		if err != nil {
-			return err
+			return refuse(rel, "link target does not resolve inside the tree")
 		}
 		if resolved == "." || strings.HasPrefix(rel, resolved+"/") {
-			return ErrUnsupported
+			return refuse(rel, "link escapes the tree")
 		}
 		if tree[resolved].entry.Type == TypeDirectory {
 			parent := path.Dir(rel)
@@ -510,7 +551,14 @@ func checkLinks(kind Kind, tree map[string]observed, limits Limits) error {
 		}
 	}
 	if len(queue) != len(indegree) {
-		return ErrUnsupported
+		blocked := make([]string, 0, 1)
+		for dir, incoming := range indegree {
+			if incoming != 0 {
+				blocked = append(blocked, dir)
+			}
+		}
+		sort.Strings(blocked)
+		return refuse(blocked[0], "directory links form a traversal cycle")
 	}
 	return nil
 }
