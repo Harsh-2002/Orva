@@ -136,6 +136,10 @@ which violet is correct.
 
 ## Non-obvious
 
+- The policy list shows an attachment count only for the open policy after its
+  own fresh read. Typed Permissions URLs treat canonical UUID-shaped segments
+  as IDs; use Functions → Permissions for an exact link to a UUID-shaped name.
+
 - Managed editor secret writes leave the function inactive. Close Secrets and
   choose **Install configuration**, then **Review permissions**. The editor
   installs only from the exact successor acknowledged by that write, not from

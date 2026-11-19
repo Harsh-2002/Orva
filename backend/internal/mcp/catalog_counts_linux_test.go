@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
@@ -33,6 +34,8 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 		ReplayExecution: func(http.ResponseWriter, *http.Request) {},
 	}
 	managed = withManagedFixtureProxy(t, f, managed)
+	withFirewall := managed
+	withFirewall.Firewall = firewall.NewManager(f.db, t.TempDir())
 	all := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
 	read := permSet{permRead: true}
 	seedStatelessAPIKey(t, f.db, "orva_catalog_all_test", "catalog-all", "catalog-all", `["read","write","invoke","admin"]`)
@@ -46,8 +49,9 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 	}{
 		{"normal-admin", "orva_catalog_all_test", normal, all, "invoke_function", 73},
 		{"normal-read", "orva_catalog_read_test", normal, read, "list_functions", 28},
-		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 76},
-		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 25},
+		{"managed-admin-no-firewall", "orva_catalog_all_test", managed, all, "create_iam_policy", 76},
+		{"managed-admin", "orva_catalog_all_test", withFirewall, all, "set_dns_config", 82},
+		{"managed-read", "orva_catalog_read_test", withFirewall, read, "list_iam_policies", 25},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := NewHandler(tc.deps)

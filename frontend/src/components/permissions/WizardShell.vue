@@ -23,6 +23,13 @@
       </h4>
       <slot />
       <p
+        v-if="hint"
+        :id="hintId"
+        class="text-xs text-foreground-muted"
+      >
+        {{ hint }}
+      </p>
+      <p
         v-if="error"
         role="alert"
         class="text-xs text-danger-fg"
@@ -49,7 +56,8 @@
           Back
         </Button>
         <Button
-          :disabled="disabled"
+          :disabled="disabled || nextDisabled"
+          :aria-describedby="nextDisabled && hint ? hintId : undefined"
           @click="$emit('next')"
         >
           {{ step === steps.length ? finalLabel : 'Next' }}
@@ -70,6 +78,9 @@ const props = defineProps({
   // The first step a person can go Back to; an edit may start further in.
   firstStep: { type: Number, default: 1 },
   finalLabel: { type: String, default: 'Add to policy' },
+  // Why the forward button is unavailable, shown under the choices.
+  hint: { type: String, default: '' },
+  nextDisabled: Boolean,
   error: { type: String, default: '' },
   disabled: Boolean,
 })
@@ -77,6 +88,7 @@ const props = defineProps({
 defineEmits(['back', 'next', 'cancel'])
 
 const titleId = `wizard-${useId()}`
+const hintId = `wizard-hint-${useId()}`
 const card = ref(null)
 const heading = ref(null)
 // Keep the task, not the repeated page context, in view after every step.

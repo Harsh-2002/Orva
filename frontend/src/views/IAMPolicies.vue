@@ -6,7 +6,7 @@
           Policies
         </h1>
         <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
-          Reusable permissions pinned to a version for each function.
+          Attach reusable permissions to functions. Approve a function only if its permissions are not active.
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -16,7 +16,7 @@
           :title="list.loading.value || list.busy.value ? 'Wait for the current policy list.' : list.error.value ? 'Refresh policies before creating a reusable policy.' : ''"
           @click="creating = true"
         >
-          Create reusable policy
+          New policy
         </Button>
         <Button
           variant="secondary"
@@ -65,7 +65,7 @@
         >
           {{ item.name }}
         </button>
-        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code> · {{ !list.fresh.value ? 'Last known state, unverified' : item.revoked ? 'Revoked permanently' : 'Available to attach' }}</span>
+        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code><template v-if="status(item)"> · {{ status(item) }}</template></span>
       </li>
     </ul>
     <p
@@ -81,13 +81,14 @@
       :api="api"
       :functions="functions"
       @changed="list.refresh"
+      @attachments="setAttachments"
       @deleted="$emit('select', ''); list.refresh()"
     />
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Button from '@/components/common/Button.vue'
 import ManagedPolicyDraft from '@/components/permissions/ManagedPolicyDraft.vue'
 import { rowAction } from '@/utils/rowNav'
@@ -98,6 +99,23 @@ const emit = defineEmits(['select'])
 const creating = ref(false)
 const targets = computed(() => props.functions.map((f) => ({ id: f.id, label: f.name, state: 'resolved' })))
 const list = useIAMResource(() => 'policies', (_, signal) => props.api.list(signal))
+// Only the open policy's count is live and verified; the list itself carries no
+// attachment data. Clear it on every switch so a reopened row cannot claim the
+// previous detail's count before its own read lands.
+const attachments = ref(null)
+watch(() => props.policyId, () => { attachments.value = null }, { flush: 'sync' })
+function setAttachments(next) {
+  if (!next || next.id !== props.policyId) return
+  attachments.value = Number.isInteger(next.count) ? { id: next.id, count: next.count } : null
+}
+function status(item) {
+  if (!list.fresh.value) return 'Last known state, unverified'
+  if (item.revoked) return 'Revoked permanently'
+  const count = attachments.value?.id === item.id ? attachments.value.count : undefined
+  if (count === undefined) return ''
+  if (count === 0) return 'Not attached'
+  return count === 1 ? 'Attached to 1 function' : `Attached to ${count} functions`
+}
 async function create(value) {
   if (!list.data.value?.can_manage || list.loading.value || list.busy.value || list.error.value) return
   const result = await list.mutate((signal) => props.api.create(value, signal))

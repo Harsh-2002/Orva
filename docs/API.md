@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  75 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
+  82 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -51,6 +51,9 @@ credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
 Browser sessions hold every tier but must prove same-origin for mutations.
+Managed MCP and Chat use the same sandbox egress manager as these routes.
+Firewall and DNS tools require live admin authority. A DNS update validates
+and replaces the complete settings together.
 
 | Surface | Routes | Tier |
 | --- | --- | --- |
