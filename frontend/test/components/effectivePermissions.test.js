@@ -167,7 +167,7 @@ describe('source-aware current access', () => {
       version: { policy: reader() }, attachments: [] }) }
     const w = make(IAMPolicyDetail, { policyId: OTHER_FN_ID, api })
     await flushPromises()
-    for (const label of ['Create new version', 'Review attachment', 'Review global revoke', 'Review deletion']) {
+    for (const label of ['Create new version', 'Attach…', 'Revoke everywhere…', 'Delete…']) {
       expect(button(w, label)).toBeUndefined()
     }
   })

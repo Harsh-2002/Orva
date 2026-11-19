@@ -16,7 +16,7 @@
           :title="list.loading.value || list.busy.value ? 'Wait for the current policy list.' : list.error.value ? 'Refresh policies before creating a reusable policy.' : ''"
           @click="creating = true"
         >
-          Create reusable policy
+          New policy
         </Button>
         <Button
           variant="secondary"

@@ -112,14 +112,14 @@
               :title="changeReason"
               @click="prepare('attach')"
             >
-              Review attachment
+              Attach…
             </Button>
           </fieldset>
         </div>
       </template>
       <div
-        v-if="state.data.value.can_manage"
-        class="flex flex-wrap gap-3"
+        v-if="state.data.value.can_manage && (!state.data.value.policy.revoked || !state.data.value.attachments.length)"
+        class="flex flex-wrap gap-3 border-t border-border pt-4"
       >
         <Button
           v-if="!state.data.value.policy.revoked"
@@ -128,7 +128,7 @@
           :title="changeReason"
           @click="prepare('revoke')"
         >
-          Review global revoke
+          Revoke everywhere…
         </Button>
         <Button
           v-if="!state.data.value.attachments.length"
@@ -137,7 +137,7 @@
           :title="changeReason"
           @click="reviewed = { operation: 'delete', body: { definition_revision: state.data.value.policy.definition_revision, membership_revision: state.data.value.policy.membership_revision, confirm: true }, impact: null }"
         >
-          Review deletion
+          Delete…
         </Button>
       </div>
       <section

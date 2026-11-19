@@ -27,6 +27,14 @@ const detailResponse = (latest = 2) => ({
 })
 
 describe('managed policy list rows', () => {
+  it('names the entry control New policy and never reuses that text for saving', async () => {
+    const view = mountView(IAMPolicies, { policyId: '', api: listApi([{ id: 'p1', name: 'reader-node', latest_version: 2, revoked: false }]), functions: [] })
+    await flushPromises()
+    const labels = view.findAll('button').map((b) => b.text())
+    expect(labels).toContain('New policy')
+    expect(labels).not.toContain('Create reusable policy')
+  })
+
   it('aligns policy names with the row padding instead of a padded ghost button', async () => {
     const view = mountView(IAMPolicies, { policyId: '', api: listApi([{ id: 'p1', name: 'reader-node', latest_version: 2, revoked: false }]), functions: [] })
     await flushPromises()
@@ -78,6 +86,19 @@ describe('attach-version group', () => {
   })
 })
 
+describe('policy detail action groups', () => {
+  it('separates the destructive actions from Attach with a rule', async () => {
+    const view = mountView(IAMPolicyDetail, { policyId: 'p1', api: listApi([], { get: vi.fn(async () => detailResponse()) }), functions: [{ id: 'f1', name: 'fn' }] })
+    await flushPromises()
+    const attach = view.findAll('button').find((b) => b.text() === 'Attach…')
+    const revoke = view.findAll('button').find((b) => b.text() === 'Revoke everywhere…')
+    const group = revoke.element.closest('div')
+    expect(group.className).toContain('border-t')
+    expect(group.contains(attach.element)).toBe(false)
+    expect(group.textContent).toContain('Delete…')
+  })
+})
+
 describe('pinned version prefill', () => {
   const detail = (get) => mountView(IAMPolicyDetail, { policyId: 'p1', api: listApi([], { get }), functions: [{ id: 'f1', name: 'fn' }] })
   const pinnedInput = (view) => view.findAll('input').find((i) => i.element.type !== 'checkbox')
@@ -105,7 +126,7 @@ describe('pinned version prefill', () => {
     await flushPromises()
     await pinnedInput(view).setValue('abc')
     await view.find('input[type="checkbox"]').setValue(true)
-    await view.findAll('button').find((b) => b.text() === 'Review attachment').trigger('click')
+    await view.findAll('button').find((b) => b.text() === 'Attach…').trigger('click')
     await flushPromises()
     expect(view.text()).toContain('Enter a valid existing version number.')
     expect(mutate).not.toHaveBeenCalled()
