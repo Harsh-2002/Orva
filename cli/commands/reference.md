@@ -21,8 +21,13 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 39 on this
-> composition; read-only keys see 28 and 10 respectively.
+> An all-permissions key sees 73 tools on the normal server and 65 on this
+> composition; read-only keys see 28 and 22 respectively. This composition also
+> mounts executions (with replay through managed admission), traces, activity,
+> events, system, API-key, OAuth-app, session and channel routes at the same
+> permission tiers as the normal server, and accepts channel tokens at `/mcp`
+> as an invoke-only catalog dispatched through the managed pool. See
+> `docs/API.md` "Managed operator surfaces".
 
 > Internal configuration qualification: optional `workloadconfig` HTTP and
 > MCP/shared-AI adapters publish environment, execution settings and encrypted
