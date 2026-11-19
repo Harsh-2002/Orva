@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -53,5 +54,29 @@ func TestManagedDependencyProfile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestManagedStepsDenyInstallWithNoEgressPolicy(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"handler.ts":    "const n: number = 1",
+		"package.json":  `{"devDependencies":{"typescript":"5.9.3"}}`,
+		"tsconfig.json": `{"compilerOptions":{"outDir":"dist"}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fn := &database.Function{ID: ids.New(), Runtime: "node", Entrypoint: "handler.ts"}
+	profile, err := managedProfile(fn, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Builder{NsjailBin: filepath.Join(dir, "must-not-start")}
+	// A .ts entrypoint defers syntax checking to tsc. The managed pipeline
+	// must fail at the install's policy gate, before attempting to start npm.
+	if err := b.runManagedSteps(t.Context(), fn, dir, profile); !errors.Is(err, sandbox.ErrEgressPolicyMissing) || !strings.Contains(err.Error(), "npm install failed") {
+		t.Fatalf("managed install failed outside the policy gate: %v", err)
 	}
 }

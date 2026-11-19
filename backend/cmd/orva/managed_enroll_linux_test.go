@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,10 +16,43 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
+
+func TestOfflineBuildPolicyFailClosed(t *testing.T) {
+	for _, migrate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("migrated=%t", migrate), func(t *testing.T) {
+			dir := t.TempDir()
+			db, err := database.New(filepath.Join(dir, "orva.db"))
+			enrollmentMust(t, err)
+			defer db.Close()
+			if migrate {
+				enrollmentMust(t, db.Migrate())
+			}
+			b := &builder.Builder{DataDir: dir}
+			closePolicy := offlineBuildPolicy(t.Context(), b, db)
+			wantUnavailable := func(stage string) {
+				t.Helper()
+				if path, gen, err := b.EgressPolicy(); path != "" || gen != "" || !errors.Is(err, firewall.ErrPolicyUnavailable) {
+					t.Errorf("%s: path=%q generation=%q error=%v; want unavailable", stage, path, gen, err)
+				}
+			}
+			if migrate {
+				if path, gen, err := b.EgressPolicy(); path == "" || gen == "" || err != nil {
+					t.Errorf("compiled policy: path=%q generation=%q error=%v", path, gen, err)
+				}
+			} else {
+				wantUnavailable("missing policy schema")
+			}
+			closePolicy()
+			wantUnavailable("after close")
+		})
+	}
+}
 
 func TestManagedEnrollProjectsAuthoredFiles(t *testing.T) {
 	for _, runtime := range []string{"node", "python"} {
