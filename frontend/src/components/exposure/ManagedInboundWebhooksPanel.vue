@@ -16,6 +16,13 @@
           from external services. Each change is checked against the trigger and
           owner authority it was read from.
         </p>
+        <p class="mt-1.5 text-[11px] text-foreground-muted">
+          <span class="uppercase tracking-wider text-[10px]">Owner</span>
+          <code
+            class="ml-1.5 font-mono break-all text-foreground"
+            data-testid="inbound-owner"
+          >{{ functionId }}</code>
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs text-foreground-muted">
@@ -420,7 +427,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch, onActivated, onDeactivated } from 'vue'
 import { Plus, RefreshCw, Edit, Trash2, Pause, Play } from '@lucide/vue'
 import { managedExposure, SIGNATURE_FORMATS } from '@/api/managedExposure.js'
 import Button from '@/components/common/Button.vue'
@@ -662,4 +669,15 @@ watch(() => props.functionId, () => {
   closeDraft()
   refresh()
 }, { immediate: true })
+
+// Layout.vue keep-alives the router-view: coming back should re-read rather
+// than show whatever another operator has since replaced (their version tokens
+// would be stale). The flag keeps the first activation from double-fetching.
+let wasDeactivated = false
+onActivated(() => {
+  if (!wasDeactivated) return
+  wasDeactivated = false
+  refresh()
+})
+onDeactivated(() => { wasDeactivated = true })
 </script>

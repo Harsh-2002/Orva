@@ -596,8 +596,8 @@ differently in three ways:
   `version` + `expected` pair unchanged (`GET /api/v1/exposures`). `--expected-version`
   replaces the version token with one you supply, which is how you deliberately
   fail the CAS; the authority tokens always come from the read.
-- A `409` means the mapping or its owners changed. Nothing is retried: inspect
-  the current row (the command prints it) and run again. `routes list` adds
+- A `409` means the mapping or its owners changed. Nothing is retried: re-read
+  with `orva routes list` and run the command again. `routes list` adds
   `VERSION` and `PUBLISHED` columns and reports a truncated list at 256 rows.
 
 ```bash

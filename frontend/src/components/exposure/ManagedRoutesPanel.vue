@@ -320,7 +320,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Edit, Trash2 } from '@lucide/vue'
 import { managedExposure } from '@/api/managedExposure.js'
 import Button from '@/components/common/Button.vue'
@@ -487,6 +487,17 @@ async function remove(row) {
 }
 
 onMounted(refresh)
+
+// Keep-alive: a return visit re-reads rather than acting on tokens captured
+// before the operator left the page. The flag keeps the first activation from
+// double-fetching on top of onMounted.
+let wasDeactivated = false
+onActivated(() => {
+  if (!wasDeactivated) return
+  wasDeactivated = false
+  refresh()
+})
+onDeactivated(() => { wasDeactivated = true })
 
 defineExpose({ refresh })
 </script>

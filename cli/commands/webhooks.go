@@ -637,7 +637,11 @@ func runInboundCreate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("create: %w", err)
 		}
 	}
-	if err := checkManagedResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	raw, err := io.ReadAll(resp.Body)
@@ -716,7 +720,11 @@ func runInboundUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
-	if err := checkManagedResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	raw, err := io.ReadAll(resp.Body)
@@ -777,7 +785,11 @@ func runInboundDelete(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("delete: %w", err)
 		}
 	}
-	if err := checkManagedResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	resp.Body.Close()

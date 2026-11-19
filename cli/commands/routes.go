@@ -285,7 +285,11 @@ func runRoutesDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
-	if err := checkResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	respBody, _ := io.ReadAll(resp.Body)

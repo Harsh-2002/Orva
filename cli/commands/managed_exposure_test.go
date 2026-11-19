@@ -2,6 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -109,5 +112,37 @@ func TestManagedOwnerRefusesNames(t *testing.T) {
 	}
 	if got, err := managedOwnerUUID(managedOwner); err != nil || got != managedOwner {
 		t.Fatalf("managed owner = %q, %v", got, err)
+	}
+}
+
+// A managed write's 409 is the one status whose message has to carry an
+// instruction; every other status keeps checkResponse's wording so legacy
+// output does not change.
+func TestCheckManagedResponse(t *testing.T) {
+	conflict := &http.Response{
+		StatusCode: http.StatusConflict,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"IAM_CONFLICT","message":"Exposure or authority changed; inspect again"}}`)),
+	}
+	err := checkManagedResponse(conflict)
+	if err == nil {
+		t.Fatal("a 409 was accepted")
+	}
+	for _, want := range []string{"IAM_CONFLICT", "nothing was sent again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("409 message %q missing %q", err.Error(), want)
+		}
+	}
+
+	invalid := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"VALIDATION","message":"Invalid exposure request"}}`)),
+	}
+	if err := checkManagedResponse(invalid); err == nil || !strings.Contains(err.Error(), "API error (400)") {
+		t.Errorf("400 message = %v, want the unchanged checkResponse wording", err)
+	}
+
+	ok := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(""))}
+	if err := checkManagedResponse(ok); err != nil {
+		t.Errorf("200 returned %v", err)
 	}
 }

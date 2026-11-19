@@ -64,6 +64,12 @@ afterEach(() => {
 })
 
 describe('managed inbound webhooks panel', () => {
+  it('names the exact owner UUID it acts on', async () => {
+    const view = mountPanel(makeApi())
+    await flushPromises()
+    expect(view.get('[data-testid="inbound-owner"]').text()).toBe(OWNER)
+  })
+
   it('offers no mutation and never a legacy signing drawer when read-only', async () => {
     const api = makeApi()
     const view = mountPanel(api, { readOnly: true })
