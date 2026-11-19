@@ -19,6 +19,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -295,7 +296,9 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 	f := newManagedExposureFixture(t)
 	all := permSet{permRead: true, permWrite: true, permAdmin: true}
 	legacy := Deps{DB: f.db, Registry: f.registry}
-	want := map[string][]string{"create_api_key": {"key"}, "create_webhook": {"secret"}, "create_inbound_webhook": {"secret"}}
+	// The boot-time history scrub reads the same list, so a minting tool added
+	// here without a Fields entry (or the reverse) fails this test.
+	want := onetime.Fields
 	for label, deps := range map[string]Deps{"legacy": legacy, "managed": f.deps} {
 		reg := BuildAgentRegistry(deps, all)
 		for _, tool := range reg.Tools() {
@@ -308,7 +311,12 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 			}
 		}
 	}
-	// Managed is the only serving mode: its catalog carries the same key tools.
+	legacyRegistry := BuildAgentRegistry(legacy, all)
+	for name := range want {
+		if legacyRegistry.Get(name) == nil {
+			t.Fatalf("onetime.Fields lists %s but no such tool is registered", name)
+		}
+	}
 	if BuildAgentRegistry(f.deps, all).Get("create_api_key") == nil {
 		t.Fatal("managed catalog cannot mint API keys")
 	}
@@ -316,10 +324,10 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 	outputs := map[string]any{}
 	var err error
 	// create_webhook exists in the legacy catalog only.
-	if outputs["create_api_key"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
+	if outputs["create_api_key"], err = legacyRegistry.Dispatch(ctx, "create_api_key", []byte(`{"name":"ci","permissions":["read"],"expires_in_days":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	if outputs["create_webhook"], err = BuildAgentRegistry(legacy, all).Dispatch(ctx, "create_webhook", []byte(`{"name":"w","url":"https://example.com/hook"}`)); err != nil {
+	if outputs["create_webhook"], err = legacyRegistry.Dispatch(ctx, "create_webhook", []byte(`{"name":"w","url":"https://example.com/hook"}`)); err != nil {
 		t.Fatal(err)
 	}
 	outputs["create_inbound_webhook"], err = f.call(ctx, all, "create_inbound_webhook", map[string]any{"function_id": f.owner, "name": "signed", "version": "0", "expected": f.expected()})

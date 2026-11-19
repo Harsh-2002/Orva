@@ -50,25 +50,62 @@ func checkBackupPaths(path string, witnessFile *os.File, roots, files []string) 
 	return nil
 }
 
-// WriteBuildSource projects only authored files from a checked code seal.
-// The managed builder has no dependency or compilation phase; its queue
-// discards the input tar. Host ownership and seal metadata are not portable.
-func (l *Lease) WriteBuildSource(ctx context.Context, w io.Writer) (err error) {
+// BuildSourceName is reserved for the original archive attached by the builder
+// after its writable build domain has been fenced.
+const BuildSourceName = ".orva-build-source.tar.gz"
+
+// WriteBuildSource exports the authored-only projection of a pre-retention seal.
+func (l *Lease) WriteBuildSource(ctx context.Context, w io.Writer) error {
 	gz := gzip.NewWriter(w)
-	if err := l.WriteBuildSourceTar(ctx, gz); err != nil {
-		return err
-	}
-	return gz.Close()
+	return errors.Join(l.WriteBuildSourceTar(ctx, gz), gz.Close())
 }
 
-// WriteBuildSourceTar is the same projection without the gzip encoding so
-// restore verification does not depend on the compressor version.
-func (l *Lease) WriteBuildSourceTar(ctx context.Context, w io.Writer) (err error) {
-	if l == nil || l.id.Kind != KindCode || l.store.boundKind != KindCode {
-		return ErrInvalid
+// WriteRetainedBuildSource exports the original input only when the trusted
+// deployment association records its digest.
+func (l *Lease) WriteRetainedBuildSource(ctx context.Context, w io.Writer, digest string) error {
+	m, err := l.verifiedCodeManifest(ctx)
+	if err != nil {
+		return err
+	}
+	for _, e := range m.Entries {
+		if e.Path == BuildSourceName {
+			if e.Type != TypeFile || e.HardlinkGroup != "" || e.Mode != 0600 || !validDigest(digest) || e.SHA256 != digest {
+				return ErrIntegrity
+			}
+			return l.copyBuildSource(w, e)
+		}
+	}
+	return ErrIntegrity
+}
+
+func (l *Lease) copyBuildSource(w io.Writer, source Entry) error {
+	f, err := openNoFollow(filepath.Join(l.path, source.Path), false)
+	if err != nil {
+		return err
+	}
+	hash := sha256.New()
+	_, err = io.CopyN(io.MultiWriter(w, hash), f, source.Size)
+	if err := errors.Join(err, f.Close()); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hash.Sum(nil)) != source.SHA256 {
+		return ErrIntegrity
+	}
+	return nil
+}
+
+func (l *Lease) verifiedCodeManifest(ctx context.Context) (Manifest, error) {
+	if l == nil || l.store == nil || l.id.Kind != KindCode || l.store.boundKind != KindCode {
+		return Manifest{}, ErrInvalid
 	}
 	m := l.rec.durable.Manifest
-	if err := verify(ctx, l.path, KindCode, m, l.store.limits, l.rec.reserved); err != nil {
+	return m, verify(ctx, l.path, KindCode, m, l.store.limits, l.rec.reserved)
+}
+
+// WriteBuildSourceTar is the old projection without gzip encoding.
+func (l *Lease) WriteBuildSourceTar(ctx context.Context, w io.Writer) (err error) {
+	m, err := l.verifiedCodeManifest(ctx)
+	if err != nil {
 		return err
 	}
 	tw := tar.NewWriter(w)

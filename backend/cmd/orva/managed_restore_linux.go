@@ -1,7 +1,6 @@
 package main
 
 import (
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -222,6 +221,7 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		return err
 	}
 	defer func() { err = errors.Join(err, db.Close()) }()
+	defer offlineBuildPolicy(ctx, build, db)()
 	rebuilt := make(map[string]database.WorkloadBuildOutput)
 	for _, d := range stage.Deployments {
 		source, want := stage.Source(d.Deployment)
@@ -237,7 +237,7 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		if err != nil {
 			return err
 		}
-		err = verifyPortableSource(ctx, lease, source)
+		err = verifyPortableSource(ctx, lease, want)
 		lease.Release()
 		if err != nil || built.SourceArchiveSHA256 != want {
 			return errors.Join(artifactfs.ErrIntegrity, err)
@@ -245,7 +245,7 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		rebuilt[d.Deployment] = database.WorkloadBuildOutput{
 			CodeGeneration: built.CodeArtifact.Generation, CodeDigest: built.CodeArtifact.Digest,
 			RuntimeGeneration: built.RuntimeArtifact.Generation, RuntimeDigest: built.RuntimeArtifact.Digest,
-			CodeHash: d.Output.CodeHash, Entrypoint: built.Entrypoint,
+			CodeHash: d.Output.CodeHash, Entrypoint: built.Entrypoint, SourceArchiveSHA256: built.SourceArchiveSHA256,
 		}
 		if err := step("code_sealed"); err != nil {
 			return err
@@ -288,27 +288,12 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 	return step("database_checkpointed")
 }
 
-func verifyPortableSource(ctx context.Context, lease *artifactfs.Lease, source string) error {
-	f, err := openEnrollmentFile(source)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	original := sha256.New()
-	n, err := io.Copy(original, io.LimitReader(gz, backup.ManagedSourceLimit+1))
-	if err != nil || n > backup.ManagedSourceLimit {
-		return errors.Join(artifactfs.ErrIntegrity, err)
-	}
+func verifyPortableSource(ctx context.Context, lease *artifactfs.Lease, digest string) error {
 	actual := sha256.New()
-	if err := lease.WriteBuildSourceTar(ctx, actual); err != nil {
+	if err := lease.WriteRetainedBuildSource(ctx, actual, digest); err != nil {
 		return err
 	}
-	if string(original.Sum(nil)) != string(actual.Sum(nil)) {
+	if fmt.Sprintf("%x", actual.Sum(nil)) != digest {
 		return artifactfs.ErrIntegrity
 	}
 	return nil

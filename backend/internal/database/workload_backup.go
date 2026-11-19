@@ -114,12 +114,16 @@ func portableInventoryTx(ctx context.Context, tx *sql.Tx, owner string) (int, []
 				continue
 			}
 		}
-		if !validManagedOwnerID(f.Deployment) || (f.run != "" && f.run != f.Entrypoint) {
+		if !validManagedOwnerID(f.Deployment) {
 			return 0, nil, ErrWorkloadArtifactConflict
 		}
 		a, err := readRollbackAssociationTx(ctx, tx, f.Owner, f.Deployment)
+		run := f.run
+		if run == "" {
+			run = f.Entrypoint
+		}
 		if err != nil || a.runtime != f.Runtime || a.authored != f.Entrypoint ||
-			a.output.CodeHash != f.hash || a.output.Entrypoint != f.Entrypoint {
+			a.output.CodeHash != f.hash || a.output.Entrypoint != run {
 			return 0, nil, errors.Join(fmt.Errorf("current deployment %s: %w", f.Deployment, ErrWorkloadArtifactConflict), err)
 		}
 		f.Output = a.output

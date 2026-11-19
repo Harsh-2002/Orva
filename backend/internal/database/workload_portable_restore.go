@@ -38,7 +38,8 @@ func (db *Database) RebindPortableRestore(ctx context.Context, prior, owner, ope
 	for _, d := range current {
 		replacement := rebuilt[d.Deployment]
 		if !replacement.valid() || replacement.CodeHash != d.Output.CodeHash ||
-			replacement.Entrypoint != d.Entrypoint || replacement.RuntimeGeneration != runtimes[d.Runtime] {
+			replacement.Entrypoint != d.Output.Entrypoint || replacement.RuntimeGeneration != runtimes[d.Runtime] ||
+			(d.Output.SourceArchiveSHA256 != "" && replacement.SourceArchiveSHA256 != d.Output.SourceArchiveSHA256) {
 			return ErrWorkloadArtifactConflict
 		}
 		if err := rebindPortableDeployment(ctx, tx, d, replacement); err != nil {

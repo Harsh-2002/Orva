@@ -271,11 +271,12 @@ does not confer exclusive ownership or prove all build descendants have exited.
 The separate managed-output mode creates its own exclusive build Domain and
 fresh artifact staging. Fence/Check must succeed before output inspection,
 sealing or deletion. Failed cleanup retains staging, runtime and finite quota
-ownership for explicit retry; it never returns an approved output. Host hooks,
-provider-supplied Domains, dependency manifests and TypeScript deny in this
-limited plain Node/Python profile. Archive parent components reject before
-normalization. This does not bind stores to an instance epoch, publish current
-generations, enable recovery or restore approval.
+ownership for explicit retry; it never returns an approved output. Host hooks
+and provider-supplied Domains are denied. npm and pip use the compiled egress
+policy and a per-function cache; TypeScript compilation runs without network.
+The complete output is verified after fencing. Archive parent components are
+rejected before normalization. Sealing alone does not approve a deployment or
+restore authority.
 
 Typed child Domains additionally serialize creation and command entry against
 their ancestors. Parent fencing covers descendant builds, while child fencing
@@ -1055,6 +1056,29 @@ conversation switch, leaving Chat or **Hide value**. Result fields that must be
 redacted are matched only when the whole result is one valid JSON value;
 otherwise the entire result is replaced. External MCP clients still receive the
 value once, as before.
+
+Credentials stored by earlier builds are scrubbed on a best-effort basis, starting
+on the first boot after upgrading (`chat_credential_scrub_done`). The value of
+each succeeded `create_api_key`, `create_webhook` or `create_inbound_webhook` call
+is replaced by the placeholder in the stored result and in the call's own tool
+message (a field is replaced only if it holds that credential; if the result was
+malformed JSON the message is replaced whole only when it can be matched
+unambiguously by call id, otherwise it is left as it is), and
+exact copies (16+ characters) elsewhere in the same conversation are replaced too:
+inside the decoded strings of JSON columns, and in plain text only where the value
+stands alone (neighbours are not letters, digits, `_` or `-`). Failed calls supply
+no value and are not replaced wholesale, but an exact copy of a succeeded call's
+value inside one is scrubbed. Other conversations, rows without the value and JSON
+that does not parse are left as they are. Each boot reads and rewrites at most
+10,000 rows apiece (except that the minting calls' own results and tool messages,
+at most 100 rows per batch, are always rewritten together, never split across
+boots, so the credential values are not lost mid-way) and resumes where it stopped, so a large
+history can take several boots. It cannot reach copies outside the database (logs, exports,
+backups, provider-side prompt logs), altered forms of a value (truncated,
+re-encoded, split) or a value too short to match safely. It does not promise that
+every copy is gone, including a tool message whose call id was ambiguous (a
+duplicate id in one turn, a deleted result): rotate any credential that was ever
+shown in Chat.
 
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same

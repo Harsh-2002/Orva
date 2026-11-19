@@ -93,17 +93,18 @@ type managedServerInput struct {
 }
 
 type managedServer struct {
-	handler     http.Handler
-	runtime     *managedRuntime
-	publication *builder.PublicationQueue
-	output      *builder.OutputOwner
-	stopping    atomic.Bool
-	shutdownMu  sync.Mutex
-	cancel      context.CancelFunc
-	done        chan error
-	spawnReady  *atomic.Bool
-	chat        *ai.Manager
-	firewall    *firewall.Manager
+	handler           http.Handler
+	runtime           *managedRuntime
+	publication       *builder.PublicationQueue
+	output            *builder.OutputOwner
+	stopping          atomic.Bool
+	shutdownMu        sync.Mutex
+	cancel            context.CancelFunc
+	done              chan error
+	spawnReady        *atomic.Bool
+	chat              *ai.Manager
+	firewall          *firewall.Manager
+	buildServicesDone chan struct{}
 }
 
 // newManagedServer composes the admission-closed, opted-in serving instance.
@@ -190,13 +191,14 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		return builder.RuntimeBinding{Runtime: sandbox.BuildRuntime{Store: assets.Runtime, Generation: generation}}, nil
 	}))
 	b.NsjailBin, b.DataDir = in.nsjail, in.dataDir
+	b.DB = db
+	fw := firewall.NewManager(db, in.dataDir)
+	b.SetEgressPolicy(fw.EgressPolicy)
 	publication, err := builder.NewPublicationQueue(b, db, reg, authority, runtime.pool, sm, assets.Code, assets.Runtime)
 	if err != nil {
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	fw := firewall.NewManager(db, in.dataDir)
-	fw.Start(runCtx)
 	var chat *ai.Manager
 	defer func() {
 		if err != nil {
@@ -236,6 +238,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		return nil, err
 	}
 	done := make(chan error, 1)
+	buildServicesDone := make(chan struct{})
 	ready := make(chan struct{})
 	spawnReady.Store(true)
 	go func() { done <- runtime.scheduler.RunManagedReady(runCtx, ready); close(done) }()
@@ -247,10 +250,17 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 		return nil, err
 	case <-ready:
+		fw.Start(runCtx)
+		gc := builder.NewBuildCacheGC(in.dataDir, db)
+		gc.FnLock = runtime.pool.FunctionLock
+		go func() {
+			defer close(buildServicesDone)
+			gc.Run(runCtx)
+		}()
 		publication.Start()
 	}
 	return &managedServer{handler: handler, runtime: runtime, publication: publication, output: output,
-		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat, firewall: fw}, nil
+		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat, firewall: fw, buildServicesDone: buildServicesDone}, nil
 }
 
 func (s *managedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +283,11 @@ func (s *managedServer) Shutdown(ctx context.Context) error {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return err
 		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-s.buildServicesDone:
 	case <-ctx.Done():
 		return ctx.Err()
 	}

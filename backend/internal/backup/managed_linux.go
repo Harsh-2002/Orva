@@ -85,6 +85,9 @@ func ArchiveManagedTo(ctx context.Context, w io.Writer, owner *artifactfs.Owner,
 			if got.Owner != d.Owner || got.Digest != d.Output.CodeDigest {
 				return artifactfs.ErrIntegrity
 			}
+			if d.Output.SourceArchiveSHA256 != "" {
+				return lease.WriteRetainedBuildSource(ctx, dst, d.Output.SourceArchiveSHA256)
+			}
 			return lease.WriteBuildSource(ctx, dst)
 		})
 }
@@ -289,6 +292,9 @@ func StageManaged(ctx context.Context, r io.Reader, stage string) (*ManagedStage
 	for _, d := range ds {
 		if m.Sources[d.Deployment] == "" {
 			return nil, managedBad("deployment source missing")
+		}
+		if d.Output.SourceArchiveSHA256 != "" && d.Output.SourceArchiveSHA256 != m.Sources[d.Deployment] {
+			return nil, managedBad("deployment source does not match the sealed association")
 		}
 	}
 	return &ManagedStage{stage, m.Owner, ds, m.Sources}, nil

@@ -61,9 +61,14 @@ rule editing.
 4. From the delegated service cgroup, run `orva managed enroll --apply
    --plan /safe/path/orva-enrollment.json --confirm`. Supply a separate
    `--exclude UUID` for every unsupported function you elect to leave inactive.
-   The profile supports only plain Node and Python with current successful
-   deployments and no dependency manifests, installed `node_modules`,
-   TypeScript, or legacy network egress. Installed rootfs trees must include
+   Node and Python with current successful deployments can use npm or pip
+   dependencies, and Node can use TypeScript. Enrollment rebuilds from the
+   projected source and manifests, not legacy `node_modules`, pip-installed
+   files, or compiler output. An unsupported plan row gives the specific
+   reason, such as legacy invocation egress, an ambiguous pip install, or
+   TypeScript output mixed with source. Installers need the configured
+   registries reachable from the build jail under the compiled policy.
+   Installed rootfs trees must include
    the current SDK-channel adapters and pass the sealed runtime verifier.
    The sealed copy omits inert dangling manual-page
    links in `/etc/alternatives` from slim Debian runtimes; the installed tree
@@ -738,7 +743,7 @@ it every removal fails with `EACCES` and is skipped.
 
 `orva backup download -f /safe/path/orva-managed.tar.gz` uses the managed
 backup endpoint, which requires read and admin authority. Keep the archive private: it contains SQLite,
-available encryption/bootstrap keys, and current plain Node/Python source.
+available encryption/bootstrap keys, and current Node/Python source inputs.
 The v2 file hashes detect corruption, not the identity of the producer;
 confirm only archives received through a trusted channel. No sealed trees,
 Owner records, cgroup epochs, runtime rootfs trees or witness are exported.
@@ -772,8 +777,12 @@ build or prove the destination can create cgroups. Run the confirmed command
 as the daemon user from its delegated cgroup. It rebuilds the exact current
 managed deployments, preserves active/inactive and pause state, reseals local
 runtimes, and records the previous Owner in the SQLite restore audit. The
-source tarballs are regenerated from verified authored files, not byte-for-byte
-copies of deployment uploads. Historical deployment rows remain for inspection,
+source tarballs come from the verified, retained build inputs (or a projection
+of authored files for older seals). Installed dependencies and compiled output
+are not copied. On the destination, npm and pip use the restored policy and
+DNS settings with the local runtime toolchains; registries must be reachable
+and packages still available. Pin dependency versions or use lockfiles to
+reduce drift. Historical deployment rows remain for inspection,
 but their old sealed outputs are unavailable on B. Explicitly excluded
 enrollment entries remain inactive and their legacy source is not carried.
 
