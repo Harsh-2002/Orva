@@ -328,7 +328,15 @@ describe('editor secrets in managed mode', () => {
     expect(byText('Install configuration')).toBeDefined()
   })
 
-  it('installs only the acknowledged successor and then offers separate permissions review', async () => {
+  it.each([ARTIFACT, 'iam:unbound'])('installs the acknowledged successor and then offers review (prior approval: %s)', async (approvedArtifact) => {
+    let revision = 5
+    h.configuration = () => {
+      const result = settings(revision++)
+      result.data.expected.approved_artifact = approvedArtifact
+      return result
+    }
+    const expected = { ...secretExpected, approved_artifact: approvedArtifact }
+    h.put.mockResolvedValueOnce({ data: { ...expected, review_required: true } })
     const { editor } = await boot({ managed: true })
     await openSecrets()
     await saveSecret('NEW_TOKEN', 'never-print-this')
@@ -342,7 +350,7 @@ describe('editor secrets in managed mode', () => {
     byText('Install configuration').click()
     await settle()
 
-    expect(h.post.mock.calls).toEqual([[INSTALL_CONFIGURATION, { expected: secretExpected }, { sensitive: true }]])
+    expect(h.post.mock.calls).toEqual([[INSTALL_CONFIGURATION, { expected }, { sensitive: true }]])
     expect(configurationCalls()).toHaveLength(2)
     expect(editor.buildLogs).toEqual([])
     expect(body().textContent).toContain('Configuration installed. Permissions review required.')
@@ -374,6 +382,7 @@ describe('editor secrets in managed mode', () => {
 
   it.each([
     { policy_revision: '8' }, { artifact_epoch: 3 }, { generation: GENERATION }, { review_required: false },
+    { approved_artifact: 'iam:unbound' },
   ])('does not install after an unverified save acknowledgement (%j)', async (fields) => {
     await boot({ managed: true })
     await openSecrets()

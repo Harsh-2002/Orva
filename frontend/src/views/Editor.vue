@@ -3111,7 +3111,7 @@ const positiveRevision = (value) => typeof value === 'string' && /^[1-9]\d{0,18}
 
 const configurationSuccessor = (data, previous) => {
   if (data?.review_required !== true || !isCanonicalUuid(data.generation) || data.generation === previous.generation
-    || (data.approved_artifact !== '' && !artifactDigest(data.approved_artifact))
+    || (!['', 'iam:unbound'].includes(data.approved_artifact) && !artifactDigest(data.approved_artifact))
     || data.approved_artifact !== previous.approved_artifact) return null
   const expected = { generation: data.generation, approved_artifact: data.approved_artifact }
   for (const key of configurationRevisions) {
