@@ -29,6 +29,8 @@
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
 > as an invoke-only catalog dispatched through the managed pool. See
 > `docs/API.md` "Managed operator surfaces".
+> Managed runtime and syscall inventory use the same read tier as legacy.
+> `orva login --test` and runtime shell completion use the runtime catalog.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
