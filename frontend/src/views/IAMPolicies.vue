@@ -6,7 +6,7 @@
           Policies
         </h1>
         <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
-          Reusable permissions pinned to a version for each function.
+          A policy is a reusable set of permissions. Attach it to functions, then approve each function.
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -16,7 +16,7 @@
           :title="list.loading.value || list.busy.value ? 'Wait for the current policy list.' : list.error.value ? 'Refresh policies before creating a reusable policy.' : ''"
           @click="creating = true"
         >
-          Create reusable policy
+          New policy
         </Button>
         <Button
           variant="secondary"
@@ -65,7 +65,7 @@
         >
           {{ item.name }}
         </button>
-        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code> · {{ !list.fresh.value ? 'Last known state, unverified' : item.revoked ? 'Revoked permanently' : 'Available to attach' }}</span>
+        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code> · {{ status(item) }}</span>
       </li>
     </ul>
     <p
@@ -81,6 +81,7 @@
       :api="api"
       :functions="functions"
       @changed="list.refresh"
+      @attachments="setAttachments"
       @deleted="$emit('select', ''); list.refresh()"
     />
   </div>
@@ -98,6 +99,15 @@ const emit = defineEmits(['select'])
 const creating = ref(false)
 const targets = computed(() => props.functions.map((f) => ({ id: f.id, label: f.name, state: 'resolved' })))
 const list = useIAMResource(() => 'policies', (_, signal) => props.api.list(signal))
+const attachments = ref(new Map())
+function setAttachments(count) { attachments.value.set(props.policyId, count) }
+function status(item) {
+  if (!list.fresh.value) return 'Last known state, unverified'
+  if (item.revoked) return 'Revoked permanently'
+  const count = attachments.value.get(item.id)
+  if (!count) return 'Available to attach'
+  return count === 1 ? 'Attached to 1 function' : `Attached to ${count} functions`
+}
 async function create(value) {
   if (!list.data.value?.can_manage || list.loading.value || list.busy.value || list.error.value) return
   const result = await list.mutate((signal) => props.api.create(value, signal))

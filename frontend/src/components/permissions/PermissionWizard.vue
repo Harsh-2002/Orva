@@ -4,7 +4,9 @@
     :steps="STEPS"
     :step="step"
     :first-step="initial ? 2 : 1"
-    :final-label="initial ? 'Update permission' : 'Add to policy'"
+    :final-label="initial ? 'Update permission' : 'Add permission'"
+    :hint="hint"
+    :next-disabled="!!hint"
     :error="errors.step || (step === 4 ? problem : '')"
     :disabled="disabled"
     @back="back"
@@ -88,12 +90,13 @@
         <label
           v-for="id in g.ids"
           :key="id"
-          :class="[ROW, 'border-transparent', blocked(id) ? 'opacity-60' : 'hover:bg-surface-hover']"
+          :class="[ROW, form.actions.includes(id) ? 'border-primary bg-surface-hover' : 'border-transparent', !form.actions.includes(id) && blocked(id) ? 'opacity-60' : '', !form.actions.includes(id) && !blocked(id) ? 'hover:bg-surface-hover' : '']"
         >
           <input
             type="checkbox"
             :checked="form.actions.includes(id)"
             :disabled="blocked(id)"
+            :aria-label="ACTION_LABELS[id]"
             :class="INPUT"
             @change="toggle(id)"
           >
@@ -104,27 +107,18 @@
             </span>
             <span
               v-if="invalidAtStartup(id)"
-              class="block text-xs text-danger-fg"
-            >{{ form.actions.includes(id) ? 'Not allowed at startup. Untick it, or choose While handling a request.' : 'Not available at startup. Startup access is read only.' }}</span>
-            <span
-              v-else
-              class="block text-xs text-foreground-muted"
-            >{{ ACTION_HELP[id] }}</span>
+              class="block text-xs text-warning-fg"
+            >Not available at startup</span>
+            <template v-else>
+              <span class="block text-xs text-foreground-muted">{{ ACTION_HELP[id] }}</span>
+              <span
+                v-if="needsGetFor(id)"
+                class="block text-xs text-warning-fg"
+              >Also needs Read a key (kv.get)</span>
+            </template>
           </span>
         </label>
       </fieldset>
-
-      <p
-        v-if="needsGet"
-        role="note"
-        class="flex items-start gap-2 rounded-md border border-warning-ring bg-warning-tint px-3 py-2 text-xs text-warning-fg"
-      >
-        <TriangleAlert
-          class="mt-0.5 h-3.5 w-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        <span>Increment and Compare and set also need Read a key (kv.get) on the same keys. Read is not added for you. Tick it here, or this permission will be incomplete.</span>
-      </p>
     </div>
 
     <!-- 3. Resources -->
@@ -156,6 +150,7 @@
           v-if="form.mode === 'key' || form.mode === 'prefix'"
           v-model="form.value"
           :label="form.mode === 'key' ? 'Key' : 'Key prefix'"
+          :placeholder="form.mode === 'prefix' ? 'app/' : ''"
           :hint="form.mode === 'prefix' ? 'Keys that start with this text. Matched exactly, case sensitive, not trimmed. To allow every key, choose Every key.' : 'Matched exactly, case sensitive, not trimmed.'"
           :error="errors.value || ''"
           :disabled="disabled"
@@ -278,7 +273,7 @@
       </p>
     </div>
 
-    <!-- 4. Review -->
+    <!-- 4. Confirm -->
     <div
       v-else
       class="space-y-3"
@@ -379,7 +374,7 @@ const props = defineProps({
 const emit = defineEmits(['commit', 'cancel'])
 const availableServices = computed(() => SERVICE_ORDER.filter((id) => !props.managed || id !== 'schedules'))
 
-const STEPS = ['Service', 'Actions', 'Resources', 'Review']
+const STEPS = ['Service', 'Actions', 'Resources', 'Confirm']
 const MANUAL = '__manual__'
 const ROW = 'flex min-h-11 cursor-pointer items-start gap-3 rounded-md border px-3 py-2.5 touch-expand-row'
 const INPUT = 'mt-0.5 h-4 w-4 shrink-0 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring'
@@ -412,6 +407,7 @@ const listPicked = computed(() => form.value.actions.includes('kv.list'))
 const needsGet = computed(() => form.value.service === 'storage'
   && (form.value.actions.includes('kv.incr') || form.value.actions.includes('kv.cas'))
   && !form.value.actions.includes('kv.get'))
+const needsGetFor = (id) => (id === 'kv.incr' || id === 'kv.cas') && needsGet.value
 const storageModes = [
   { value: 'key', label: 'Exact key' },
   { value: 'prefix', label: 'Prefix' },
@@ -491,7 +487,7 @@ function validate(n) {
 function enterStep(n) {
   const f = form.value
   // Only an unchosen scope gets a starting point. A chosen one is never rewritten.
-  if (n === 3 && f.service === 'storage' && !f.mode) f.mode = listPicked.value ? 'prefix' : 'key'
+  if (n === 3 && f.service === 'storage' && !f.mode) f.mode = 'prefix'
   if (n === 3 && f.service === 'schedules' && !f.mode) f.mode = 'name'
   errors.value = {}
   step.value = n
@@ -499,13 +495,42 @@ function enterStep(n) {
 
 const built = computed(() => (step.value === 4 ? buildStatement(formToInput(form.value, props.functionId)) : null))
 
-function next() {
-  if (props.disabled) return
-  const e = validate(step.value)
-  if (Object.keys(e).length) {
-    errors.value = e
-    return
+// The forward button is unavailable until the current step can be finished, so
+// the reason is stated before a click instead of after one.
+const hint = computed(() => {
+  const f = form.value
+  if (step.value === 1) return f.service ? '' : 'Choose a service'
+  if (step.value === 2) {
+    if (!f.actions.length) return 'Choose at least one action'
+    const bad = f.actions.filter(invalidAtStartup)
+    return bad.length ? `Untick ${bad.map((a) => ACTION_LABELS[a]).join(', ')}, or choose While handling a request` : ''
   }
+  if (step.value === 3) {
+    if (f.service === 'storage') {
+      if (f.mode === 'key' && listPicked.value) return 'List keys needs a prefix or every key'
+      if (f.mode !== 'all' && f.value === '') return 'Enter a key or prefix'
+    }
+    if (f.service === 'functions' && !f.targetId) return 'Choose a function'
+    if (f.service === 'schedules') {
+      if (f.mode === 'prefix' && f.value === '') return 'Enter a schedule name prefix'
+      if (f.mode === 'name' && f.value === '') return 'Enter a schedule name'
+    }
+    if (f.service === 'schedules' && f.targetId && f.targetId !== props.functionId) return 'Schedules may run only this function'
+    const check = buildStatement(formToInput(f, props.functionId))
+    if (!check.ok) {
+      const { actions, context, ...fields } = check.errors
+      return fields.value || fields.targetId || fields.kind || actions || context || 'Complete this step'
+    }
+    return ''
+  }
+  if (!built.value || !built.value.ok) return 'This permission is not valid yet. Check the previous steps.'
+  const all = { ...validate(1), ...validate(2), ...validate(3) }
+  if (!Object.keys(all).length) return ''
+  return all.step || all.value || all.targetId || 'This permission is not valid yet. Check the previous steps.'
+})
+
+function next() {
+  if (props.disabled || hint.value) return
   if (step.value < 4) {
     enterStep(step.value + 1)
     return
