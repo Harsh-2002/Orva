@@ -80,8 +80,8 @@ func TestManagedCatalogOperatorSurfaces(t *testing.T) {
 	}
 	tiers := map[string][]string{
 		"read": {"list_executions", "get_execution", "get_execution_logs", "list_traces", "get_trace",
-			"get_function_baseline", "system_health", "system_metrics", "list_activity"},
-		"write": {"delete_execution", "bulk_delete_executions", "replay_execution"},
+			"get_function_baseline", "system_health", "system_metrics", "list_activity", "list_fixtures"},
+		"write": {"delete_execution", "bulk_delete_executions", "replay_execution", "save_fixture", "delete_fixture"},
 		"admin": {"system_storage", "system_vacuum", "list_api_keys", "create_api_key", "delete_api_key",
 			"list_channels", "get_channel"},
 	}

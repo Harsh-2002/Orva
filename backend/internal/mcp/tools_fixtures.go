@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -123,15 +124,35 @@ func normaliseFixtureInput(in *SaveFixtureInput) error {
 	return nil
 }
 
+func regAddFixtureTool[In, Out any](rc *regCtx, perm string, def *mcpsdk.Tool, handler mcpsdk.ToolHandlerFor[In, Out]) {
+	if rc.deps.ManagedServer {
+		db := rc.deps.DB
+		regAddTool(rc, perm, def, func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+			ref, ok := auth.OperatorFromContext(ctx)
+			if !ok || db == nil || db.CheckOperatorPermission(ctx, ref, perm) != nil {
+				var out Out
+				return nil, out, database.ErrOperatorDenied
+			}
+			return handler(ctx, req, in)
+		})
+		return
+	}
+	regAddTool(rc, perm, def, handler)
+}
+
 func registerFixtureTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "fixtures"
 
-	regAddTool(rc, permRead,
+	listDescription := "List saved request fixtures for one function. Fixtures are reusable Postman-style presets (method, path, headers, body) used to invoke the function from the editor's Test pane or via test_function_with_fixture."
+	if deps.ManagedServer {
+		listDescription = "List saved request fixtures (method, path, headers, body) for one function without invoking it."
+	}
+	regAddFixtureTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:        "list_fixtures",
 			Title:       "List Fixtures",
-			Description: "List saved request fixtures for one function. Fixtures are reusable Postman-style presets (method, path, headers, body) used to invoke the function from the editor's Test pane or via test_function_with_fixture.",
+			Description: listDescription,
 			Annotations: &mcpsdk.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptrFalse()},
 		},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, in ListFixturesInput) (*mcpsdk.CallToolResult, ListFixturesOutput, error) {
@@ -151,7 +172,7 @@ func registerFixtureTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddFixtureTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "save_fixture",
 			Title:       "Save Fixture",
@@ -183,7 +204,7 @@ func registerFixtureTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddFixtureTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "delete_fixture",
 			Title:       "Delete Fixture",
