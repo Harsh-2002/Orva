@@ -490,11 +490,11 @@ jobs:
           # (2026-11-19: two consecutive amd64 runs). Retry the pair, and let
           # apt retry each download too.
           export DEBIAN_FRONTEND=noninteractive
-          packages="git make gcc g++ autoconf bison flex libtool pkg-config \
-            libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler"
+          packages=(git make gcc g++ autoconf bison flex libtool pkg-config
+            libcap-dev libcap2-bin libprotobuf-dev libnl-route-3-dev protobuf-compiler)
           for attempt in 1 2 3 4 5; do
             if sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 update -qq &&
-               sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y --no-install-recommends $packages; then
+               sudo apt-get -o Acquire::Retries=6 -o Acquire::http::Timeout=60 install -y --no-install-recommends "${packages[@]}"; then
               break
             fi
             if [ "$attempt" = 5 ]; then
