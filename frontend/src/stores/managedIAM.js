@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { readManagedIAMCapability } from '@/api/managedPolicies.js'
+import { readManagedIAMMode } from '@/api/managedPolicies.js'
 import { useAuthStore } from './auth.js'
 
 export const useManagedIAMStore = defineStore('managed-iam', () => {
@@ -10,32 +10,43 @@ export const useManagedIAMStore = defineStore('managed-iam', () => {
   // for the answer: `available` being false means both "not yet asked" and
   // "not managed".
   const checked = ref(false)
+  const mode = ref('unknown')
   let pending
 
   watch([() => auth.isAuthenticated, () => auth.user?.id], () => {
     pending = undefined
     checked.value = false
     available.value = false
+    mode.value = 'unknown'
   }, { flush: 'sync' })
 
   function check({ fresh = false } = {}) {
     if (!auth.isAuthenticated) return false
+    if (!pending && checked.value && !fresh) return available.value
+    return checkMode({ fresh }).then((result) => result === 'managed')
+  }
+
+  async function checkMode({ fresh = false } = {}) {
+    if (!auth.isAuthenticated) return 'unknown'
     if (pending) return pending
-    if (checked.value && !fresh) return available.value
-    if (fresh) checked.value = false
-    const request = readManagedIAMCapability()
-      // A rejected probe is an absent capability, never a pending one.
-      .catch(() => false)
-      .then((enabled) => {
-        if (pending !== request) return false
+    if (mode.value !== 'unknown' && !fresh) return mode.value
+    if (fresh) {
+      checked.value = false
+      mode.value = 'unknown'
+    }
+    const request = readManagedIAMMode()
+      .catch(() => 'unknown')
+      .then((result) => {
+        if (pending !== request) return 'unknown'
         pending = undefined
+        mode.value = result
         checked.value = true
-        available.value = enabled === true
-        return available.value
+        available.value = result === 'managed'
+        return result
       })
     pending = request
     return request
   }
 
-  return { available, checked, check }
+  return { available, checked, check, checkMode }
 })

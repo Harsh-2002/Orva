@@ -30,7 +30,7 @@ const h = vi.hoisted(() => ({
   configuration: null,
 }))
 vi.mock('@/api/managedPolicies.js', () => ({
-  readManagedIAMCapability: async () => h.managed,
+  readManagedIAMMode: async () => h.managed ? 'managed' : 'legacy',
 }))
 vi.mock('@/api/client', () => ({
   default: { get: h.get, post: h.post, put: h.put, delete: h.del },
