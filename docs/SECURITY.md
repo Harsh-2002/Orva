@@ -1,16 +1,28 @@
 # Security model
 
-The internal managed server uses the same Authority for the sealed pool,
+The opt-in managed server uses the same Authority for the sealed pool,
 private SDK, job/cron admission, and protected writes. Startup holds admission
 closed while verifying the exact committed pair and pause state. Restore
 quarantine denies retained approvals; a normal same-boot restart retains only
 approval for the verified unchanged generation. The managed mux and shared
 MCP/Chat catalog are allowlists, not wrappers that fall through to legacy
 mutations. Session-backed mutations require a live UUID-backed session and
-a same-origin browser request. None of this selects managed mode in `orva serve`.
+a same-origin browser request. No environment variable selects managed mode in
+`orva serve`; only the durable mode record does.
 Configuration writes preserve the exact sealed pair in the same transaction
 as the successor generation, inactive status and review-required deny. A
 restart cannot install a pending generation or grant its retained policy.
+
+Managed boot authenticates the canonical Owner record with a distinct,
+pre-provisioned 32-byte random host witness before choosing an opener. The
+witness is mode `0600` in a mode `0700` directory, outside data/backup roots;
+it is never migrated, regenerated, rotated or backed up. Authenticated
+same-kernel-boot records require exact cgroup fencing, including after
+daemon process loss. Only a different kernel boot qualifies for cold opening;
+a missing or replaced cgroup on the same boot is failure, not death proof.
+Deleting the witness on uninstall makes sealed stores unrecoverable on that
+host. The kernel boot and witness do not attest the host or prevent privileged
+in-place rollback.
 
 ## Opt-in restore-quarantine boundary
 

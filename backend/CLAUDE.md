@@ -1,17 +1,18 @@
 # Backend
 
-`server.StartManaged` is an internal opt-in composition, not normal `serve`
-wiring. The caller owns the sealed artifact Owner and drains its HTTP listener
-before closing the instance. It requires matching durable managed mode and uses
-the managed subdirectory under the same outer flock as `serve`. Legacy `serve`
-follows directory aliases but refuses any mode file or root SQLite tombstone
-before opening the database.
+`orva serve` selects the opt-in `server.StartManaged` composition only from
+durable managed mode. The boot caller holds the outer flock across Owner
+recovery, managed SQLite and shutdown. It starts the managed scheduler before
+the listener and drains HTTP, stops the instance, then fences/closes the Owner.
+Legacy serve still follows directory aliases and requires an absent mode file
+and no root SQLite tombstone. The default installer doesn't enable managed mode.
 Offline relocation publishes the mode last; it does not enroll workloads.
 Startup restores durable pause and reconstructs
 only valid exact associations; restore gets a deny evaluator before dispatch.
 `scheduler.RunManaged` starts only shared-authority job/cron loops and drains
 before it returns. Legacy mutation routes and tools are not mounted in this
-composition. Cold boot, legacy enrollment and recovery tooling remain gates.
+composition. The authenticated final boot run selects same-boot exact fencing
+or a true kernel-cold opener. Legacy enrollment and portable restore remain gates.
 
 Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
 over `workload_inbound_publications` (triggers unpublish any non-managed write;
@@ -92,7 +93,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. The Owner gates same-boot recovery on exact fencing and reconciles fully prepared host-bound appends. Host-bound recovery authenticates and retires the oldest proven epoch at the cap before appending; version 1 still denies at capacity. The explicit cold opener requires the private witness and stable filesystem identities. Neither path is wired into daemon boot; see OWNER.md. |
+| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. Opt-in managed boot requires a host-bound Owner, exact same-boot fencing or a verified prior kernel boot. At the epoch cap it retires the oldest proven epoch. See OWNER.md. |
 | `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `workloadpolicy` | Shared policy publication core and unregistered HTTP adapter. Requires trusted live authentication/current-artifact observation; mutations recheck live operator authority transactionally. The live scratch KV workflow exercises it, but no serving route or observer is installed. |

@@ -277,3 +277,19 @@ func lastOwnerBootRun(epochs []ownerEpochRecord) (int, error) {
 	}
 	return start, nil
 }
+
+func ownerNeedsColdRecovery(epochs []ownerEpochRecord, boot string) (bool, error) {
+	start, err := lastOwnerBootRun(epochs)
+	if err != nil || !ownerBoot(boot) || boot == "00000000-0000-0000-0000-000000000000" {
+		return false, ErrIntegrity
+	}
+	if epochs[start].Reference.Boot == boot {
+		return false, nil
+	}
+	for _, epoch := range epochs[:start] {
+		if epoch.Reference.Boot == boot {
+			return false, ErrIntegrity
+		}
+	}
+	return true, nil
+}

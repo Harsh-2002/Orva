@@ -1,7 +1,7 @@
 //go:build linux
 
-// Package workloadrecovery is an explicit admission-closed recovery fixture.
-// Normal serving, boot migration and the public restore handler do not use it.
+// Package workloadrecovery coordinates admission-closed managed startup and
+// restore fixtures. Legacy serving and public restore do not use it.
 package workloadrecovery
 
 import (
@@ -65,27 +65,44 @@ func OpenManaged(dataDir string, host Host, owner string) (*Coordinator, error) 
 }
 
 func open(dataDir string, host Host, owner string) (*Coordinator, error) {
-	if host.Quiesce == nil || host.AdmissionClosed == nil {
-		return nil, ErrClosed
-	}
 	lock, err := servingmode.Acquire(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	record, root, err := lock.OpenData()
+	c, err := openLocked(lock, host, owner)
 	if err != nil {
 		lock.Close()
 		return nil, err
 	}
+	c.lock = lock
+	return c, nil
+}
+
+// OpenManagedLocked uses an outer lock already held during artifact recovery.
+// The caller owns that lock and must keep it through Coordinator.Close.
+func OpenManagedLocked(lock *servingmode.Lock, host Host, owner string) (*Coordinator, error) {
+	if owner == "" || lock == nil {
+		return nil, database.ErrManagedOwnerInvalid
+	}
+	return openLocked(lock, host, owner)
+}
+
+func openLocked(lock *servingmode.Lock, host Host, owner string) (*Coordinator, error) {
+	if host.Quiesce == nil || host.AdmissionClosed == nil {
+		return nil, ErrClosed
+	}
+	record, root, err := lock.OpenData()
+	if err != nil {
+		return nil, err
+	}
 	if owner != "" && (record.Mode != servingmode.Managed || record.Owner != owner) {
 		root.Close()
-		lock.Close()
 		return nil, fmt.Errorf("%w: data directory is not in durable managed mode for this Owner", database.ErrManagedOwnerMismatch)
 	}
 	if record.Mode == servingmode.Managed {
 		owner = record.Owner
 	}
-	return &Coordinator{dir: root.Name(), root: root, lock: lock, host: host, owner: owner}, nil
+	return &Coordinator{dir: root.Name(), root: root, host: host, owner: owner}, nil
 }
 
 func (c *Coordinator) DataDir() string { return c.dir }
@@ -108,7 +125,10 @@ func (c *Coordinator) Close() error {
 	if c.root == nil {
 		return nil
 	}
-	err := errors.Join(c.root.Close(), c.lock.Close())
+	err := c.root.Close()
+	if c.lock != nil {
+		err = errors.Join(err, c.lock.Close())
+	}
 	c.root = nil
 	return err
 }

@@ -18,16 +18,17 @@ import (
 type Budget struct{ s *budgetState }
 
 type budgetState struct {
-	mu       sync.Mutex
-	pid      int
-	boot     string
-	path     string
-	mountID  uint64
-	objects  [4]*os.File // mount, budget, cgroup namespace, mount namespace
-	ids      [4]objectID
-	refs     int
-	closed   bool
-	disposed bool
+	mu            sync.Mutex
+	pid           int
+	boot          string
+	path          string
+	servingParent string
+	mountID       uint64
+	objects       [4]*os.File // mount, budget, cgroup namespace, mount namespace
+	ids           [4]objectID
+	refs          int
+	closed        bool
+	disposed      bool
 }
 
 // CaptureBudget accepts no path: only the exact current non-root membership,
@@ -37,7 +38,55 @@ func CaptureBudget() (*Budget, error) {
 	if err != nil {
 		return nil, err
 	}
+	return captureBudget(path)
+}
+
+// CaptureServingBudget recaptures an already delegated serving layout. Only
+// the immediate daemon leaf can select its budget and sibling worker parent.
+func CaptureServingBudget(parent string) (*Budget, error) {
+	current, err := currentBudgetPath()
+	if err != nil {
+		return nil, err
+	}
+	base := filepath.Dir(parent)
+	if !strictChild("/sys/fs/cgroup", base) || filepath.Join(base, "orva.workers") != parent {
+		return nil, ErrInvalid
+	}
+	if err := noLinks(base); err != nil {
+		return nil, err
+	}
+	if current == base {
+		b, err := CaptureBudget()
+		if err != nil {
+			return nil, err
+		}
+		b.s.servingParent = parent
+		return b, nil
+	}
+	if current != filepath.Join(base, "orva.daemon") {
+		return nil, ErrInvalid
+	}
+	for _, path := range []string{base, current, parent, filepath.Join(base, "cgroup.procs")} {
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+			return nil, ErrIntegrity
+		}
+	}
+	b, err := captureBudget(base)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.s.check(parent); err != nil {
+		b.Close()
+		return nil, err
+	}
+	b.s.servingParent = parent
+	return b, nil
+}
+
+func captureBudget(path string) (*Budget, error) {
 	b := &budgetState{pid: os.Getpid(), path: path}
+	var err error
 	ok := false
 	defer func() {
 		if !ok {
@@ -81,6 +130,23 @@ func CaptureBudget() (*Budget, error) {
 	}
 	ok = true
 	return &Budget{s: b}, nil
+}
+
+// BootID returns the kernel boot identity of a still-valid local budget.
+func (b *Budget) BootID() (string, error) {
+	if b == nil || b.s == nil {
+		return "", ErrInvalid
+	}
+	s := b.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return "", ErrClosed
+	}
+	if err := s.check(""); err != nil {
+		return "", err
+	}
+	return s.boot, nil
 }
 
 // CreateUnderBudget requires a package-minted live capture and a strict child of
@@ -178,7 +244,7 @@ func (b *budgetState) checkParent(parent string, expected *objectID) error {
 	if current != b.path && !strictChild(b.path, current) {
 		return ErrIntegrity
 	}
-	if parent != "" && !strictChild(b.path, parent) {
+	if parent != "" && (!strictChild(b.path, parent) || b.servingParent != "" && parent != b.servingParent) {
 		return ErrInvalid
 	}
 	if parent != "" {

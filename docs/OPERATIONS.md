@@ -1,6 +1,6 @@
 # Operations runbook
 
-The internal managed server binds its SQLite database to the sealed Owner
+The opt-in managed server binds its SQLite database to the sealed Owner
 instance. It refuses databases with existing unbound workloads before
 migration. In-place managed restores retain the sealed stores and validate
 the archive's binding before replacing the installed database. Replace
@@ -16,8 +16,8 @@ Managed startup and offline relocation require a service-owned outer
 directory with no symlinked components or group/world write access.
 
 Legacy `orva serve` requires no `.orva-serving-mode` entry and
-`ORVA_SERVING_MODE` unset or exactly `legacy`. Any marker, including a malformed
-one, causes refusal. Managed mode stores SQLite under `managed/orva.db` and
+`ORVA_SERVING_MODE` unset or exactly `legacy`. A malformed mode marker causes
+refusal, not legacy fallback. Managed mode stores SQLite under `managed/orva.db` and
 keeps an empty mode-0500 directory
 at `orva.db` so older binaries cannot open the original path. Do not remove
 the tombstone, edit the marker, or point a legacy binary at `managed/`. There
@@ -25,10 +25,49 @@ is no public enrollment, downgrade, or interrupted-relocation command in this
 slice. The offline helper requires all daemons (including older releases) to
 be stopped and SQLite checkpointed with no WAL, SHM, or rollback journal.
 
+## Fresh managed provisioning
+
+Stop existing daemons and use a new data directory with no legacy workload,
+database, keys or restore residue. Prepare the [persistent delegation and
+witness location](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
+Run these explicitly as the daemon user, with the same `ORVA_DATA_DIR` and
+managed environment that the daemon will use:
+
+1. `orva setup --managed-witness /etc/orva/host-witness/witness` creates the
+   witness once. The witness's parent directory must be private (`0700`) and
+   owned by the daemon user. If its grandparent is not writable by that user,
+   have the host administrator create the private parent first. Use the
+   configured path if different.
+2. `orva setup --managed-layout provision` publishes provisioning intent.
+3. From the prepared cgroup, run `orva serve`. In provisioning mode it creates
+   the Owner only if the three private roots are empty, then exits without
+   opening a database or listener.
+4. From the persistent `orva.daemon` leaf, run
+   `orva setup --managed-layout publish`. It verifies and closes the exact
+   Owner before explicitly publishing managed mode. If you set
+   `ORVA_SERVING_MODE`, update it from `provisioning` to `managed` only after
+   publication; leaving it unset is simpler.
+5. Run `orva serve` again from the same leaf. Without explicitly configured
+   sealed runtimes the listener can start, but new builds cannot run.
+
+SIGTERM closes and drains HTTP, then closes the managed instance (including
+its scheduler), then fences and closes its Owner. Startup or shutdown refusal
+exits 78, never the restore restart status 70. Do not delete stale cgroups
+to force a start: on the same boot the exact prior groups must still be
+present. A missing group or witness mismatch is not an invitation to
+reprovision or substitute a new witness. Incomplete fresh provisioning
+requires supervised inspection, not an automatic retry with new stores.
+
+Uninstall deletes the standard native witness, even when retaining data;
+the sealed stores then become **unrecoverable on that host**. For externally
+managed witnesses or volumes the operator must explicitly remove the witness
+as part of uninstall. Never copy a witness to preserve recoverability after
+uninstall.
+
 ## Internal restore-quarantine fixture
 
 `workloadrecovery` is an explicit Linux scratch composition, **not** the current
-public restore handler or normal boot path. It requires trusted stopped/drained
+public restore handler or legacy boot path. It requires trusted stopped/drained
 admission before writing a durable external marker and replacing any DB files.
 Its startup transaction migrates empty legacy authority, quarantines all durable
 work origins and policy/inbound authority, fails abandoned builds, and removes

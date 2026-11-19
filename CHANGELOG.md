@@ -18,11 +18,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
-  paths. Startup exits 78 (`EX_CONFIG`) before opening SQLite if it finds a
-  mode file or tombstone, cannot take the lock, or `ORVA_SERVING_MODE` is set
-  to anything but `legacy`. Managed serving remains internal opt-in only;
-  its stricter directory checks do not apply to legacy serving. New systemd
-  units do not restart on exit 78.
+  paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it
+  cannot take the lock or finds an unexpected mode, tombstone or assertion.
+  Managed serving remains explicit opt-in via the durable mode record and
+  retains stricter directory checks. It needs a separately provisioned
+  witness and persistent delegated cgroup budget. Native uninstall destroys
+  the standard witness even if data is retained; the sealed stores then
+  become unrecoverable on that host. New systemd units do not restart on 78.
 
 ### Internal queued IAM publication (not activated)
 

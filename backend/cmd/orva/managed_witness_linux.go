@@ -25,14 +25,7 @@ func managedBackupRoots(dataDir string) []string {
 }
 
 func setupManagedWitness(path, dataDir string) error {
-	if dataDir == "" {
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		dataDir = cfg.Data.Dir
-	}
-	dataDir, err := filepath.Abs(dataDir)
+	dataDir, err := managedSetupDataDir(dataDir)
 	if err != nil {
 		return err
 	}
@@ -40,4 +33,15 @@ func setupManagedWitness(path, dataDir string) error {
 		return fmt.Errorf("provision managed host witness: %w", err)
 	}
 	return nil
+}
+
+func managedSetupDataDir(dataDir string) (string, error) {
+	if dataDir == "" {
+		cfg, err := config.Load()
+		if err != nil {
+			return "", err
+		}
+		dataDir = cfg.Data.Dir
+	}
+	return filepath.Abs(dataDir)
 }

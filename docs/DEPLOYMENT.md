@@ -1,24 +1,42 @@
 # Production deployment notes
 
-## Recovery cutover is not enabled
+## Opt-in managed daemon (supervised setups only)
 
-The managed test composition requires an exclusive, verified sealed Owner
-and a matching database. It cannot adopt an existing legacy installation
-or restore a managed archive onto a different Owner. Normal `orva serve`
-does not participate in the managed recovery lock; never point both at
-the same data directory.
+The daemon selects managed serving only from `.orva-serving-mode`, under the
+same outer lock as legacy serving. It requires an exclusive, verified sealed
+Owner and matching database. This does not enroll legacy functions or support
+portable restore. Keep the first listener private during operator onboarding.
+
+Prepare a dedicated, service-user-owned cgroup v2 budget with CPU, memory and
+PID delegation. The workload parent is its `orva.workers` child. Keep the
+budget and worker groups alive across daemon restarts: the daemon service
+must not own (or remove) the persistent subtree. A trusted launcher starts
+the first process in the undelegated budget and subsequent ones in its
+`orva.daemon` leaf; it must not start an Orva daemon at the host cgroup root.
+
+On systemd, `install.sh --bare-metal --managed-workload-slice` installs an
+inactive `orva-workloads.slice` without starting or changing the regular
+daemon unit. Enable/start the slice separately. Systemd supports `Delegate=yes`
+on **services and scopes**, not slices: a separate persistent delegated
+service/scope under that slice must own the budget and place the daemon
+processes as above. The installer does not provide that launcher. Do not
+restart/stop the budget holder as a way to restart only the daemon.
+
+For a supervised container setup, keep `/var/lib/orva-host/witness` on a
+separate, private volume (dedicated name `orva-host-witness`) outside the data
+volume and backups. A container restart on the same Linux kernel boot that
+removes the old cgroups is **not** recoverable by the current opener and
+refuses with exit 78. Cold recovery requires a different kernel boot, the
+same witness and sealed-store identities, and the same absolute workload
+parent path. Do not enable automatic managed Docker restarts.
 
 Managed custom routes do not carry public exposure across restore. To re-expose
 a retained mapping, use fresh inspection and the managed REST CAS upsert after
 the restore; do not use the legacy route writer.
 
-The internal `workloadrecovery` fixture is not wired into `serve`, normal
-migration, public restore routes or scheduler construction. Deploying this
-source does not activate IAM migration/quarantine guarantees. A later coordinated
-cutover must close and drain all admissions/builds, establish external lifecycle
-fencing, use the host-owned marker before DB promotion, and reconstruct current
-artifacts independently before permitting worker/scheduler startup. Existing
-artifact-owner same-boot fencing and recovery constraints remain unchanged.
+Only the managed boot path uses `workloadrecovery` and the managed scheduler.
+The normal migration path and public legacy restore routes remain separate.
+See [fresh provisioning and shutdown](OPERATIONS.md#fresh-managed-provisioning).
 See [the opt-in recovery contract](../backend/internal/workloadrecovery/README.md).
 
 > Orva is in active development and the maintainers don't recommend it

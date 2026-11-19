@@ -3,9 +3,11 @@ package servingmode
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
+	"github.com/Harsh-2002/Orva/internal/ids"
 	"golang.org/x/sys/unix"
 )
 
@@ -14,7 +16,83 @@ import (
 // A failure after staging may require supervised recovery; this never guesses
 // whether an existing managed directory belongs to a previous operation.
 func (l *Lock) RelocateToManaged(owner, operation string) error {
+	current, err := l.Read()
+	if err != nil {
+		return err
+	}
+	if current.Mode != Legacy {
+		return errors.New("only a legacy layout can be relocated")
+	}
 	return l.relocate(Record{Version: 1, Mode: Managed, Owner: owner, Operation: operation}, func(string) error { return nil })
+}
+
+// BeginProvisioning records explicit intent for a fresh instance, not a legacy
+// conversion. No database or managed routing is enabled.
+func (l *Lock) BeginProvisioning() error {
+	current, err := l.Read()
+	if err != nil {
+		return err
+	}
+	if current != (Record{Mode: Legacy}) {
+		return errors.New("fresh managed provisioning requires an unmarked data directory")
+	}
+	if err := l.checkFreshLayout(); err != nil {
+		return err
+	}
+	return l.write(Record{Version: 1, Mode: Provisioning, Owner: ids.New(), Operation: ids.New()})
+}
+
+func (l *Lock) checkFreshLayout() error {
+	for _, name := range []string{dbName, "orva.db-wal", "orva.db-shm", "orva.db-journal", Managed, ".master.key", ".admin-key", ".workload-recovery"} {
+		st, err := statAt(int(l.root.Fd()), name)
+		if err != nil {
+			return err
+		}
+		if st != nil {
+			return fmt.Errorf("%s already exists; this operation is fresh managed provisioning only", name)
+		}
+	}
+	dir, err := openDir(int(l.root.Fd()), "functions", "functions")
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if names, err := dir.Readdirnames(1); len(names) != 0 || !errors.Is(err, io.EOF) {
+		return errors.New("fresh managed provisioning requires an empty legacy functions directory")
+	}
+	return nil
+}
+
+// PublishProvisioned requires the independently verified ID of the exact
+// provisioned Owner, under the same outer lock.
+func (l *Lock) PublishProvisioned(owner string) error {
+	current, err := l.Read()
+	if err != nil {
+		return err
+	}
+	if current.Mode != Provisioning || current.Owner != owner {
+		return errors.New("no matching fresh managed provisioning")
+	}
+	if err := l.checkFreshLayout(); err != nil {
+		return err
+	}
+	current.Mode = Managed
+	return l.relocate(current, func(string) error { return nil })
+}
+
+// CheckProvisioning refuses legacy residue before the daemon creates an Owner.
+func (l *Lock) CheckProvisioning() error {
+	current, err := l.Read()
+	if err != nil {
+		return err
+	}
+	if current.Mode != Provisioning {
+		return errors.New("fresh managed provisioning is not selected")
+	}
+	return l.checkFreshLayout()
 }
 
 func (l *Lock) relocate(r Record, step func(string) error) error {
@@ -25,7 +103,7 @@ func (l *Lock) relocate(r Record, step func(string) error) error {
 	if err != nil {
 		return err
 	}
-	if current.Mode != Legacy {
+	if current.Mode != Legacy && !(current.Mode == Provisioning && current.Owner == r.Owner && current.Operation == r.Operation) {
 		return errors.New("only a legacy layout can be relocated")
 	}
 	parent := int(l.root.Fd())

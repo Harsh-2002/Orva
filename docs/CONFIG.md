@@ -4,10 +4,9 @@ Orva is configured entirely through environment variables. There is no
 config file — every knob that needs operator input is an env var. A bare
 `docker run` with no env set works out of the box.
 
-The table below lists all 16 supported server variables. On startup, Orva logs
-which of the 11 variables loaded through `config.SupportedEnvVars` it found set
-and how many are at their defaults. The five marked as direct runtime inputs
-are read by their owning subsystem instead of the central config loader.
+On legacy startup, Orva logs which of the 11 variables loaded through
+`config.SupportedEnvVars` it found set. Direct runtime and managed-only inputs
+are read by their owning subsystems instead.
 
 Every variable below has an observable runtime effect. A knob that an
 operator can set with no consequence is worse than no knob at all, so
@@ -20,7 +19,7 @@ names that stopped doing anything are deleted rather than deprecated.
 | env | default | what |
 |-----|---------|------|
 | `ORVA_DATA_DIR` | `~/.orva` (dev) / `/var/lib/orva` (Docker) | Root for SQLite DB, function code, and rootfs trees. DB and rootfs paths are derived automatically. |
-| `ORVA_SERVING_MODE` | (unset; direct startup assertion) | If set, must exactly match the durable mode (`legacy` when `.orva-serving-mode` is absent). An empty value is a mismatch. Normal `orva serve` requires the mode file to be absent and exits 78 on refusal. The variable cannot enable managed mode or resume provisioning. |
+| `ORVA_SERVING_MODE` | (unset; direct startup assertion) | If set, must exactly match the durable mode (`legacy` when `.orva-serving-mode` is absent). An empty value is a mismatch. It cannot select or change the mode. Startup exits 78 on refusal. |
 | `ORVA_HOST` | `0.0.0.0` | Bind address for the HTTP listener. Set to `127.0.0.1` to listen on loopback only (recommended behind a reverse proxy). |
 | `ORVA_PORT` | `8443` | Listen port — plain HTTP, no TLS. Set to `8080` when a reverse proxy owns 8443. |
 | `ORVA_WRITE_TIMEOUT_SEC` | `60` | Response write timeout. Must exceed your longest function `timeout_ms` for **buffered** responses, or Orva will cut them off. It does **not** bound streaming responses: the write deadline is cleared on the streaming path, which is governed by `stream_max_seconds` (default 300) instead. |
@@ -36,6 +35,15 @@ names that stopped doing anything are deleted rather than deprecated.
 | `ORVA_DISABLE_USERNS` | installer-selected; `0` in Docker (direct runtime input) | `0` keeps nsjail's preferred user namespace; `1` uses its file-capability fallback when the host blocks user-namespace setup. The bare-metal installer execution-tests the selected mode as the `orva` service user. Set only `0` or `1`: an explicit choice is verified and fails installation if it cannot run. |
 | `ORVA_CGROUPV2_MOUNT` | (auto-detected; direct runtime input) | Explicit worker cgroup v2 subtree for per-sandbox CPU, memory, and process limits. Normally leave unset: Orva creates `orva.daemon` and `orva.workers` inside its own delegated service/container cgroup and verifies the child limit files. The override must be an absolute, already delegated and writable **child of Orva's own cgroup**; old host-root overrides are rejected. Orva never searches writable ancestors. If no safe subtree is available, health reports `rlimit_only`. |
 
+### Managed-only inputs
+
+| env | default | what |
+|-----|---------|------|
+| `ORVA_MANAGED_WITNESS_PATH` | `/etc/orva/host-witness/witness` (native); `/var/lib/orva-host/witness` (Docker entrypoint) | Absolute path to the pre-provisioned, private host witness. No creation or rotation at serving startup. |
+| `ORVA_MANAGED_BACKUP_DIR` | unset | Additional existing absolute backup root to exclude from witness placement, in addition to `ORVA_DATA_DIR`. Keep all other backup tooling away from the witness too. |
+| `ORVA_MANAGED_WORKLOAD_PARENT` | required on native; Docker entrypoint derives it from the current container cgroup | Exact absolute `orva.workers` child of an owned, non-root cgroup-v2 budget. Initial launch enters the budget before controllers are enabled; replacement launches may enter its `orva.daemon` leaf directly. This is not `ORVA_CGROUPV2_MOUNT`. |
+| `ORVA_MANAGED_NODE_GENERATION`, `ORVA_MANAGED_PYTHON_GENERATION` | unset | Exact existing sealed runtime generation for new builds in each language. An unset language cannot build; a configured generation of the wrong runtime or a missing generation refuses startup. This never imports a mutable rootfs. |
+
 ---
 
 ## What's hardcoded (not configurable)
@@ -48,7 +56,7 @@ deployment and exposing them as knobs would only create confusion:
 | HTTP read timeout | 30 s |
 | nsjail binary | `/usr/local/bin/nsjail` |
 | Rootfs dir | `${ORVA_DATA_DIR}/rootfs` (derived) |
-| DB path | `${ORVA_DATA_DIR}/orva.db` for normal serving; `${ORVA_DATA_DIR}/managed/orva.db` for the internal managed composition (derived) |
+| DB path | `${ORVA_DATA_DIR}/orva.db` for legacy serving; `${ORVA_DATA_DIR}/managed/orva.db` for managed serving (derived) |
 | New-function timeout | `30000` ms — change per function, see below |
 | New-function memory | `64` MB — change per function, see below |
 | Default function CPUs | `0.5` |

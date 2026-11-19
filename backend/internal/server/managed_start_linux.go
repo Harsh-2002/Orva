@@ -13,12 +13,14 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadrecovery"
 )
 
 type ManagedOptions struct {
 	DataDir, NsjailBin string
 	Artifacts          *artifactfs.Owner
+	LayoutLock         *servingmode.Lock // Optional; caller retains it through Close.
 	Output             builder.OutputConfig
 	RuntimeGenerations map[sandbox.Language]string
 	ChatGuard          firewall.Guard
@@ -26,7 +28,7 @@ type ManagedOptions struct {
 
 // ManagedInstance owns the managed listener's recovery lock and database.
 // The embedding process owns the artifact Owner and must retain it until Close
-// succeeds. This internal entry point is not wired into normal orva serve.
+// succeeds.
 type ManagedInstance struct {
 	http.Handler
 	mu          sync.Mutex
@@ -44,10 +46,16 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 		return nil, err
 	}
 	var service *managedServer
-	recovery, err := workloadrecovery.OpenManaged(in.DataDir, workloadrecovery.Host{
+	host := workloadrecovery.Host{
 		Quiesce:         func(context.Context) error { return nil },
 		AdmissionClosed: func() bool { return service == nil },
-	}, ownerID)
+	}
+	var recovery *workloadrecovery.Coordinator
+	if in.LayoutLock == nil {
+		recovery, err = workloadrecovery.OpenManaged(in.DataDir, host, ownerID)
+	} else {
+		recovery, err = workloadrecovery.OpenManagedLocked(in.LayoutLock, host, ownerID)
+	}
 	if err != nil {
 		return nil, err
 	}

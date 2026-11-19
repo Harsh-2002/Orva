@@ -161,6 +161,9 @@ If the final run is from this boot, use `OpenOwnerRecovery`; missing cgroups in
 that run deny, regardless of which entry point is used. Both entry points use
 the same append intent, commit barrier and store verification. Cold recovery
 can replay authenticated retirement; it does not repair incomplete append state.
+`OpenOwnerForBoot` chooses these paths after checking the witness MAC and
+durable instance ID under the owner lock. Provisioning accepts only three
+empty private roots.
 
 The witness is not hardware attestation or rollback detection. Host placement
 and backup-root completeness are trusted provisioning facts. Privileged host
@@ -191,9 +194,9 @@ cgroups are never looked up or removed.
 
 No bindings are returned until retirement and the fresh append finish. Sealed
 code/runtime and staged or retired store entries are unchanged; no grants or
-policy are restored. Bound same-boot cgroups must outlive the daemon process
-(the planned host placement is `orva-workloads.slice`); this code does not
-provision that slice or wire daemon boot.
+policy are restored. Bound same-boot cgroups must outlive the daemon process;
+a native systemd launcher needs a separate delegated unit under
+`orva-workloads.slice`.
 
 ## Budget recapture prerequisite
 
@@ -202,11 +205,11 @@ The budget-aware variant accepts only a live process-local CaptureBudget
 capability and never restores Start. It does not manufacture an ancestor capture
 from a record. After controllers are enabled, the no-internal-process rule can
 prevent a cold replacement daemon from entering the old internal service budget
-to capture it. Boot placement/recapture is **not solved here**. Cross-process
-handoff tests capture the replacement's budget before delegation and move only
-their own test processes. They do not establish production cold-start recovery.
-The cold entry point assumes a trusted boot owner can provision an appropriate
-new budget and the same delegated parent path. The tagged
+to capture it. The managed daemon can recapture an already delegated budget
+when the trusted launcher places it in the exact owned `orva.daemon` leaf;
+that budget is scoped to the sibling `orva.workers` only. The cold entry point
+still requires the same delegated parent path and an actual new kernel boot.
+The tagged
 `TestOwnerActualReboot` fixture passed on guest-local ext4: an enrolled child
 was present before hard stop, the new boot had no old cgroup, a foreign witness
 was rejected, and both exact seals reopened under cold then same-boot recovery.

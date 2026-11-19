@@ -153,6 +153,19 @@ func openLifecycleOwner(ctx context.Context, cfg OwnerConfig, recovering bool, o
 }
 
 func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops persistentOps) (*Owner, error) {
+	return openOwnerForBoot(ctx, cfg, recovering, cold, "", ops)
+}
+
+// OpenOwnerForBoot requires a durable, host-bound Owner ID. Recovery selects
+// its path only after witness authentication under the owner lock.
+func OpenOwnerForBoot(ctx context.Context, cfg OwnerConfig, ownerID string, provisioning bool) (*Owner, error) {
+	if cfg.Host == nil || !generationID(ownerID) {
+		return nil, ErrInvalid
+	}
+	return openOwnerForBoot(ctx, cfg, !provisioning, false, ownerID, defaultOwnerOps())
+}
+
+func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ownerID string, ops persistentOps) (*Owner, error) {
 	if err := validateOwnerConfig(ctx, cfg); err != nil {
 		return nil, err
 	}
@@ -170,6 +183,19 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 			_ = s.witness.file.Close()
 		}
 	}()
+	if !recovering && ownerID != "" {
+		for _, root := range []string{cfg.MetadataRoot, cfg.CodeRoot, cfg.RuntimeRoot} {
+			f, err := openNoFollow(root, true)
+			if err != nil {
+				return nil, err
+			}
+			names, readErr := f.Readdirnames(1)
+			f.Close()
+			if len(names) != 0 || !errors.Is(readErr, io.EOF) {
+				return nil, ErrIntegrity
+			}
+		}
+	}
 	s.meta, err = openStore(cfg.MetadataRoot, ownerMetadataLimits(), !recovering)
 	if err != nil {
 		return nil, err
@@ -205,6 +231,19 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 		}
 		if s.witness != nil {
 			if err := s.witness.verify(s.disk); err != nil {
+				return nil, err
+			}
+		}
+		if ownerID != "" {
+			if s.disk.ID != ownerID {
+				return nil, ErrIntegrity
+			}
+			boot, err := cfg.Budget.BootID()
+			if err != nil {
+				return nil, err
+			}
+			cold, err = ownerNeedsColdRecovery(s.disk.Epochs, boot)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -268,6 +307,9 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 		}
 	} else {
 		s.disk = ownerRecord{Version: 1, ID: ids.New(), Parent: cfg.Parent, MaxEpochs: cfg.MaxEpochs}
+		if ownerID != "" {
+			s.disk.ID = ownerID
+		}
 		if s.witness != nil {
 			s.disk.Version = 2
 		}

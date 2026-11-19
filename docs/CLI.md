@@ -18,6 +18,12 @@ Released for **Linux + macOS + Windows × amd64 + arm64** on every Orva tag.
 
 ## Install
 
+The Linux server binary additionally provides `orva setup --managed-witness
+PATH` (create a witness only, refusing replacement) and `orva setup
+--managed-layout provision|publish` (explicit fresh-instance layout steps).
+Neither flag enrolls legacy workloads. See the [supervised provisioning
+procedure](OPERATIONS.md#fresh-managed-provisioning).
+
 ### Linux + macOS
 
 ```bash

@@ -28,6 +28,36 @@ func testOwnerHost(t *testing.T) *OwnerHostConfig {
 	return &OwnerHostConfig{WitnessPath: path, BackupRoots: []string{t.TempDir()}}
 }
 
+func TestOwnerBootSelection(t *testing.T) {
+	a := "aaca99ca-deec-4a58-bf5a-1cb50f2b7357"
+	b := "baca99ca-deec-4a58-bf5a-1cb50f2b7357"
+	c := "caca99ca-deec-4a58-bf5a-1cb50f2b7357"
+	for _, tc := range []struct {
+		name       string
+		run        []string
+		boot       string
+		cold, deny bool
+	}{
+		{"same boot", []string{a, a, b, b}, b, false, false},
+		{"prior boot", []string{a, a, b}, c, true, false},
+		{"current boot in prefix", []string{a, b}, a, false, true},
+		{"discontinuous", []string{a, b, a}, c, false, true},
+		{"empty", nil, a, false, true},
+		{"invalid kernel boot", []string{a}, "invalid", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var epochs []ownerEpochRecord
+			for _, boot := range tc.run {
+				epochs = append(epochs, ownerEpochRecord{Reference: workloadfence.EpochReference{Boot: boot}})
+			}
+			cold, err := ownerNeedsColdRecovery(epochs, tc.boot)
+			if cold != tc.cold || (err != nil) != tc.deny {
+				t.Fatalf("cold=%v error=%v", cold, err)
+			}
+		})
+	}
+}
+
 func TestOwnerHostWitness(t *testing.T) {
 	host := testOwnerHost(t)
 	base := t.TempDir()

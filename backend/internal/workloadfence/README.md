@@ -245,7 +245,7 @@ prepared path cannot bypass a subsequently closed Start. Code using this API
 must not start the command by another route or substitute a different
 `--cgroupv2_mount` after argument construction.
 
-## Captured service budget (new, not production boot integration)
+## Captured service budget
 
 Linux's no-internal-process constraint prevents a populated non-root daemon
 cgroup from distributing memory to children. Ordinary Create still requires a
@@ -270,8 +270,13 @@ namespaces, boot, PID, pinned budget identity and current path identity are
 rechecked at creation and through the Domain's normal Start/Prepare/Fence/Check
 identity verification. A daemon leaf and an epoch parent may therefore be
 siblings **inside the same captured budget**, without authorizing any path
-outside it. A capture made only after moving into a leaf cannot reconstruct or
+outside it. An ordinary `CaptureBudget` made in a leaf cannot reconstruct or
 mint its ancestor's authority.
+
+The daemon's separate `CaptureServingBudget` accepts only a configured
+`orva.workers` parent and verifies either exact initial budget membership or
+membership in the immediate owned `orva.daemon` sibling leaf. It returns a
+budget scoped to that worker parent, not arbitrary ancestors or siblings.
 
 The trusted boot owner must exclusively own the service budget and its stable
 ancestors, move **only its own daemon** to a known owned leaf, verify the

@@ -81,6 +81,11 @@ func runServe(cmd *cobra.Command, _ []string) int {
 		slog.Error("cannot prepare data directory", "error", err)
 		return exitConfig
 	}
+	if _, err := os.Lstat(filepath.Join(cfg.Data.Dir, servingmode.MarkerName)); !os.IsNotExist(err) {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		return managedExit(runServeManaged(ctx, cfg))
+	}
 	lock, err := servingmode.AcquireLegacy(cfg.Data.Dir)
 	if err != nil {
 		slog.Error("refusing legacy startup", "error", err)

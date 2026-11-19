@@ -770,6 +770,42 @@ func prepareOwnedCgroup(base string) (string, error) {
 	return workers, nil
 }
 
+// PrepareManagedServingCgroup is called only after capturing the daemon's
+// budget. A restart may already be in the persistent daemon leaf.
+func PrepareManagedServingCgroup(parent string) error {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return err
+	}
+	current, err := selfCgroupBase("/sys/fs/cgroup", string(data))
+	if err != nil {
+		return err
+	}
+	base := filepath.Dir(parent)
+	if base == "/sys/fs/cgroup" || validateCgroupOverride("/sys/fs/cgroup", base) != nil ||
+		parent != filepath.Join(base, "orva.workers") ||
+		(current != base && current != filepath.Join(base, "orva.daemon")) {
+		return errors.New("invalid managed serving cgroup geometry")
+	}
+	for _, path := range []string{base, parent, filepath.Join(base, "orva.daemon")} {
+		st, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) && path != base && current == base {
+			continue
+		}
+		if err != nil || !st.IsDir() {
+			return fmt.Errorf("invalid managed serving cgroup %s", path)
+		}
+	}
+	got, err := prepareOwnedCgroup(base)
+	if err != nil {
+		return err
+	}
+	if got != parent {
+		return errors.New("managed serving cgroup differs from prepared parent")
+	}
+	return nil
+}
+
 func controllerSet(path string) (map[string]bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

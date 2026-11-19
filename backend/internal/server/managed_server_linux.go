@@ -93,7 +93,7 @@ type managedServer struct {
 // newManagedServer composes the admission-closed, opted-in serving instance.
 func newManagedServer(ctx context.Context, db *database.Database, in managedServerInput) (_ *managedServer, err error) {
 	if ctx == nil || db == nil || in.artifacts == nil || !filepath.IsAbs(in.dataDir) || !filepath.IsAbs(in.nsjail) ||
-		len(in.runtimeGenerations) == 0 || len(in.runtimeGenerations) > 2 {
+		in.runtimeGenerations == nil || len(in.runtimeGenerations) > 2 {
 		return nil, errManagedServerUnavailable
 	}
 	assets, err := in.artifacts.Bindings(ctx)
@@ -196,11 +196,25 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 		return nil, err
 	}
-	publication.Start()
-	spawnReady.Store(true)
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runtime.scheduler.RunManaged(runCtx); close(done) }()
+	ready := make(chan struct{})
+	spawnReady.Store(true)
+	go func() { done <- runtime.scheduler.RunManagedReady(runCtx, ready); close(done) }()
+	select {
+	case err := <-done:
+		cancel()
+		spawnReady.Store(false)
+		if chat != nil {
+			chat.Close()
+		}
+		if err == nil {
+			err = errManagedServerUnavailable
+		}
+		return nil, err
+	case <-ready:
+		publication.Start()
+	}
 	return &managedServer{handler: handler, runtime: runtime, publication: publication, output: output,
 		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat}, nil
 }

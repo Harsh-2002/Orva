@@ -2,10 +2,10 @@
 
 This internal coordinator drives real `backup.ArchiveTo` /
 `RestoreFromGuarded` installation and file-backed SQLite migration/quarantine.
-It is **not installed by `serve`, normal migration, REST restore, MCP or CLI**.
+Only durable managed `serve` uses its startup path; legacy migration, REST
+restore, MCP and CLI do not install the coordinator.
 The existing `RestoreFrom` and public handler retain their legacy behavior.
-There is no production feature flag, remote administration route or supported
-operator recovery command in this patch. Do not start normal serving to try it.
+There is no remote administration route or supported operator restore command.
 
 ## Host boundary
 
@@ -13,7 +13,8 @@ operator recovery command in this patch. Do not start normal serving to try it.
 directory, no symlinked ancestors, and the same outer data-directory lock as
 legacy `serve`. Absent mode selects the legacy fixture layout; durable managed
 mode requires the tombstone and selects `managed/`. `OpenManaged` additionally
-requires the mode to match the verified Owner. Managed startup and restore
+requires the mode to match the verified Owner. The daemon uses
+`OpenManagedLocked` under its already-held outer lock. Managed startup and restore
 must use the bound methods with that Owner. Control files are no-follow,
 owner-only, single-link regular files. Startup
 rejects linked SQLite DB/WAL/SHM paths before opening SQLite. Filesystem

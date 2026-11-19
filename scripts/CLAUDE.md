@@ -17,6 +17,16 @@ Support scripts for deployment and installation. None of these are called by the
 
 ## Gotchas
 
+- `install.sh --bare-metal --managed-workload-slice` installs the persistent
+  placement slice without starting or restarting Orva. Systemd delegation lives
+  on a separate persistent service/scope, not the slice or the legacy daemon
+  unit. Uninstall deletes the standard native witness and warns that retained
+  sealed stores are unrecoverable. It also removes the dedicated Docker witness
+  volume when mounted at `/var/lib/orva-host` under the documented name.
+- With a durable mode entry, the Docker entrypoint supplies managed witness and
+  workload-parent defaults and skips the legacy CLI bootstrap; Go validates the
+  mode under lock. Docker does not turn a restart into a kernel reboot.
+
 - `entrypoint.sh` **always overwrites** `adapter.js` / `adapter.py` from the image on every container start — this ensures runtime upgrades roll out even when the user mounts a persistent `orva-data` volume. The bundled SDK is *replaced*, not merged: `opt/orva/node_modules/orva/` is removed and re-copied, because a merge would leave files an older image shipped under names the current one no longer uses (`index.js`) alive in the volume forever.
 - `entrypoint.sh` never creates `orva.db`; only the daemon opens SQLite after taking the data-directory lock.
 - `entrypoint.sh` sources `rootfs-sync.sh` (installed as `/usr/local/bin/orva-rootfs-sync`) to seed or refresh the volume's runtimes. `.orva-runtime` (`node v26.13.0`, `python 3.15.2`) comes from the interpreter; `.orva-rootfs-revision` comes from `rootfs-revisions/`. Either mismatch refreshes the runtime, including a missing volume revision when the image has one. Matching identities are a no-op; an image without a content revision retains interpreter-only behavior. Copies are staged beside the working rootfs, and copy failure returns before replacement. `test/install/rootfs-sync-test.sh` covers synchronization and construction metadata without root or Docker.

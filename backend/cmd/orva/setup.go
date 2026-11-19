@@ -41,10 +41,17 @@ rootfs trees via scripts/build-rootfs.sh.`,
 	cmd.Flags().Bool("skip-nsjail", false, "do not install nsjail or run setcap")
 	cmd.Flags().String("rootfs-url", "", "base URL for downloadable rootfs tarballs (e.g. https://github.com/Harsh-2002/Orva/releases/latest/download)")
 	cmd.Flags().String("managed-witness", "", "only create a new managed host witness at this absolute path; never replace it")
+	cmd.Flags().String("managed-layout", "", "explicit fresh managed layout step: provision or publish; no legacy conversion")
+	cmd.MarkFlagsMutuallyExclusive("managed-witness", "managed-layout")
 	return cmd
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("managed-layout") {
+		action, _ := cmd.Flags().GetString("managed-layout")
+		dataDir, _ := cmd.Flags().GetString("data-dir")
+		return setupManagedLayout(cmd.Context(), action, dataDir)
+	}
 	if cmd.Flags().Changed("managed-witness") {
 		witness, _ := cmd.Flags().GetString("managed-witness")
 		dataDir, _ := cmd.Flags().GetString("data-dir")
