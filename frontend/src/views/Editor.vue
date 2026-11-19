@@ -21,7 +21,7 @@
          Mobile (<sm): name + runtime label take a full first row; the
          dropdowns + actions take a second row. Above sm, the original
          single-row flex-wrap returns. -->
-    <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 pb-3 border-b border-border">
+    <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-2 gap-y-3 pb-3 border-b border-border">
       <div class="flex items-center gap-2 sm:mr-auto min-w-0 w-full sm:w-auto">
         <FileCode class="w-4 h-4 text-foreground-muted shrink-0" />
         <label
@@ -38,7 +38,7 @@
         <button
           v-if="!isEditing && !fnId"
           type="button"
-          class="p-1 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
+          class="p-1 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
           title="Re-roll a fresh name"
           aria-label="Re-roll a fresh name"
           @click="rerollName"
@@ -65,7 +65,7 @@
       <!-- Wrapper for the dropdowns + actions on mobile so they sit on
            one row (or wrap among themselves). On sm+ they merge back
            into the parent flex-wrap. -->
-      <div class="flex flex-wrap items-center gap-2 sm:contents">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-3 sm:contents">
         <!-- Config menu — Settings / Env / Deps / Secrets / Versions.
            Versions is hidden until isEditing && versions.length so the
            menu stays small for new-function flows. -->
@@ -3440,17 +3440,7 @@ const resetForm = async () => {
 </script>
 
 <style scoped>
-/* Compact panel-trigger button used in the editor's top action bar.
-   Visible height ~28 px keeps the toolbar dense for desktop operators; on
-   coarse pointers the real box grows to the WCAG 2.5.5 floor (see the
-   media query at the bottom of this block).
-
-   This used to be a ::before overlay inset -8px vertically. That is the
-   exact pattern style.css removed: the toolbar is flex-wrap, so once the
-   row passes a phone's width the buttons wrap onto two rows separated by
-   gap-2 (7.6 px) and each row-2 overlay covered the row-1 buttons above
-   it — winning the hit test on paint order and swallowing taps meant for
-   Config. Grow the box, never the shadow of it. */
+/* Match the shared sm toolbar controls without changing the menu styling. */
 .panel-btn {
   display: inline-flex;
   align-items: center;
@@ -3539,42 +3529,20 @@ const resetForm = async () => {
   cursor: not-allowed;
 }
 
-/* Coarse-pointer floors for the controls this view styles itself. The
-   touch-expand-* helpers cover everything that goes through Button /
-   IconButton; these two are scoped-CSS controls that never see them.
-   Desktop (fine pointers) is untouched. */
 @media (pointer: coarse) {
-  /* The sm rung, then buy the target: a 44px BOX made Config and Bindings
-     visibly taller than the Test / Reset / Deploy trio beside them, which is
-     the "floor is not the size" mistake DESIGN.md names. */
-  .panel-btn {
-    height: auto;
-    min-height: 36px;
-    position: relative;
-  }
-  .panel-btn::after {
-    content: '';
-    position: absolute;
-    top: -4px;
-    bottom: -4px;
-    left: 0;
-    right: 0;
-  }
-
-  /* Run sat at 44px inside a 44px bar: a bordered control exactly as tall as
-     the strip containing it, touching both edges, which is what made it read
-     as a slab rather than a button. It takes the sm rung (36px) and buys the
-     rest of its target the same bounded way the shared helpers do. */
+  .panel-btn,
   .run-btn {
     height: auto;
     min-height: 36px;
     position: relative;
   }
+  /* Fixed target height avoids losing the two border pixels to the padding box. */
+  .panel-btn::after,
   .run-btn::after {
     content: '';
     position: absolute;
-    top: -4px;
-    bottom: -4px;
+    top: calc(50% - 22px);
+    height: 44px;
     left: 0;
     right: 0;
   }
