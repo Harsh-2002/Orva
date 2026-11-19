@@ -63,8 +63,10 @@ set, and registers the ordinary invoke-only channel catalog, whose `invokeFuncti
 goes through `Proxy.Forward` and therefore the managed pool; managed never serves a
 non-`active` function from a prior code directory. `registerManagedOperationTools`
 shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools` and
-`registerKeyTools` with the normal catalog (73/28 unchanged; managed 66/22) and adds
+`registerKeyTools` with the normal catalog (73/28 unchanged; managed 69/23) and adds
 `list_activity`, `list_channels`, `get_channel` and `replay_execution`.
+Managed MCP and Chat share the DB-only `registerFixtureTools` with legacy mode,
+rechecking the live operator tier per call without registering fixture execution.
 Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation

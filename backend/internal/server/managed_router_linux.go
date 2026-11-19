@@ -114,6 +114,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
+	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
 	mountManagedAccess(mux, db, ops)
 	var dispatch http.Handler = mux
