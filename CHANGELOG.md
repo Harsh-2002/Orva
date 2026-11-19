@@ -16,6 +16,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
+- The AI assistant no longer stores one-time credentials it mints. API keys,
+  outbound webhook secrets and inbound webhook secrets created through Chat
+  appear only in that turn's live result; history, exports and later model
+  requests show a placeholder. Copy the value before reloading. Existing
+  conversations created before this change are not rewritten.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
   paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it

@@ -1025,6 +1025,13 @@ per-conversation **approval policy** (`all_writes` / `destructive_only`
 / `auto`), which can pause a write for human approval before it runs,
 and a code-enforced `confirm=true` requirement on destructive tools.
 
+Tools that mint a one-time credential (`create_api_key`, `create_webhook`,
+`create_inbound_webhook`) declare the credential fields. The assistant shows the
+value only in that turn's live result; the stored tool call, the conversation
+message, exports and every later model request carry
+`[redacted: shown once to the operator]` instead. External MCP clients still
+receive the value once, as before.
+
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same
 conversation list (they are not isolated per credential). BYO provider

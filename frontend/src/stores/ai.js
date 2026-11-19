@@ -175,7 +175,8 @@ export const useAIStore = defineStore('ai', () => {
         for (let i = timeline.value.length - 1; i >= 0; i--) {
           const t = timeline.value[i]
           if (t.kind === 'tool' && t.id === data.id) {
-            timeline.value[i] = { ...t, status: data.status, result: data.result }
+            // one_time: the live result carries a credential the server never stores.
+            timeline.value[i] = { ...t, status: data.status, result: data.result, oneTime: data.one_time === true }
             break
           }
         }
