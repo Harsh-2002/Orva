@@ -70,12 +70,19 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
+| Outbound webhooks | `GET /api/v1/webhooks`, `GET .../{id}`, `GET .../{id}/deliveries` | read |
+| | `POST /api/v1/webhooks`, `PUT/DELETE .../{id}`, `POST .../{id}/test`, `POST .../deliveries/{id}/retry` | write |
 | Chat | `/api/v1/ai/*` (see [AI assistant](#ai-assistant)) | admin |
 
 The OAuth authorization server endpoints are not mounted: existing grants can
 be listed and revoked, not issued. Connected apps and sessions are cookie-bound,
 as on the normal server, and have no MCP tool. `GET /api/v1/system/storage`
 reports the plain data directory; it does not include sealed artifact stores.
+
+Outbound webhook REST routes manage subscriptions and delivery records only.
+Test and retry queue deliveries without making HTTP requests. Managed mode
+does not start outbound event fanout or the delivery worker, so queued deliveries
+are not sent and these routes do not enable outbound webhook egress.
 
 - **Activity.** Eligible requests queue best-effort activity rows, with key
   (`source: api`) or browser session (`source: web`) attribution when resolved.

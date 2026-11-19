@@ -34,6 +34,8 @@
 > `kv_cas`. Tools recheck the operator's current credential and required tier
 > at tool entry. They access stored values by function name or UUID, including
 > for inactive functions, without running code or granting SDK permissions.
+> Managed outbound webhook REST routes under `/api/v1/webhooks` require `read`
+> for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
@@ -835,9 +837,13 @@ curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e0
 ## Webhooks
 
 Operator-managed subscriptions for system events. Configure URLs from
-the Webhooks page; Orva delivers signed POSTs to them when matching
+the Webhooks page; the legacy server delivers signed POSTs when matching
 events fire (deployments, function lifecycle, cron failures, job
 outcomes). Subscriptions are global, not per-function.
+
+In managed mode, the REST routes manage subscriptions and delivery records.
+Test and retry queue deliveries only; managed mode does not run outbound event
+fanout or the delivery worker.
 
 **Headers:** `X-Orva-Event`, `X-Orva-Delivery-Id`,
 `X-Orva-Timestamp`, `X-Orva-Signature`.
