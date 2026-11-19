@@ -158,6 +158,7 @@ onMounted(bootstrap)
 // keep-alive re-entry: refresh conversations + provider/settings state, so
 // changes made over in Settings -> AI are reflected when returning to the chat.
 onActivated(() => {
+  store.setChatVisible(true)
   store.loadConversations()
   store.loadSettings()
   store.loadProviders()
@@ -175,6 +176,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 // Leaving the view (keep-alive deactivates rather than unmounts) drops any live
 // one-time credential; coming back shows the stored placeholder.
-onDeactivated(() => store.dismissOneTime())
-onUnmounted(() => store.dismissOneTime())
+onDeactivated(() => store.setChatVisible(false))
+onUnmounted(() => store.setChatVisible(false))
 </script>

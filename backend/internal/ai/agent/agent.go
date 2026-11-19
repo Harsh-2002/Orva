@@ -397,12 +397,13 @@ func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row 
 		_ = r.store.UpdateToolCall(row)
 		out, err = r.dispatch(ctx, row.ToolName, raw)
 	}
-	var resultJSON string
+	var resultJSON, rawOut string
 	if err != nil {
 		resultJSON = mustJSON(map[string]string{"error": err.Error()})
 		row.Status = "failed"
 	} else {
-		resultJSON = string(out)
+		rawOut = string(out)
+		resultJSON = rawOut
 		if resultJSON == "" {
 			resultJSON = "null"
 		}
@@ -416,8 +417,13 @@ func (r *Runner) runToolCall(ctx context.Context, sink Sink, convID string, row 
 	// frame below carries the one-time value.
 	liveJSON := resultJSON
 	stored, oneTime := resultJSON, false
-	if err == nil {
-		stored, oneTime = redactResult(resultJSON, r.byName[row.ToolName].Sensitive)
+	if sensitive := r.byName[row.ToolName].Sensitive; err == nil && len(sensitive) > 0 {
+		// Redact the dispatcher's raw bytes: normalizing empty output to "null"
+		// first would let a sensitive tool's malformed result through unchanged.
+		stored, oneTime = redactResult(rawOut, sensitive)
+		if strings.TrimSpace(rawOut) == "" {
+			oneTime = false // nothing was shown, so there is nothing to copy
+		}
 	}
 	row.Result = stored
 	_ = r.store.UpdateToolCall(row)

@@ -167,3 +167,23 @@ func TestRedactResult(t *testing.T) {
 		})
 	}
 }
+
+// An empty dispatcher result is normalized to null for display, but a sensitive
+// tool must still fail closed instead of storing that null.
+func TestSensitiveEmptyResultFailsClosed(t *testing.T) {
+	st := &idStore{}
+	empty := func(context.Context, string, json.RawMessage) (json.RawMessage, error) { return nil, nil }
+	r := New(nil, []Tool{mintingTool("create_api_key", "key"), readOnlyTool("list_functions")}, empty, st, Config{ApprovalPolicy: "auto"})
+	sink := &captureSink{}
+	r.processToolCalls(context.Background(), sink, "c", "m", []llm.ToolCall{
+		{ID: "1", Name: "create_api_key", Arguments: `{}`}, {ID: "2", Name: "list_functions", Arguments: `{}`}})
+	if got := st.toolCalls[0].Result; got != `"`+RedactedPlaceholder+`"` {
+		t.Fatalf("sensitive empty result stored as %q", got)
+	}
+	if sink.frames[0]["one_time"] != nil {
+		t.Fatal("empty result must not advertise a one-time value")
+	}
+	if st.toolCalls[1].Result != "null" {
+		t.Fatalf("ordinary empty result changed: %q", st.toolCalls[1].Result)
+	}
+}
