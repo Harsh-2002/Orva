@@ -104,6 +104,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("/fn/{id}", invoke.ServeManagedHTTP)
 		mux.HandleFunc("/fn/{id}/{rest...}", invoke.ServeManagedHTTP)
 	}
+	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service
 	if publication != nil {
@@ -184,6 +185,30 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		}
 	}
 	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, managedActivityMiddleware(db, ops.Hub, dispatch))), nil
+}
+
+// mountManagedExecutions mounts execution history, captured requests and
+// replay. Reads need read; deletion and replay need admin. Replay dispatches
+// only through the managed pool and re-checks the current Factory version.
+func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *registry.Registry, manager *pool.Manager,
+	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
+) {
+	exec := &handlers.ExecutionHandler{DB: db}
+	mux.HandleFunc("GET /api/v1/executions", requireManagedOperator(db, false, exec.List))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}", requireManagedOperator(db, false, exec.Get))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", requireManagedOperator(db, false, exec.GetLogs))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}/request", requireManagedOperator(db, false, exec.GetRequest))
+	mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", requireManagedOperator(db, true, exec.Delete))
+	mux.HandleFunc("POST /api/v1/executions/bulk-delete", requireManagedOperator(db, true, exec.BulkDelete))
+	if invoke == nil {
+		return
+	}
+	replay := &handlers.ReplayHandler{DB: db, Registry: reg, Pool: manager, Metrics: invoke.Metrics,
+		SDKAuth: invoke.Proxy.SDKAuth, Managed: true}
+	if ops.Hub != nil {
+		replay.PublishEvent = ops.Hub.Publish
+	}
+	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, true, replay.Replay))
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,

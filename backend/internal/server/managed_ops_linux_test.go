@@ -128,3 +128,88 @@ func TestManagedRouterWritesActivityForAuthenticatedRequests(t *testing.T) {
 		t.Fatal("an unauthenticated managed request left no anonymous activity row")
 	}
 }
+
+func (f *managedOpsFixture) seedExecution(withCapture bool) string {
+	f.t.Helper()
+	id := ids.New()
+	managedMust(f.t, f.db.InsertExecutionFinal(&database.Execution{ID: id, FunctionID: f.owner, Status: "success"}, 3, 200, "", 2))
+	managedMust(f.t, f.db.InsertExecutionLog(&database.ExecutionLog{ExecutionID: id, FunctionID: f.owner, Stderr: "boom\n"}))
+	if withCapture {
+		f.db.AsyncInsertExecutionRequest(&database.ExecutionRequest{ExecutionID: id, FunctionID: f.owner, Method: "POST",
+			Path: "/", HeadersJSON: "{}", Body: []byte(`{"a":1}`), CapturedAt: time.Now().UnixMilli()})
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := f.db.GetExecutionRequest(id); err == nil {
+				return id
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		f.t.Fatal("captured request was not persisted")
+	}
+	return id
+}
+
+func TestManagedExecutionsAuthorityAndDeletion(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	reader, _ := f.key("reader", `["read"]`)
+	writer, _ := f.key("writer", `["write"]`)
+	admin, _ := f.key("admin", `["read","write","admin"]`)
+	revoked, revokedID := f.key("revoked", `["read","write","admin"]`)
+	id := f.seedExecution(true)
+	base := "/api/v1/executions"
+
+	f.expect(http.MethodGet, base, "", "", http.StatusUnauthorized)
+	for _, path := range []string{base, base + "/" + id, base + "/" + id + "/logs", base + "/" + id + "/request"} {
+		f.expect(http.MethodGet, path, reader, "", http.StatusOK)
+		f.expect(http.MethodGet, path, writer, "", http.StatusForbidden)
+	}
+	if body := f.expect(http.MethodGet, base+"/"+id+"/logs", reader, "", http.StatusOK).Body.String(); !strings.Contains(body, "boom") {
+		t.Fatalf("logs missing stderr: %s", body)
+	}
+	// Mutations need admin, not merely read.
+	f.expect(http.MethodDelete, base+"/"+id, reader, "", http.StatusForbidden)
+	f.expect(http.MethodPost, base+"/bulk-delete", reader, `{"ids":["`+id+`"]}`, http.StatusForbidden)
+	f.expect(http.MethodPost, base+"/"+id+"/replay", reader, "", http.StatusForbidden)
+
+	managedMust(t, f.db.DeleteAPIKey(revokedID))
+	f.expect(http.MethodGet, base, revoked, "", http.StatusUnauthorized)
+	f.expect(http.MethodDelete, base+"/"+id, revoked, "", http.StatusUnauthorized)
+
+	f.expect(http.MethodDelete, base+"/"+id, admin, "", http.StatusOK)
+	f.expect(http.MethodGet, base+"/"+id, admin, "", http.StatusNotFound)
+	f.expect(http.MethodDelete, base+"/"+id, admin, "", http.StatusNotFound)
+	a, b := f.seedExecution(false), f.seedExecution(false)
+	rec := f.expect(http.MethodPost, base+"/bulk-delete", admin, `{"ids":["`+a+`","`+b+`","missing"]}`, http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `"deleted":2`) || !strings.Contains(rec.Body.String(), `"not_found":1`) {
+		t.Fatalf("unexpected bulk delete result: %s", rec.Body.String())
+	}
+}
+
+func TestManagedReplayRefusesWithoutManagedAdmission(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	admin, _ := f.key("admin", `["read","write","admin"]`)
+	id := f.seedExecution(true)
+	replays := func() int {
+		rows, err := f.db.ListExecutions(database.ListExecutionsParams{FunctionID: f.owner, Limit: 100})
+		managedMust(t, err)
+		n := 0
+		for _, e := range rows.Executions {
+			if e.ReplayOf != nil {
+				n++
+			}
+		}
+		return n
+	}
+	// The fixture's manager has no installed Factory, so managed admission
+	// denies; replay must surface that rather than reach any legacy path.
+	rec := f.expect(http.MethodPost, "/api/v1/executions/"+id+"/replay", admin, "", http.StatusServiceUnavailable)
+	if !strings.Contains(rec.Body.String(), pool.ErrNoFunction.Error()) {
+		t.Fatalf("replay did not reach the managed missing-Factory guard: %s", rec.Body.String())
+	}
+	f.expect(http.MethodPost, "/api/v1/executions/"+ids.New()+"/replay", admin, "", http.StatusNotFound)
+	f.expect(http.MethodPost, "/api/v1/executions/"+f.seedExecution(false)+"/replay", admin, "", http.StatusNotFound)
+	time.Sleep(200 * time.Millisecond)
+	if replays() != 0 {
+		t.Fatal("a refused replay left an execution row")
+	}
+}

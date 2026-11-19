@@ -132,6 +132,8 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		return nil, err
 	}
 	reg := registry.New(db)
+	// Operators replay captured requests; without this the capture toggle is never read.
+	proxy.LoadCaptureConfig(db)
 	spawnReady := &atomic.Bool{}
 	runtime := newManagedRuntime(db, reg, authority, sm, pool.SandboxTemplate{
 		DataDir: in.dataDir, NsjailBin: in.nsjail, DefaultSeccomp: "default", ManagedDomain: assets.Domain,

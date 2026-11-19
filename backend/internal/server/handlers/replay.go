@@ -14,6 +14,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/executionlogs"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
+	"github.com/Harsh-2002/Orva/backend/internal/proxy"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
@@ -34,6 +35,12 @@ type ReplayHandler struct {
 	Pool     *pool.Manager
 	Metrics  *metrics.Metrics
 	SDKAuth  *sdkauth.Authenticator
+
+	// Managed requires the pool to be a managed Manager and re-checks, on the
+	// acquired worker, that the Factory serving it is the current function
+	// version; it takes the timeout from that Factory. A pool without managed
+	// resources is refused rather than served as a legacy pool.
+	Managed bool
 
 	// PublishEvent fans the new execution out to the SSE hub so the
 	// dashboard's InvocationsLog prepends the replay row without polling.
@@ -181,10 +188,25 @@ func (h *ReplayHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
+	if h.Managed {
+		facts, managed := acq.ManagedResources()
+		if !managed {
+			respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE",
+				"managed replay requires a managed worker pool", reqID)
+			return
+		}
+		if !h.Pool.AcceptsManagedVersion(acq, fn.Version) {
+			status, opts := invokeError(proxy.ErrInvocationVersionChanged, fn, reqID)
+			respond.ErrorWithDetail(w, status, opts)
+			return
+		}
+		timeout = facts.Timeout
+		rebuiltHeaders["x-orva-timeout-ms"] = strconv.FormatInt(timeout.Milliseconds(), 10)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 
 	event := adapterRequest{
 		Method:  captured.Method,

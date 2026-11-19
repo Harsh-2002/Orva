@@ -264,6 +264,70 @@ func TestManagedServingLive(t *testing.T) {
 			invoke("allowed:changed")
 		})
 	}
+	t.Run("executions-replay", func(t *testing.T) {
+		var original string
+		deadline := time.Now().Add(10 * time.Second)
+		for original == "" && time.Now().Before(deadline) {
+			rows, err := db.ListExecutions(database.ListExecutionsParams{FunctionID: node.ID, Limit: 50})
+			managedMust(t, err)
+			for _, row := range rows.Executions {
+				if _, err := db.GetExecutionRequest(row.ID); err == nil {
+					original = row.ID
+					break
+				}
+			}
+			if original == "" {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		if original == "" {
+			t.Fatal("no managed invocation left a captured request")
+		}
+		replay := func(want int) *http.Response {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, listener.URL+"/api/v1/executions/"+original+"/replay", nil)
+			managedMust(t, err)
+			req.Header.Set("X-Orva-API-Key", fixtureKey)
+			res, err := listener.Client().Do(req)
+			managedMust(t, err)
+			defer res.Body.Close()
+			io.Copy(io.Discard, res.Body)
+			if res.StatusCode != want {
+				t.Fatalf("replay: got %d want %d", res.StatusCode, want)
+			}
+			return res
+		}
+		res := replay(200)
+		replayed := res.Header.Get("X-Orva-Execution-ID")
+		if replayed == "" || res.Header.Get("X-Orva-Replay-Of") != original {
+			t.Fatal("replay did not report the new execution it created")
+		}
+		deadline = time.Now().Add(10 * time.Second)
+		for {
+			row, err := db.GetExecution(replayed)
+			if err == nil {
+				if row.Trigger != "replay" || row.ReplayOf == nil || *row.ReplayOf != original {
+					t.Fatalf("replay row not linked to its original: %+v", row)
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("replay execution row was not recorded")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		// A request admitted against a Factory whose version no longer matches the
+		// registry is refused, never served by the stale Factory.
+		reg := service.service.runtime.invoke.Registry
+		current, err := reg.Get(node.ID)
+		managedMust(t, err)
+		stale := current.Clone()
+		stale.Version++
+		reg.CacheCommitted(stale)
+		replay(http.StatusConflict)
+		reg.CacheCommitted(current)
+		replay(200)
+	})
 	t.Run("external-mcp-catalog", func(t *testing.T) {
 		body := call(t, http.MethodPost, "/mcp", map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, 200)
 		if !strings.Contains(string(body), `"name":"revoke_iam_policy"`) || strings.Contains(string(body), `"name":"update_function"`) {
