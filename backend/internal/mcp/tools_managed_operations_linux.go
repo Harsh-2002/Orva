@@ -25,6 +25,7 @@ func registerManagedOperationTools(rc *regCtx) {
 	registerTraceTools(rc)
 	registerSystemOpsTools(rc)
 	registerKeyTools(rc)
+	registerKVTools(rc)
 	registerManagedActivityTool(rc)
 	registerManagedChannelTools(rc)
 }

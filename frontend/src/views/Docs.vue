@@ -775,7 +775,7 @@
         <code class="doc-chip">cacheScope: "private"</code> because the tool
         list depends on the caller. On a standard server, a full-permission
         key lists 73 tools and a read-only key lists 28. Channel tokens list
-        only their bundled functions. The managed server lists 69 and 23
+        only their bundled functions. The managed server lists 75 and 25
         tools respectively and dispatches channel calls through the managed pool.
         Use <code class="doc-chip">tools/list</code> for your exact count.
         <code class="doc-chip">ttlMs</code> is

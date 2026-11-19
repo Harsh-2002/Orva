@@ -52,10 +52,12 @@ unreleased range, and the sections below as the record for everything before it.
   dispatches through managed admission. Admission is not approval: an installed
   but unreviewed function still runs its handler (protected SDK operations stay
   denied until review), so bundle only functions agents should be able to run.
-  The managed MCP and Chat catalog grows from 47/13 to 69/23 tools
+  The managed MCP and Chat catalog grows from 47/13 to 75/25 tools
   (all-permissions / read-only key); it adds `replay_execution`,
   `list_activity` and read-only `list_channels` and `get_channel`, and now
-  includes the API-key tools. The normal catalog is unchanged (73/28).
+  includes the API-key and operator KV tools. Managed KV tools recheck their
+  required read or write tier on every call. The normal catalog is unchanged
+  (73/28).
 - Managed MCP and Chat can list, save and delete saved request fixtures. Each
   call rechecks live `read` or `write` permission. Running a fixture through
   `test_function_with_fixture` remains unavailable in managed mode.
@@ -69,7 +71,7 @@ unreleased range, and the sections below as the record for everything before it.
   failed before any response was written, instead of an empty `200` result.
   This applies to the normal server too.
 - Not yet on the managed composition: pool and firewall configuration, secrets,
-  KV, webhooks, runtimes and syscalls, account password change, and the
+  fixture execution, webhooks, account password change, and the
   OAuth authorization server. `GET /api/v1/system/storage` reports the plain data
   directory only, not sealed artifact stores.
 
