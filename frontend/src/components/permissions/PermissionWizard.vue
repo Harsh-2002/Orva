@@ -119,7 +119,6 @@
           </span>
         </label>
       </fieldset>
-
     </div>
 
     <!-- 3. Resources -->
