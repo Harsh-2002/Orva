@@ -18,6 +18,7 @@ import (
 
 const (
 	MarkerName   = ".orva-serving-mode"
+	enrollIntent = ".orva-enrollment-intent"
 	Env          = "ORVA_SERVING_MODE"
 	Legacy       = "legacy"
 	Provisioning = "provisioning"
@@ -53,6 +54,15 @@ type Lock struct {
 
 // Acquire takes the existing recovery lock before resolving any serving mode.
 func Acquire(dataDir string) (*Lock, error) {
+	return acquireLayout(dataDir, true)
+}
+
+// AcquireEnrollment never creates the lock, even on a dry run of an old layout.
+func AcquireEnrollment(dataDir string) (*Lock, error) {
+	return acquireLayout(dataDir, false)
+}
+
+func acquireLayout(dataDir string, create bool) (*Lock, error) {
 	abs, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, err
@@ -88,7 +98,7 @@ func Acquire(dataDir string) (*Lock, error) {
 	} else if st != nil {
 		return fail(errors.New("use the instance data directory, not its managed subdirectory"))
 	}
-	file, err := flock(fd, true)
+	file, err := flock(fd, true, create)
 	if err != nil {
 		return fail(err)
 	}
@@ -113,7 +123,7 @@ func AcquireLegacy(dataDir string) (*os.File, error) {
 }
 
 func lockLegacy(fd int) (*os.File, error) {
-	file, err := flock(fd, false)
+	file, err := flock(fd, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +136,7 @@ func lockLegacy(fd int) (*os.File, error) {
 }
 
 func checkLegacyStart(fd int) error {
-	for _, name := range []string{managedGuard, MarkerName, dbName} {
+	for _, name := range []string{managedGuard, MarkerName, enrollIntent, dbName} {
 		st, err := statAt(fd, name)
 		if err != nil {
 			return fmt.Errorf("check %s: %w", name, err)
@@ -139,6 +149,8 @@ func checkLegacyStart(fd int) error {
 			return errors.New("use the instance data directory, not its managed subdirectory")
 		case name == MarkerName:
 			return errors.New("legacy serve requires no .orva-serving-mode file")
+		case name == enrollIntent:
+			return errEnrollmentIncomplete
 		case st.Mode&unix.S_IFMT == unix.S_IFDIR:
 			return errors.New("legacy SQLite path orva.db is a directory; leaving the tombstone intact")
 		}
@@ -146,8 +158,12 @@ func checkLegacyStart(fd int) error {
 	return (Record{Mode: Legacy}).CheckEnvironment()
 }
 
-func flock(fd int, strict bool) (*os.File, error) {
-	lfd, err := unix.Openat(fd, lockName, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0600)
+func flock(fd int, strict, create bool) (*os.File, error) {
+	flags := unix.O_RDWR | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
+	if create {
+		flags |= unix.O_CREAT
+	}
+	lfd, err := unix.Openat(fd, lockName, flags, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open data-directory lock: %w", err)
 	}
@@ -198,6 +214,15 @@ func controlFile(fd int, max int64) error {
 }
 
 func (l *Lock) Read() (Record, error) {
+	if st, err := statAt(int(l.root.Fd()), enrollIntent); err != nil {
+		return Record{}, err
+	} else if st != nil {
+		return Record{}, errEnrollmentIncomplete
+	}
+	return l.readMode()
+}
+
+func (l *Lock) readMode() (Record, error) {
 	fd, err := unix.Openat(int(l.root.Fd()), MarkerName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return Record{Mode: Legacy}, nil

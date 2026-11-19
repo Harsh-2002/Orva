@@ -96,10 +96,17 @@ func (l *Lock) CheckProvisioning() error {
 }
 
 func (l *Lock) relocate(r Record, step func(string) error) error {
+	if _, err := l.Read(); err != nil {
+		return err
+	}
+	return l.relocateLocked(r, step)
+}
+
+func (l *Lock) relocateLocked(r Record, step func(string) error) error {
 	if !r.valid() || r.Mode != Managed {
 		return errors.New("invalid managed relocation identity")
 	}
-	current, err := l.Read()
+	current, err := l.readMode()
 	if err != nil {
 		return err
 	}
