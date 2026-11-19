@@ -29,6 +29,12 @@ unreleased range, and the sections below as the record for everything before it.
   storage and vacuum, API keys, OAuth connected apps, browser sessions and
   channels, and dashboard Chat. Health and `/metrics` stay unauthenticated,
   as before.
+- The dashboard function editor works in managed mode: secret names load from a
+  read-only names route, and secret changes and Deploy's settings and
+  environment save go through the managed configuration routes with fresh
+  expectations (a concurrent change stops with a reload message). Deploy saves
+  settings only when they changed; the description is not managed
+  configuration and is not saved.
 - Managed routes require exactly the permission the normal server requires:
   `read` for GET, `write` for other methods, `admin` for keys, channels, the AI
   assistant, backup, storage and vacuum. Deployment publication, creation,

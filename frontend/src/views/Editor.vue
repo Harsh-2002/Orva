@@ -2866,7 +2866,7 @@ const publishManagedSettings = async (settings, environment) => {
       settings,
     })
   } catch (err) {
-    throw new Error(managedConfigurationError(err, 'Failed to update configuration', 'An administrator must change the configuration.'))
+    throw new Error(managedConfigurationError(err, 'Failed to update configuration', 'An administrator must change the configuration.'), { cause: err })
   }
 }
 
