@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  69 and 23 respectively. Channel credentials are accepted at `/mcp` and expose
+  75 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -58,6 +58,8 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
 | Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
 | Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| Operator KV | `GET /api/v1/functions/{fn_id}/kv`, `GET .../kv/{key}` | read |
+| | `PUT/DELETE .../kv/{key}`, `POST .../kv/{key}/incr`, `POST .../kv/{key}/cas` | write |
 | Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
@@ -104,6 +106,11 @@ are not sent and these routes do not enable outbound webhook egress.
   tokens are never returned). `invoke_function` and `list_runtimes` are not part
   of it. A failed invocation that wrote no response is now reported as an error
   rather than an empty `200`, in every catalog.
+- **Operator KV.** External MCP and Chat share `kv_get` and `kv_list` (`read`)
+  and `kv_put`, `kv_delete`, `kv_incr` and `kv_cas` (`write`). Managed calls
+  recheck the operator's current credential and required tier at tool entry.
+  These tools operate on stored data by function name or UUID, including for
+  inactive functions. They do not run function code or grant SDK permissions.
 
 ### Managed channels
 

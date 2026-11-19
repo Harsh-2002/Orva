@@ -117,6 +117,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
 	mountManagedAccess(mux, db, ops)
+	mountManagedOperatorKV(mux, db, reg, ops)
 	mountManagedWebhooks(mux, db, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service

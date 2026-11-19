@@ -14,6 +14,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Changed
+
+- Dashboard helper text is shorter and fills its row instead of wrapping at a
+  narrow fixed width, and the Docs page sits in one centered reading column.
+  The stale "scratch hosts only" note about named permissions is replaced with
+  a short summary of how policies, versions and rollout work in managed mode.
+
 ### Added
 
 - Managed deployments build npm and pip dependencies and compile TypeScript in
@@ -45,10 +52,12 @@ unreleased range, and the sections below as the record for everything before it.
   dispatches through managed admission. Admission is not approval: an installed
   but unreviewed function still runs its handler (protected SDK operations stay
   denied until review), so bundle only functions agents should be able to run.
-  The managed MCP and Chat catalog grows from 47/13 to 69/23 tools
+  The managed MCP and Chat catalog grows from 47/13 to 75/25 tools
   (all-permissions / read-only key); it adds `replay_execution`,
   `list_activity` and read-only `list_channels` and `get_channel`, and now
-  includes the API-key tools. The normal catalog is unchanged (73/28).
+  includes the API-key and operator KV tools. Managed KV tools recheck their
+  required read or write tier on every call. The normal catalog is unchanged
+  (73/28).
 - Managed MCP and Chat can list, save and delete saved request fixtures. Each
   call rechecks live `read` or `write` permission. Running a fixture through
   `test_function_with_fixture` remains unavailable in managed mode.
@@ -65,7 +74,7 @@ unreleased range, and the sections below as the record for everything before it.
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
 - Not yet on the managed composition: pool and firewall configuration, secrets,
-  KV, fixture execution, outbound webhook delivery, account password change, and
+  fixture execution, outbound webhook delivery, account password change, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 

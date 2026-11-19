@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-12 pb-16">
+  <div class="docs-page space-y-12 pb-16">
     <!-- Page heading, section shortcuts, and a full-reference copy action. -->
     <header class="docs-hero">
       <div class="docs-hero-content">
@@ -55,21 +55,13 @@
 
     <section class="space-y-3">
       <h2 class="text-lg font-semibold text-foreground-strong">
-        Staged named permissions
+        Function permissions
       </h2>
-      <p class="max-w-prose text-sm text-foreground-muted">
-        Named-policy management is available only in explicit scratch hosts, not
-        normal production routing. Versions are immutable, attachments stay pinned,
-        and effective access is read-only. Inline edits never replace attached
-        sources. Detach or revoke can leave overlapping grants from other sources.
-        Consult the source repository's IAM_MANAGEMENT contract before using the
-        staged CLI or optional MCP tools.
-        Optional configuration publication also remains scratch-only: environment,
-        settings and secret changes first publish review-required deny. Explicit
-        new Factory installation and review are separate. Configuration uses the
-        installed code and runtime pair, including after queued deployment
-        installation. Old injected secrets cannot be recalled. No normal routes
-        or tools are activated.
+      <p class="measure text-sm text-foreground-muted">
+        On a managed server, each function can only use what its permissions
+        allow. Grant access inline on the function's Permissions page, or attach
+        a reusable policy from Policies. Editing a policy creates a new version;
+        attached functions keep theirs until you roll it out.
       </p>
     </section>
 
@@ -471,7 +463,7 @@
         <div class="doc-microlabel">
           Background jobs: jobs.enqueue()
         </div>
-        <details class="text-sm text-foreground-muted max-w-prose">
+        <details class="text-sm text-foreground-muted measure-long">
           <summary>Internal IAM jobs fixture (not active in normal serving)</summary>
           <p class="mt-2">
             Origin and creator are host-owned. Current grants and target acceptance
@@ -481,7 +473,7 @@
             Cron, adoption and restore are not enabled by this fixture.
           </p>
         </details>
-        <details class="text-sm text-foreground-muted max-w-prose">
+        <details class="text-sm text-foreground-muted measure-long">
           <summary>Separate cron controls fixture (not active in normal serving)</summary>
           <p class="mt-2">
             Schedule source and authority are host-owned. Explicit admin Resume
@@ -783,7 +775,7 @@
         <code class="doc-chip">cacheScope: "private"</code> because the tool
         list depends on the caller. On a standard server, a full-permission
         key lists 73 tools and a read-only key lists 28. Channel tokens list
-        only their bundled functions. The managed server lists 69 and 23
+        only their bundled functions. The managed server lists 75 and 25
         tools respectively and dispatches channel calls through the managed pool.
         Use <code class="doc-chip">tools/list</code> for your exact count.
         <code class="doc-chip">ttlMs</code> is
@@ -2506,6 +2498,13 @@ const Callout = defineComponent({
 </script>
 
 <style>
+/* One reading column for the whole page so a wide display does not leave the
+   content pinned to the left edge. */
+.docs-page {
+  width: 100%;
+  max-width: 1140px;
+  margin-inline: auto;
+}
 /* Unscoped because CodeBlock / TabbedCode / Callout and the four
    diagrams are render-fn components inside this SFC, and a scoped
    style's attribute selector never reaches nodes a render function
@@ -3090,7 +3089,7 @@ const Callout = defineComponent({
   font-size: 13px;
   line-height: 1.6;
   color: var(--color-foreground-muted);
-  max-width: 64ch;
+  text-wrap: pretty;
   margin: 0.35rem 0 0;
 }
 

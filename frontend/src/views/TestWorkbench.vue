@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Test
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Send a request to
           <router-link
             :to="`/functions/${fnName}`"
@@ -302,7 +302,7 @@
               v-else
               class="px-4 py-4 text-xs text-foreground-muted leading-snug"
             >
-              Nothing saved yet. Set a request up above and choose Save current to replay it later, or to hand its name to the MCP test_function_with_fixture tool.
+              Nothing saved yet. Save the current request to replay it later or run it with test_function_with_fixture.
             </p>
           </section>
         </div>
@@ -540,7 +540,7 @@
               class="px-4 py-4 space-y-2"
             >
               <p class="text-xs text-foreground-muted leading-snug">
-                No runs yet. History keeps the last 20 of this browser session, so you can hold one run against the one before it. It is not stored on the server.
+                No runs yet. Keeps the last 20 of this browser session; not stored on the server.
               </p>
               <router-link
                 to="/invocations"

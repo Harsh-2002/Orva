@@ -5,10 +5,9 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Routes
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
-          Public paths that invoke one function. Every change is checked against
-          the mapping and owner authority it was read from, so a concurrent edit
-          fails instead of overwriting it.
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
+          Public paths that invoke one function. A concurrent change fails
+          instead of overwriting.
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -44,8 +43,7 @@
       class="rounded-lg border border-border bg-surface p-3 text-sm text-foreground-muted"
       role="status"
     >
-      Read-only. Creating, rebinding and deleting routes needs current write
-      access on this server.
+      Read-only. Changing routes needs current write access.
     </p>
 
     <div
@@ -256,7 +254,7 @@
           >
           <p class="text-xs text-foreground-muted mt-1.5">
             Prefix routes end in <code class="font-mono">/*</code>. A path cannot be
-            renamed in place; delete it and create the new one.
+            renamed; delete it and create the new one.
           </p>
         </div>
         <div>
@@ -385,7 +383,7 @@ async function refresh() {
   } catch (error) {
     if (error?.forbidden) {
       denied.value = true
-      loadError.value = 'Reading routes needs read access on this server.'
+      loadError.value = 'Reading routes needs read access.'
     } else {
       loadError.value = error?.message || 'Request failed'
     }

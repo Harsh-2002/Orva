@@ -25,7 +25,7 @@
       role="status"
       class="text-sm text-warning-fg"
     >
-      History or capacity is stale or unknown. Refresh before reviewing changes.
+      History or capacity is stale or unknown. Refresh before reviewing.
     </p>
     <p
       v-if="loading"
@@ -54,7 +54,7 @@
     >
       <p>Canonical metadata: <span class="font-mono">{{ capacity.rows_used }} / {{ capacity.max_rows }}</span> rows and <span class="font-mono">{{ capacity.bytes_used }} / {{ capacity.max_bytes }}</span> bytes used.</p>
       <p>Reserved within those caps: <span class="font-mono">{{ capacity.rows_reserved }}</span> rows, <span class="font-mono">{{ capacity.bytes_reserved }}</span> bytes. Hard limits: 100,000 rows / 64 MiB.</p>
-      <p>90 days means purge eligibility, not automatic expiry. Reserved entries cannot purge. {{ capacity.can_manage ? 'Management requires a live server authorization check.' : 'Read-only access. Management is unavailable.' }}</p>
+      <p>90 days means purge eligibility, not automatic expiry. Reserved entries cannot purge. {{ capacity.can_manage ? 'Management needs live server authorization.' : 'Read-only access. Management is unavailable.' }}</p>
     </div>
     <ul class="divide-y divide-border">
       <li
@@ -188,7 +188,7 @@
             New operator-origin {{ selected.kind }}
           </h3>
           <p class="text-sm text-foreground-muted">
-            No original payload is retained. Choose a new target UUID explicitly; matching names never bind automatically.
+            No original payload is retained. Choose a new target UUID; names never bind automatically.
           </p>
           <FilterSelect
             v-model="draft.target"
@@ -264,7 +264,7 @@
           Confirm new operator work
         </h3>
         <p class="text-sm text-foreground-muted break-all">
-          Source: {{ selected.kind }} {{ selected.id }}. New target UUID: {{ draft.target }}. A new work ID and old-to-new audit will be created. Original authority and work are not restored.
+          Source: {{ selected.kind }} {{ selected.id }}. New target UUID: {{ draft.target }}. A new work ID and old-to-new audit are created. Original authority and work are not restored.
         </p>
         <pre class="text-xs font-mono whitespace-pre-wrap break-all text-foreground-strong">{{ reviewed }}</pre>
         <Button
