@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
 	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
@@ -120,6 +122,7 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 		return err
 	}
 	defer func() { err = errors.Join(err, snapshot.Close()) }()
+	defer offlineBuildPolicy(ctx, build, snapshot)()
 	for _, fn := range plan.Functions {
 		e := database.LegacyEnrollmentFunction{
 			ID: fn.ID, Generation: ids.New(), LegacyHash: fn.CodeHash, Revision: fn.Revision,
@@ -181,6 +184,33 @@ func managedRebuilder(ctx context.Context, root, nsjail string, assets artifactf
 	return build, dispose, nil
 }
 
+func offlineBuildPolicy(ctx context.Context, build *builder.Builder, db *database.Database) func() {
+	build.DB = db
+	fw := firewall.NewManager(db, build.DataDir)
+	var mu sync.Mutex
+	started, closed := false, false
+	build.SetEgressPolicy(func() (string, string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if closed {
+			return "", "", firewall.ErrPolicyUnavailable
+		}
+		if !started {
+			fw.Start(ctx)
+			started = true
+		}
+		return fw.EgressPolicy()
+	})
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		closed = true
+		if started {
+			_ = fw.Stop(context.Background())
+		}
+	}
+}
+
 func buildEnrollmentFunction(ctx context.Context, root, scratch string, build *builder.Builder, assets artifactfs.OwnerBindings,
 	snapshot *database.Database, entry enrollmentFunction, e *database.LegacyEnrollmentFunction,
 ) error {
@@ -192,12 +222,16 @@ func buildEnrollmentFunction(ctx context.Context, root, scratch string, build *b
 	if err != nil {
 		return err
 	}
+	fn.RunEntrypoint = ""
+	if built.Entrypoint != fn.Entrypoint {
+		fn.RunEntrypoint = built.Entrypoint
+	}
 	// Keep the legacy deployment hash for operator history; the independently
 	// verified concrete artifacts have their own generations and manifest digests.
 	e.Build = database.WorkloadBuildOutput{
 		CodeGeneration: built.CodeArtifact.Generation, CodeDigest: built.CodeArtifact.Digest,
 		RuntimeGeneration: built.RuntimeArtifact.Generation, RuntimeDigest: built.RuntimeArtifact.Digest,
-		CodeHash: e.LegacyHash, Entrypoint: built.Entrypoint,
+		CodeHash: e.LegacyHash, Entrypoint: built.Entrypoint, SourceArchiveSHA256: built.SourceArchiveSHA256,
 	}
 	rows, err := snapshot.ListSecrets(fn.ID)
 	if err != nil {

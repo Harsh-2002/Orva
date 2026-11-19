@@ -126,8 +126,12 @@ No serving caller enables this path. Runtime pinning does not fence build
 descendants or seal/approve code output; see `builder/README.md`.
 Separate internal managed-output mode owns fresh staging and an exclusive build
 Domain, fencing before inspection, Seal or Abort. Failed cleanup retains bounded
-ownership for retry. Only plain no-dependency Node/Python is qualified; no
-serving caller, durable publication, current authority or recovery is enabled.
+ownership for retry. Managed builds run npm and pip against the compiled
+egress policy and run tsc without network, inside the same owned build Domain.
+The complete output is verified after fencing. The private authored archive
+is attached only after fencing and is bound by digest to the deployment for
+portable rebuilds. TypeScript records the compiler output in `run_entrypoint`
+without changing `entrypoint`. Host build hooks remain unsupported.
 Managed output can use a concrete ParentDomain instead of raw budget/path
 provisioning. Build domains then inherit ancestor entry gates; root fencing
 blocks later starts through retained child handles. This is not boot wiring
@@ -343,6 +347,36 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 ## Database
 
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
+
+`scrubChatCredentials` (`ai_credential_scrub.go`, run from `Migrate()` after the
+orphan reclaim) is the third explicit rewrite carve-out, best effort: one-shot
+behind `chat_credential_scrub_done`, hard-bounded per boot on rows read and
+rewritten (`chatScrubMaxScanned`/`chatScrubMaxRewritten`, checked before every
+read and write; point re-reads and minting rows filtered in Go count). A bound
+commits the work done and persists the minting cursor plus
+`chat_credential_scrub_pos` (conversation, phase m/t/title/f, rowid) so the next
+boot resumes without rescans. Per conversation the order is messages, tool calls,
+title, then the batch's own minting rows and their tool messages, which hold the
+only copy of the values (never persisted) and are therefore rewritten together in
+one step: if the budget cannot cover them all the pass stops before touching any
+and the next boot, which resumes at that phase, always finishes it. That is the
+one place a boot may exceed the bounds, by at most 2 × `chatScrubBatchRows` rows.
+Rule: never change what cannot be proven. A credential field outside the minting
+audit row (the source) is redacted only if its value equals a credential taken
+from the conversation's succeeded minting calls (`onetime.RedactMatching`, never
+by field name). The call's tool message is found by call id (first after the
+requesting assistant message) for that value-verified redaction; a malformed
+result's tool message is replaced whole only on unambiguous correlation (one audit
+row with the id in the turn, one tool message with it before the next assistant
+message, content not valid JSON), else skipped and counted
+(`scrubStats.ambiguous`, INFO log). Content equality only without a call id.
+Values come only from succeeded calls of the tools in `onetime.Fields`; a failed
+call is never replaced wholesale, but copies of a value inside it are scrubbed.
+JSON columns are rewritten through decoded string leaves (unparseable ones are
+left alone), plain text only on token boundaries; each row is re-read just before
+its write, and every row loop checks `rows.Err()`. Candidates use `idx_ai_tc_tool`
+and keyset ranges. `onetime` is the leaf package shared by that migration,
+`ai/agent` redaction and the MCP registrations.
 
 `KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM
 path, never serving/operator routes yet. It queries case-sensitive literal UTF-8

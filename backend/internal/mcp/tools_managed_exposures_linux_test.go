@@ -19,6 +19,7 @@ import (
 
 	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -295,7 +296,9 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 	f := newManagedExposureFixture(t)
 	all := permSet{permRead: true, permWrite: true, permAdmin: true}
 	legacy := Deps{DB: f.db, Registry: f.registry}
-	want := map[string][]string{"create_api_key": {"key"}, "create_webhook": {"secret"}, "create_inbound_webhook": {"secret"}}
+	// The boot-time history scrub reads the same list, so a minting tool added
+	// here without a Fields entry (or the reverse) fails this test.
+	want := onetime.Fields
 	for label, deps := range map[string]Deps{"legacy": legacy, "managed": f.deps} {
 		reg := BuildAgentRegistry(deps, all)
 		for _, tool := range reg.Tools() {
@@ -306,6 +309,11 @@ func TestOneTimeCredentialToolsAreMarked(t *testing.T) {
 			} else if len(tool.Sensitive) != 0 {
 				t.Fatalf("%s %s unexpectedly sensitive", label, tool.Name)
 			}
+		}
+	}
+	for name := range want {
+		if BuildAgentRegistry(legacy, all).Get(name) == nil {
+			t.Fatalf("onetime.Fields lists %s but no such tool is registered", name)
 		}
 	}
 	if BuildAgentRegistry(f.deps, all).Get("create_api_key") != nil {

@@ -4,6 +4,7 @@
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -46,12 +47,36 @@ def handler(event, context):
             return {"statusCode": 200, "body": "IAM_DENIED" if denied else "uncategorized"}
     return {"statusCode": 200, "body": "python-current"}
 """
+DEPENDENCIES = {
+    "npm": ("node", "handler.js", {
+        "handler.js": """const semver = require('semver');
+exports.handler = () => ({statusCode: 200, body: semver.clean('v7.6.3')});
+""",
+        "package.json": '{"dependencies":{"semver":"7.6.3"}}',
+    }, b"7.6.3", ""),
+    "pip": ("python", "handler.py", {
+        "handler.py": """import idna
+def handler(event):
+    return {"statusCode": 200, "body": idna.encode("bücher.de").decode()}
+""",
+        "requirements.txt": "idna==3.10\n",
+    }, b"xn--bcher-kva.de", ""),
+    "tsc": ("node", "handler.ts", {
+        "handler.ts": """export function handler() {
+  const body: string = 'tsc-built';
+  return {statusCode: 200, body};
+}
+""",
+        "package.json": '{"devDependencies":{"typescript":"5.9.3"}}',
+        "tsconfig.json": '{"compilerOptions":{"target":"ES2022","module":"CommonJS","outDir":"dist","strict":true},"files":["handler.ts"]}',
+    }, b"tsc-built", "dist/handler.js"),
+}
 EMPTY = '{"schema_version":1,"allow":[],"inbound":[]}'
 ADDR = "http://127.0.0.1:18443"
 
 
-def until(check, description):
-    deadline = time.monotonic() + 20
+def until(check, description, seconds=20):
+    deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
             if check():
@@ -87,6 +112,7 @@ def main():
            "ORVA_MANAGED_WITNESS_PATH": str(witness),
            "ORVA_MANAGED_WORKLOAD_PARENT": str(budget / "orva.workers")}
     key = None
+    dependency_cases = DEPENDENCIES if os.environ.get("ORVA_APPROVED_REGISTRIES") == "1" else {}
 
     def run(*args, mode="legacy", group=None, expect=0, log=None, host=None):
         argv = [binary, *args]
@@ -105,13 +131,13 @@ def main():
         )
         return result
 
-    def request(method, path, value=None, extra_headers=None):
+    def request(method, path, value=None, extra_headers=None, raw_body=None):
         headers = {"Content-Type": "application/json", **(extra_headers or {})}
         if key:
             headers["X-Orva-API-Key"] = key
-        body = json.dumps(value).encode() if value is not None else None
+        body = json.dumps(value).encode() if value is not None else raw_body
         try:
-            response = urlopen(Request(ADDR + path, method=method, headers=headers, data=body), timeout=8)
+            response = urlopen(Request(ADDR + path, method=method, headers=headers, data=body), timeout=30)
         except HTTPError as exc:
             response = exc
         with response:
@@ -122,16 +148,36 @@ def main():
         assert 200 <= code < 300, f"{method} {path}: HTTP {code}: {raw[:300]!r}"
         return json.loads(raw)
 
-    def deploy(fn, entry, code):
-        dep = api("POST", f"/api/v1/functions/{fn}/deploy-inline",
-                  {"filename": entry, "code": code})["deployment_id"]
+    def deploy(fn, entry, code, files=None, managed=False):
+        if files is None:
+            dep = api("POST", f"/api/v1/functions/{fn}/deploy-inline",
+                      {"filename": entry, "code": code})["deployment_id"]
+        else:
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w:gz", format=tarfile.GNU_FORMAT) as tar:
+                for name, value in files.items():
+                    raw = value.encode()
+                    info = tarfile.TarInfo(name)
+                    info.size, info.mode = len(raw), 0o644
+                    tar.addfile(info, io.BytesIO(raw))
+            boundary = "orva-enrollment-dependency-fixture"
+            body = (f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="code"; filename="code.tar.gz"\r\n'
+                    "Content-Type: application/gzip\r\n\r\n").encode()
+            status, response = request("POST", f"/api/v1/functions/{fn}/deploy",
+                                       extra_headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                                       raw_body=body + archive.getvalue() + f"\r\n--{boundary}--\r\n".encode())
+            assert status == 202, (status, response)
+            dep = json.loads(response)["deployment_id"]
 
         def built():
             row = api("GET", f"/api/v1/deployments/{dep}")
             assert row["status"] != "failed", f"legacy deployment failed: {row.get('error_message')}"
-            return row["status"] == "succeeded" and api("GET", f"/api/v1/functions/{fn}")["status"] == "active"
+            return row["status"] == "succeeded" and (managed or api("GET", f"/api/v1/functions/{fn}")["status"] == "active")
 
-        until(built, "legacy deployment")
+        until(built, "dependency deployment" if files else "legacy deployment", seconds=145 if files else 20)
+        if managed:
+            api("POST", f"/api/v1/deployments/{dep}/install")
         return dep
 
     def stop(proc):
@@ -156,6 +202,12 @@ def main():
         daemon = boot("legacy", budget, log)
         try:
             key = (data / ".admin-key").read_text().strip()
+            if dependency_cases:
+                dns = [words[1] for line in Path("/etc/resolv.conf").read_text().splitlines()
+                       if len(words := line.split()) == 2 and words[0] == "nameserver"
+                       and ipaddress.ip_address(words[1]).version == 4]
+                assert dns, "VM IPv4 DNS is required"
+                api("PUT", "/api/v1/firewall/dns", {"servers": dns, "search": "", "records": []})
             owners, old_bodies = {}, {}
             for lang, entry, code in (("node", "handler.js", NODE), ("python", "handler.py", PYTHON)):
                 fn = api("POST", "/api/v1/functions", {"name": f"enroll-{lang}", "runtime": lang,
@@ -169,6 +221,15 @@ def main():
                 status, body = request("GET", f"/fn/{fn}")
                 assert (status, body) == (200, f"{lang}-current".encode()), (status, body)
                 old_bodies[lang] = body
+            for name, (lang, entry, files, expected, run_entry) in dependency_cases.items():
+                fn = api("POST", "/api/v1/functions", {"name": f"enroll-{name}", "runtime": lang,
+                         "entrypoint": entry, "auth_mode": "none", "memory_mb": 256})["id"]
+                deploy(fn, entry, None, files)
+                assert request("GET", f"/fn/{fn}") == (200, expected), name
+                assert (api("GET", f"/api/v1/functions/{fn}").get("run_entrypoint") or "") == run_entry, name
+                owners[name] = fn
+                old_bodies[name] = expected
+                print(f"legacy {name}: deployed and invoked", flush=True)
             assert request("GET", f"/fn/{owners['node']}/probe") == (200, b"kv-allowed")
             excluded = api("POST", "/api/v1/functions", {"name": "enroll-draft", "runtime": "node",
                            "entrypoint": "handler.js", "auth_mode": "none"})["id"]
@@ -201,6 +262,11 @@ def main():
         try:
             for lang, fn in owners.items():
                 assert request("GET", f"/fn/{fn}") == (200, old_bodies[lang])
+                if lang in dependency_cases:
+                    row = api("GET", f"/api/v1/functions/{fn}")
+                    assert row["entrypoint"] == dependency_cases[lang][1], lang
+                    assert (row.get("run_entrypoint") or "") == dependency_cases[lang][4], lang
+                    print(f"enrolled {lang}: managed invocation returned the legacy result", flush=True)
             assert request("GET", f"/fn/{owners['node']}/probe") == (200, b"IAM_DENIED")
             assert request("GET", f"/fn/{excluded}")[0] == 409
         finally:
@@ -217,11 +283,27 @@ def main():
                           (excluded,)).fetchone() == (1,)
     print("managed Node and Python returned the same results; protected SDK write denied; only legacy SDK opt-in requires review")
 
+    if dependency_cases:
+        with (scratch / "managed-deploy.private.log").open("wb") as log:
+            daemon = boot("managed", budget / "orva.daemon", log)
+            try:
+                for name, (lang, entry, files, expected, run_entry) in dependency_cases.items():
+                    fn = api("POST", "/api/v1/functions", {"name": f"managed-{name}", "runtime": lang,
+                             "entrypoint": entry})["id"]
+                    deploy(fn, entry, None, files, managed=True)
+                    assert request("GET", f"/fn/{fn}") == (200, expected), name
+                    row = api("GET", f"/api/v1/functions/{fn}")
+                    assert row["entrypoint"] == entry and (row.get("run_entrypoint") or "") == run_entry, name
+                    assert api("GET", f"/api/v1/functions/{fn}/source")["code"] == files[entry], name
+                    owners[f"managed-{name}"], old_bodies[f"managed-{name}"] = fn, expected
+                    print(f"managed {name}: uploaded, built, installed and invoked", flush=True)
+            finally:
+                stop(daemon)
     if os.environ.get("ORVA_PORTABLE_VM_TEST") == "disposable-vm":
-        portable(run, boot, stop, request, api, data, witness, budget, owners)
+        portable(run, boot, stop, request, api, data, witness, budget, owners, old_bodies)
 
 
-def portable(run, boot, stop, request, api, data, witness, budget, owners):
+def portable(run, boot, stop, request, api, data, witness, budget, owners, old_bodies):
     scratch = data.parent
     b = scratch / "host-b"
     w = scratch / "witness-b" / "witness"
@@ -252,7 +334,7 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
     with (scratch / "portable-a.private.log").open("wb") as log:
         daemon = boot("managed", budget / "orva.daemon", log)
         try:
-            for fn in owners.values():
+            for fn in (owners["node"], owners["python"]):
                 perms = f"/api/v1/functions/{fn}/permissions"
                 api("PUT", perms, {"expected": approval(fn), "policy": {
                     "schema_version": 1, "allow": [{"actions": ["kv.put"],
@@ -278,10 +360,15 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
             stop(daemon)
     with tarfile.open(fileobj=io.BytesIO(archive.read_bytes()), mode="r:gz") as tar:
         manifest = json.load(tar.extractfile("manifest.json"))
-        assert manifest["format_version"] == 2 and len(manifest["deployment_sources"]) == 2
+        assert manifest["format_version"] == 2 and len(manifest["deployment_sources"]) == len(owners)
         assert set(tar.getnames()) == {"manifest.json", *manifest["files"]}
         assert all(name == "orva.db" or name in {"keys/master.key", "keys/admin.key"} or
                    (name.startswith("sources/") and name.endswith(".tar.gz")) for name in manifest["files"])
+        for name in manifest["deployment_sources"].values():
+            source = tar.extractfile(f"sources/{name}.tar.gz").read()
+            with tarfile.open(fileobj=io.BytesIO(source), mode="r:gz") as authored:
+                assert not any(p.startswith(("node_modules/", "dist/", "idna/")) or ".dist-info/" in p
+                               for p in authored.getnames())
     print("A: authorized SDK write, live route and signed webhook; v2 archive lists only the allowlisted files", flush=True)
 
     before = tree_hash(b)
@@ -299,8 +386,11 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
             daemon = boot("managed", group, log, host)
             try:
                 for lang, fn in owners.items():
-                    assert request("GET", f"/fn/{fn}") == (200, f"{lang}-current".encode())
-                    assert request("GET", f"/fn/{fn}/probe") == (200, b"IAM_DENIED")
+                    assert request("GET", f"/fn/{fn}") == (200, old_bodies[lang]), lang
+                    if lang in {"node", "python"}:
+                        assert request("GET", f"/fn/{fn}/probe") == (200, b"IAM_DENIED")
+                    else:
+                        print(f"{logname}: {lang} invoked", flush=True)
                 assert request("GET", route_invoke)[0] == 404
                 assert request("POST", webhook, body, sig_header)[0] == 404
             finally:
@@ -309,7 +399,7 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
     verify(g / "orva.daemon", "portable-b.private.log", host_b)
     with sqlite3.connect(f"file:{b}/managed/orva.db?mode=ro", uri=True) as db:
         rows = db.execute("SELECT quarantined,review_required,approved_artifact FROM workload_iam_policies").fetchall()
-        assert len(rows) == 3 and all(row == (1, 1, "0" * 64) for row in rows)
+        assert len(rows) == len(owners) + 1 and all(row == (1, 1, "0" * 64) for row in rows)
         prior, next_owner, epoch = db.execute(
             "SELECT prior_owner,new_owner,restore_epoch FROM workload_portable_restore_audit").fetchone()
         assert prior == manifest["prior_owner"] and prior != next_owner and epoch == 1

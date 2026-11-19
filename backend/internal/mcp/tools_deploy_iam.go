@@ -19,7 +19,7 @@ func (a *publicationArguments) UnmarshalJSON(raw []byte) error {
 
 func registerPublicationDeploy(rc *regCtx) {
 	regAddTool(rc, permWrite, &mcpsdk.Tool{Name: "deploy_function_inline", Title: "Deploy Function Inline",
-		Description: "Queue plain no-dependency Node/Python code with live submitter capture. Successful publication is review-required DENY, not ready to invoke. A fresh host Factory installation and explicit source-aware review are separate.",
+		Description: "Queue a single Node or Python source file with live submitter capture. For dependencies or a TypeScript project, use the managed REST archive upload. Successful publication is review-required DENY, not ready to invoke. A fresh host Factory installation and explicit source-aware review are separate.",
 		InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"function_id", "code", "wait"},
 			"properties": map[string]any{"function_id": map[string]string{"type": "string"}, "code": map[string]string{"type": "string"},
 				"filename": map[string]string{"type": "string"}, "dependencies": map[string]string{"type": "string"},

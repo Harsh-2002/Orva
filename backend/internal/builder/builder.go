@@ -579,31 +579,9 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 			// that they need to declare typescript as a dep.
 			return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 		}
-		slog.Info("installing node dependencies", "dir", codeDir)
-		out, err := b.runBuildStep(ctx, buildStep{
-			language: sandbox.Node,
-			fnID:     fnID,
-			codeDir:  codeDir,
-			stream:   "npm",
-			timeout:  b.buildStepTimeout(),
-			// --prefix is redundant now that the jail's cwd is the code dir,
-			// but it keeps the resolved install root explicit and matches
-			// what operators see in the build log.
-			argv: []string{nodeNpmBin, "install", "--prefix", sandbox.BuildCodeDir, "--no-audit", "--no-fund"},
-			env: map[string]string{
-				// The "New major version of npm available" banner is pure
-				// noise in a deploy log the user is watching. It only showed
-				// up once builds moved into the jail, because npm's notifier
-				// state lives in HOME and HOME is now thrown away each time.
-				"NO_UPDATE_NOTIFIER":         "1",
-				"npm_config_update_notifier": "false",
-			},
-			network: buildNetworkEgress,
-		})
-		if err != nil {
-			return entrypoint, fmt.Errorf("npm install failed: %w\n%s", err, string(out))
+		if err := b.installNPM(ctx, fnID, codeDir); err != nil {
+			return entrypoint, err
 		}
-		slog.Info("npm install complete", "output", strings.TrimSpace(string(out)))
 		return b.maybeCompileTypeScript(ctx, fnID, codeDir, entrypoint)
 
 	case isPythonRuntime(runtime):
@@ -611,23 +589,57 @@ func (b *Builder) installDependencies(ctx context.Context, fnID, codeDir, runtim
 		if _, err := os.Stat(reqTxt); os.IsNotExist(err) {
 			return entrypoint, nil
 		}
-		slog.Info("installing python dependencies", "dir", codeDir, "runtime", runtime)
-		out, err := b.runBuildStep(ctx, buildStep{
-			language: sandbox.Python,
-			fnID:     fnID,
-			codeDir:  codeDir,
-			stream:   "pip",
-			timeout:  b.buildStepTimeout(),
-			argv:     pipInstallArgv(),
-			env:      map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
-			network:  buildNetworkEgress,
-		})
-		if err != nil {
-			return entrypoint, fmt.Errorf("pip install failed: %w\n%s", err, string(out))
-		}
-		slog.Info("pip install complete")
+		return entrypoint, b.installPip(ctx, fnID, codeDir)
 	}
 	return entrypoint, nil
+}
+
+func (b *Builder) installNPM(ctx context.Context, fnID, codeDir string) error {
+	slog.Info("installing node dependencies", "dir", codeDir)
+	out, err := b.runBuildStep(ctx, buildStep{
+		language: sandbox.Node,
+		fnID:     fnID,
+		codeDir:  codeDir,
+		stream:   "npm",
+		timeout:  b.buildStepTimeout(),
+		// --prefix is redundant now that the jail's cwd is the code dir,
+		// but it keeps the resolved install root explicit and matches
+		// what operators see in the build log.
+		argv: []string{nodeNpmBin, "install", "--prefix", sandbox.BuildCodeDir, "--no-audit", "--no-fund"},
+		env: map[string]string{
+			// The "New major version of npm available" banner is pure
+			// noise in a deploy log the user is watching. It only showed
+			// up once builds moved into the jail, because npm's notifier
+			// state lives in HOME and HOME is now thrown away each time.
+			"NO_UPDATE_NOTIFIER":         "1",
+			"npm_config_update_notifier": "false",
+		},
+		network: buildNetworkEgress,
+	})
+	if err != nil {
+		return fmt.Errorf("npm install failed: %w\n%s", err, string(out))
+	}
+	slog.Info("npm install complete", "output", strings.TrimSpace(string(out)))
+	return nil
+}
+
+func (b *Builder) installPip(ctx context.Context, fnID, codeDir string) error {
+	slog.Info("installing python dependencies", "dir", codeDir, "runtime", "python")
+	out, err := b.runBuildStep(ctx, buildStep{
+		language: sandbox.Python,
+		fnID:     fnID,
+		codeDir:  codeDir,
+		stream:   "pip",
+		timeout:  b.buildStepTimeout(),
+		argv:     pipInstallArgv(),
+		env:      map[string]string{"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+		network:  buildNetworkEgress,
+	})
+	if err != nil {
+		return fmt.Errorf("pip install failed: %w\n%s", err, string(out))
+	}
+	slog.Info("pip install complete")
+	return nil
 }
 
 // Toolchain paths inside the runtime rootfs images.
@@ -796,7 +808,19 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, ent
 	if err := verifyTypeScriptDeclared(pkgJSON); err != nil {
 		return entrypoint, err
 	}
+	if err := b.compileTypeScript(ctx, fnID, codeDir); err != nil {
+		return entrypoint, err
+	}
+	resolved := compiledEntrypoint(entrypoint, readTSConfigOutDir(root))
+	if _, err := root.Stat(resolved); err != nil {
+		return entrypoint, fmt.Errorf("tsc succeeded but compiled entrypoint not found at %s: %w", resolved, err)
+	}
+	logTSCCompiled(b, resolved)
+	slog.Info("typescript compile complete", "entrypoint", resolved)
+	return resolved, nil
+}
 
+func (b *Builder) compileTypeScript(ctx context.Context, fnID, codeDir string) error {
 	// Honor the existing build_timeout_seconds knob. Default 5 min — long
 	// enough for a real typed app, short enough that a runaway build
 	// can't hang the queue worker forever.
@@ -824,32 +848,23 @@ func (b *Builder) maybeCompileTypeScript(ctx context.Context, fnID, codeDir, ent
 		timeout:  time.Duration(timeoutSec) * time.Second,
 	})
 	if errors.Is(runErr, sandbox.ErrBuildTimedOut) {
-		return entrypoint, fmt.Errorf("tsc timed out after %ds", timeoutSec)
+		return fmt.Errorf("tsc timed out after %ds", timeoutSec)
 	}
 	if runErr != nil {
 		// tsc prints diagnostics to stdout (TS6059, TS2322, …) — surface the
 		// captured output so the user sees the actual type error in the
 		// build log.
-		return entrypoint, fmt.Errorf("tsc failed: %w\n%s", runErr, strings.TrimSpace(string(out)))
+		return fmt.Errorf("tsc failed: %w\n%s", runErr, strings.TrimSpace(string(out)))
 	}
+	return nil
+}
 
-	outDir := readTSConfigOutDir(root)
+func compiledEntrypoint(entrypoint, outDir string) string {
 	// On a re-deploy `entrypoint` may already carry the `dist/` prefix
 	// from the previous build's persisted entrypoint — strip it so we
 	// don't double-nest the outDir.
 	stem := tsSourceStem(entrypoint, outDir)
-	resolved := filepath.Join(outDir, stem+".js")
-	if _, err := root.Stat(resolved); err != nil {
-		return entrypoint, fmt.Errorf("tsc succeeded but compiled entrypoint not found at %s: %w", resolved, err)
-	}
-	// Successful tsc runs silently — surface a single line into build_logs
-	// so operators can see "tsc ran" in the deploy progress UI without
-	// having to grep for absence-of-error. We use slog as well as the
-	// build_log sink so the line shows up regardless of whether a Logger
-	// is wired (legacy synchronous deploys, unit tests).
-	logTSCCompiled(b, resolved)
-	slog.Info("typescript compile complete", "entrypoint", resolved)
-	return resolved, nil
+	return filepath.Join(outDir, stem+".js")
 }
 
 // logTSCCompiled emits the post-tsc summary line. Split out so the call

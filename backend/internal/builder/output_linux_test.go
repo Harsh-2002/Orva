@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -75,6 +76,7 @@ func TestManagedOutputExtractionBounds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			cfg.MetadataRoot = t.TempDir()
 			j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path}
 			archive := createTestArchive(t, map[string]string{"handler.js": "plain text"})
 			ctx, cancel := context.WithCancel(t.Context())
@@ -87,6 +89,37 @@ func TestManagedOutputExtractionBounds(t *testing.T) {
 			}
 			if _, _, err := j.produce(t.Context()); err == nil {
 				t.Fatal("unfenced stage admitted to manifest production")
+			}
+		})
+	}
+}
+
+func TestAttachSourceVerifiesExtractedArchive(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("changed=%t", changed), func(t *testing.T) {
+			const input = "original archive"
+			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: artifactfs.Limits{FileBytes: 1024}}},
+				path: t.TempDir(), source: filepath.Join(t.TempDir(), "archive")}
+			body := input
+			if changed {
+				body = "modified archive"
+			}
+			if err := os.WriteFile(j.source, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := j.attachSource(t.Context(), fmt.Sprintf("%x", sha256.Sum256([]byte(input))))
+			if changed {
+				if !errors.Is(err, artifactfs.ErrIntegrity) {
+					t.Fatalf("attached changed input: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(j.path, artifactfs.BuildSourceName))
+			if err != nil || string(got) != input {
+				t.Fatalf("attached archive: %q, %v", got, err)
 			}
 		})
 	}
@@ -126,6 +159,7 @@ func TestManagedOutputArchiveTypeConflict(t *testing.T) {
 	if err := os.WriteFile(archive, raw.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
+	cfg.MetadataRoot = t.TempDir()
 	j := &outputJob{owner: &outputState{cfg: cfg}, stage: stage, path: path}
 	if _, err := j.extract(t.Context(), archive); !errors.Is(err, artifactfs.ErrUnsupported) {
 		t.Fatal("archive metadata conflict rewritten:", err)
@@ -149,7 +183,8 @@ func TestManagedOutputRejectsRawParentComponents(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: limits, ReservedBytes: 1024, ArchiveBytes: 1 << 20}}, stage: stage, path: path}
+			j := &outputJob{owner: &outputState{cfg: OutputConfig{Limits: limits, ReservedBytes: 1024, ArchiveBytes: 1 << 20,
+				MetadataRoot: t.TempDir()}}, stage: stage, path: path}
 			if _, err := j.extract(t.Context(), createTestArchive(t, map[string]string{name: "plain"})); !errors.Is(err, artifactfs.ErrUnsupported) {
 				t.Fatalf("raw parent component normalized rather than rejected: %v", err)
 			}
@@ -453,11 +488,15 @@ func TestManagedOutputKernel(t *testing.T) {
 					t.Fatal("canceled build did not fence")
 				}
 			} else if mode == "profiles" {
-				for _, name := range []string{"package.json", "requirements.txt", "tsconfig.json"} {
+				for _, name := range []string{"requirements.txt", "tsconfig.json"} {
 					a := createTestArchive(t, map[string]string{"handler.js": "exports.handler = () => 42", name: "{}"})
 					if _, e := b.Build(t.Context(), fn, a); !errors.Is(e, ErrOutputProfile) {
 						t.Fatal("unsupported build profile admitted:", name, e)
 					}
+				}
+				a := createTestArchive(t, map[string]string{"handler.js": "exports.handler = () => 42", "package.json": "{}"})
+				if _, e := b.Build(t.Context(), fn, a); !errors.Is(e, sandbox.ErrEgressPolicyMissing) {
+					t.Fatal("installer did not fail closed:", e)
 				}
 				b.BuildFunc = func(context.Context, string, string, string) (int64, error) {
 					t.Fatal("host hook invoked")

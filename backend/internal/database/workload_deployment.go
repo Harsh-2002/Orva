@@ -321,6 +321,7 @@ func (db *Database) CheckWorkloadDeployment(ctx context.Context, id string) (*Wo
 type WorkloadBuildOutput struct {
 	CodeGeneration, CodeDigest, RuntimeGeneration, RuntimeDigest string
 	CodeHash, Entrypoint                                         string
+	SourceArchiveSHA256                                          string `json:",omitempty"`
 }
 
 func (o WorkloadBuildOutput) valid() bool {
@@ -336,7 +337,7 @@ func (o WorkloadBuildOutput) valid() bool {
 			return false
 		}
 	}
-	return true
+	return o.SourceArchiveSHA256 == "" || enrollmentSHA(o.SourceArchiveSHA256)
 }
 
 // RecordWorkloadBuildOutput retains recoverable sealed output before publication.

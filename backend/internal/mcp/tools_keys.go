@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 	"github.com/Harsh-2002/Orva/internal/ids"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -146,7 +147,7 @@ func registerKeyTools(rc *regCtx) {
 				ExpiresAt: expiresAt, CreatedAt: time.Now().UTC(),
 			}, nil
 		},
-		withOneTimeResult("key"),
+		withOneTimeResult(onetime.Fields["create_api_key"]...),
 	)
 
 	regAddTool(rc, permAdmin,

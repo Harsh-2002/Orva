@@ -412,7 +412,14 @@ func resolveRuntimeLink(rel string, tree map[string]observed, limits Limits) (st
 }
 
 func resolveCodeLink(rel, target string, tree map[string]observed, limits Limits) (string, error) {
-	for _, component := range strings.Split(target, "/") {
+	parent := path.Dir(rel)
+	components := target
+	npmBin := path.Base(parent) == ".bin" && path.Base(path.Dir(parent)) == "node_modules" &&
+		strings.HasPrefix(target, "../")
+	if npmBin {
+		components = strings.TrimPrefix(target, "../")
+	}
+	for _, component := range strings.Split(components, "/") {
 		if component == ".." || component == "." {
 			return "", ErrUnsupported
 		}
@@ -422,6 +429,9 @@ func resolveCodeLink(rel, target string, tree map[string]observed, limits Limits
 	}
 	resolved := path.Join(path.Dir(rel), target)
 	if !validPath(resolved, limits.PathBytes) {
+		return "", ErrUnsupported
+	}
+	if npmBin && (!strings.HasPrefix(resolved, path.Dir(parent)+"/") || tree[resolved].entry.Type != TypeFile) {
 		return "", ErrUnsupported
 	}
 	for current := resolved; ; current = path.Dir(current) {

@@ -1,20 +1,119 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/servingmode"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
+
+func TestOfflineBuildPolicyFailClosed(t *testing.T) {
+	for _, migrate := range []bool{false, true} {
+		t.Run(fmt.Sprintf("migrated=%t", migrate), func(t *testing.T) {
+			dir := t.TempDir()
+			db, err := database.New(filepath.Join(dir, "orva.db"))
+			enrollmentMust(t, err)
+			defer db.Close()
+			if migrate {
+				enrollmentMust(t, db.Migrate())
+			}
+			b := &builder.Builder{DataDir: dir}
+			closePolicy := offlineBuildPolicy(t.Context(), b, db)
+			wantUnavailable := func(stage string) {
+				t.Helper()
+				if path, gen, err := b.EgressPolicy(); path != "" || gen != "" || !errors.Is(err, firewall.ErrPolicyUnavailable) {
+					t.Errorf("%s: path=%q generation=%q error=%v; want unavailable", stage, path, gen, err)
+				}
+			}
+			if migrate {
+				if path, gen, err := b.EgressPolicy(); path == "" || gen == "" || err != nil {
+					t.Errorf("compiled policy: path=%q generation=%q error=%v", path, gen, err)
+				}
+			} else {
+				wantUnavailable("missing policy schema")
+			}
+			closePolicy()
+			wantUnavailable("after close")
+		})
+	}
+}
+
+func TestManagedEnrollProjectsAuthoredFiles(t *testing.T) {
+	for _, runtime := range []string{"node", "python"} {
+		t.Run(runtime, func(t *testing.T) {
+			data, scratch := t.TempDir(), t.TempDir()
+			f := enrollmentFunction{ID: ids.New(), Runtime: runtime, CodeHash: strings.Repeat("b", 64), deployment: ids.New(), status: "active"}
+			dir := filepath.Join(data, "functions", f.ID)
+			version := filepath.Join(dir, "versions", f.CodeHash)
+			write := func(name, body string) {
+				p := filepath.Join(version, name)
+				enrollmentMust(t, os.MkdirAll(filepath.Dir(p), 0755))
+				enrollmentMust(t, os.WriteFile(p, []byte(body), 0644))
+			}
+			var want []string
+			if runtime == "node" {
+				f.Entrypoint, f.runEntrypoint = "handler.ts", "out/handler.js"
+				write("package.json", `{"devDependencies":{"typescript":"5.9.3"}}`)
+				write("tsconfig.json", `{"compilerOptions":{"outDir":"out"}}`)
+				write("out/handler.js", "compiled")
+				write("node_modules/typescript/bin/tsc", "installed")
+				enrollmentMust(t, os.MkdirAll(filepath.Join(version, "node_modules/.bin"), 0755))
+				enrollmentMust(t, os.Symlink("../typescript/bin/tsc", filepath.Join(version, "node_modules/.bin/tsc")))
+				want = []string{"handler.ts", "package.json", "tsconfig.json"}
+			} else {
+				f.Entrypoint = "handler.py"
+				write("requirements.txt", "example==1.0")
+				write("example/__init__.py", "installed")
+				digest := sha256.Sum256([]byte("installed"))
+				write("example-1.0.dist-info/RECORD", "example/__init__.py,sha256="+base64.RawURLEncoding.EncodeToString(digest[:])+
+					",9\nexample-1.0.dist-info/RECORD,,\n")
+				want = []string{"handler.py", "requirements.txt"}
+			}
+			write(f.Entrypoint, "source")
+			write(".orva-ready", f.CodeHash)
+			enrollmentMust(t, os.Symlink(filepath.Join("versions", f.CodeHash), filepath.Join(dir, "current")))
+			enrollmentMust(t, f.inspect(t.Context(), data, scratch))
+			if !f.Enrollable {
+				t.Fatal(f.Reason)
+			}
+			archive, err := os.Open(f.archive(scratch))
+			enrollmentMust(t, err)
+			defer archive.Close()
+			gz, err := gzip.NewReader(archive)
+			enrollmentMust(t, err)
+			defer gz.Close()
+			tr := tar.NewReader(gz)
+			var got []string
+			for {
+				h, err := tr.Next()
+				if err == io.EOF {
+					break
+				}
+				enrollmentMust(t, err)
+				got = append(got, h.Name)
+			}
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Fatalf("archive paths = %v, want %v", got, want)
+			}
+		})
+	}
+}
 
 func enrollmentMust(t *testing.T, err error) {
 	t.Helper()
@@ -144,7 +243,7 @@ func TestManagedEnrollDryRun(t *testing.T) {
 				t.Fatalf("unexpected plain function report: %+v", f)
 			}
 		case second:
-			if f.Enrollable || !f.SDK || !f.TypeScript || len(f.Dependencies) != 1 || !strings.Contains(f.Reason, "TypeScript") {
+			if f.Enrollable || !f.SDK || !f.TypeScript || len(f.Dependencies) != 1 || !strings.Contains(f.Reason, "typescript not in package.json") {
 				t.Fatalf("unexpected TS function report: %+v", f)
 			}
 		default:

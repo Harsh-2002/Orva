@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/onetime"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -155,7 +156,7 @@ func registerInboundWebhookTools(rc *regCtx) {
 				Secret:         secret,
 			}, nil
 		},
-		withOneTimeResult("secret"),
+		withOneTimeResult(onetime.Fields["create_inbound_webhook"]...),
 	)
 
 	regAddTool(rc, permAdmin,

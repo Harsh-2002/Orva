@@ -240,7 +240,11 @@ func RunBuild(ctx context.Context, cfg BuildConfig) ([]byte, error) {
 	// prepared, drop it and build with a throwaway one rather than failing a
 	// deploy over a directory nothing depends on.
 	if cfg.CacheDir != "" {
-		if err := prepareCacheDirs(cfg.CacheDir); err != nil {
+		prepare := prepareCacheDirs
+		if cfg.Domain != nil {
+			prepare = prepareDomainCacheDirs
+		}
+		if err := prepare(cfg.CacheDir); err != nil {
 			slog.Warn("build cache unusable, falling back to a throwaway cache",
 				"dir", cfg.CacheDir, "err", err)
 			cfg.CacheDir = ""
@@ -293,10 +297,28 @@ func prepareCacheDirs(cacheDir string) error {
 		if err := os.MkdirAll(dir, 0o777); err != nil {
 			return fmt.Errorf("create build cache dir: %w", err)
 		}
-		// MkdirAll applies the process umask, so the mode above is a request,
-		// not a guarantee — chmod is what actually makes it group/other
-		// writable.
 		if err := os.Chmod(dir, 0o777); err != nil {
+			return fmt.Errorf("prepare build cache dir: %w", err)
+		}
+	}
+	return nil
+}
+
+func prepareDomainCacheDirs(cacheDir string) error {
+	root, err := os.OpenRoot(cacheDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	for _, dir := range []string{".", "npm", "pip"} {
+		if err := root.MkdirAll(dir, 0o777); err != nil {
+			return fmt.Errorf("create build cache dir: %w", err)
+		}
+		info, err := root.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("invalid build cache directory %s", dir)
+		}
+		if err := root.Chmod(dir, 0o777); err != nil {
 			return fmt.Errorf("prepare build cache dir: %w", err)
 		}
 	}

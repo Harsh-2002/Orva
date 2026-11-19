@@ -14,6 +14,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Added
+
+- Managed deployments build npm and pip dependencies and compile TypeScript in
+  the owned sandbox. Supported legacy deployments can enroll with their
+  dependencies; portable restore rebuilds them from the retained source and
+  needs access to their registries.
+
 ### Upgrade notes
 
 - Managed backups use portable v2. Download with `orva backup download`
@@ -30,8 +37,20 @@ unreleased range, and the sections below as the record for everything before it.
   outbound webhook secrets and inbound webhook secrets created through Chat
   appear only in that turn's live result; stored history and later model
   requests show a placeholder (the Markdown export never includes tool
-  results). Copy the value before reloading or leaving Chat. Existing
-  conversations created before this change are not rewritten.
+  results). Copy the value before reloading or leaving Chat. On the first boot
+  after upgrading, a best-effort migration also replaces one-time credentials
+  already stored in Chat history with the placeholder: the audit rows, each call's own
+  tool message (a field only if it holds the credential; replaced whole if the
+  result was malformed JSON and the call id matches unambiguously, otherwise left
+  and counted) and exact copies of the value elsewhere in the same conversation
+  (messages, thinking, later tool arguments and results including failed ones, the
+  title; whole strings only, never part of a longer token). Each boot is bounded to
+  10,000 rows read and 10,000 rewritten (a batch's minting-call results and their
+  tool messages, at most 100 rows, are always rewritten together, so a boot may
+  exceed that by those rows) and
+  resumes where it stopped, so a large history can take several boots. It cannot reach logs, exports, backups or
+  provider-side logs, and does not guarantee every copy is removed: rotate any API
+  key or webhook secret that was ever shown in Chat.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
   paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it
@@ -48,13 +67,13 @@ unreleased range, and the sections below as the record for everything before it.
   the standard witness even if data is retained; the sealed stores then
   become unrecoverable on that host. New systemd units do not restart on 78.
 
-### Internal queued IAM publication (not activated)
+### Managed queued IAM publication
 
-- Adds explicit managed-store queued capture/publication and optional REST/MCP/
-  shared-AI adapters. Normal serving/boot remains unchanged; no public breaking
-  behavior is enabled. New output publishes inactive review-required DENY,
-  followed by separate fresh Factory installation and review. Legacy filesystem
-  mixing, dependencies/TypeScript, restore and automatic resume remain unqualified.
+- Managed REST and MCP use queued capture/publication, also shared by the
+  optional in-product AI adapter.
+  New output publishes inactive review-required DENY, followed by separate
+  fresh Factory installation and review. Legacy filesystem mixing and
+  automatic resume remain unsupported.
 
 ### Fixed
 
