@@ -724,8 +724,8 @@ it every removal fails with `EACCES` and is skipped.
 
 ### Managed mode: portable recovery
 
-`orva backup download -f /safe/path/orva-managed.tar.gz` uses the admin-only
-managed backup endpoint. Keep the archive private: it contains SQLite,
+`orva backup download -f /safe/path/orva-managed.tar.gz` uses the managed
+backup endpoint, which requires read and admin authority. Keep the archive private: it contains SQLite,
 available encryption/bootstrap keys, and current plain Node/Python source.
 The v2 file hashes detect corruption, not the identity of the producer;
 confirm only archives received through a trusted channel. No sealed trees,
