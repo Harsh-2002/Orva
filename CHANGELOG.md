@@ -68,14 +68,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
-- Fresh managed startup seals the installed Node and Python rootfs trees and
-  records their generations. Existing selections are preserved. Managed
-  instances with neither runtime installed or selected now refuse startup
-  instead of opening a listener that cannot build. A refused tree reports the
-  first offending tree-relative path and rule (for example
-  `usr/bin/node: owned by uid 1001, want root or the server user`) and the
-  `chown -R` / `chmod -R go-w` repair, instead of only
-  `artifactfs: unsupported tree`.
+- Fresh managed startup seals each installed Node or Python rootfs and records
+  it before moving to the next. Existing selections are preserved and checked
+  in the sealed store. Startup refuses if no runtime is available or a selected
+  generation is missing or invalid. An unsafe tree reports the path and rule;
+  ownership and writable-mode refusals also suggest a permission repair.
 - Managed backups use portable v2. Download with `orva backup download`
   and use the stopped server binary's `orva managed restore --archive FILE
   --confirm` on the independently provisioned destination, not the legacy
