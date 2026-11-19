@@ -219,7 +219,7 @@ never been executed.
 ## 9. Must-not-break invariants
 
 - **SQLite migrations are additive-only** (`CREATE TABLE IF NOT EXISTS` + idempotent
-  `ALTER`), run on every boot. No `DROP`/destructive migrations. **Two carve-outs.**
+  `ALTER`), run on every boot. No `DROP`/destructive migrations. **Three carve-outs.**
   First, `migrate_to_uuidv7.go` rewrites primary keys and renames
   `<dataDir>/functions/<id>/` to match. Its child columns are derived from
   `PRAGMA foreign_key_list` — never hand-list them, that is how
@@ -234,7 +234,22 @@ never been executed.
   cleaned them up. It is one-shot behind `orphan_reclaim_done` in `system_config`,
   batched and capped so a huge table resumes next boot. **It must keep running
   inside `Migrate()`, before the async execution writer starts**; moving the call
-  site later turns a reclaim of dead rows into deletion of live ones.
+  site later turns a reclaim of dead rows into deletion of live ones. Third,
+  `scrubChatCredentials` (`database/ai_credential_scrub.go`) **rewrites** (never
+  drops) Chat history written before one-time credentials were redacted at the
+  source: for `ai_tool_calls` of `create_api_key`, `create_webhook` and
+  `create_inbound_webhook` it replaces the credential field of `result`, the
+  identical result held in the matching `ai_messages` role=`tool` row, and any
+  copy of that credential value in `content`/`parts` of `assistant` messages of
+  the same conversation, with `[redacted: shown once to the operator]` (an
+  unparseable result is replaced wholesale). Rows of every other tool, user
+  messages and other conversations are untouched. It exists because those
+  credentials were stored and re-sent to the model in clear. One-shot behind
+  `chat_credential_scrub_done`, one transaction per batch that also advances the
+  `chat_credential_scrub_cursor` rowid cursor, capped per boot and resumed on the
+  next. The tool list and field paths are the single shared `onetime.Fields`
+  that live Chat redaction and the MCP registrations also read; a test fails if
+  they drift.
 - `execution_requests`, `user_spans` and `execution_log_entries` have **no FK** to
   `executions` (intentional, for async insert ordering). The cascade is manual, via
   the single `executionChildTables` list, used by **both** `DeleteExecution` and

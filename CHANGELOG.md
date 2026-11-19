@@ -30,8 +30,12 @@ unreleased range, and the sections below as the record for everything before it.
   outbound webhook secrets and inbound webhook secrets created through Chat
   appear only in that turn's live result; stored history and later model
   requests show a placeholder (the Markdown export never includes tool
-  results). Copy the value before reloading or leaving Chat. Existing
-  conversations created before this change are not rewritten.
+  results). Copy the value before reloading or leaving Chat. On the first boot
+  after upgrading, a one-shot migration also replaces one-time credentials
+  already stored in Chat history (audit rows, the matching tool messages and
+  copies the model repeated in its replies) with the placeholder; it is resumable
+  and runs once. Logs, exports or backups taken earlier may still hold copies:
+  rotate any API key or webhook secret that was ever shown in Chat.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
   paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it

@@ -105,7 +105,7 @@ func TestWorkloadIAMExplicitSchemaOnly(t *testing.T) {
 	if err != nil || string(before) != string(after) {
 		t.Fatalf("initializer modified function: %v", err)
 	}
-	if n := iamTestCount(t, db, "system_config"); n != 18 {
+	if n := iamTestCount(t, db, "system_config"); n != 19 {
 		t.Fatalf("initializer modified migration/config markers: %d", n)
 	}
 	if _, err := db.NewIAMPolicy(ctx, f.ID, true, iamTestActor); err != nil {

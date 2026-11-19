@@ -344,6 +344,14 @@ Auth middleware only runs on paths starting with `/api/`. Everything else (`/fn/
 
 SQLite WAL mode. All migrations in `internal/database/migrations.go` — additive only. `VACUUM INTO` produces consistent backup snapshots without a write lock.
 
+`scrubChatCredentials` (`ai_credential_scrub.go`, run from `Migrate()` after the
+orphan reclaim) is the third explicit rewrite carve-out: one-shot behind
+`chat_credential_scrub_done`, per-batch transactions with a persisted rowid
+cursor, replacing stored one-time credentials of the tools in `onetime.Fields`
+(`ai_tool_calls.result`, the matching role=tool `ai_messages.content`, and exact
+copies in same-conversation assistant `content`/`parts`). `onetime` is the leaf
+package shared by that migration, `ai/agent` redaction and the MCP registrations.
+
 `KVListLiteralWithCursorContext` is used only by the internal opt-in SDK-host IAM
 path, never serving/operator routes yet. It queries case-sensitive literal UTF-8
 prefix ranges using binary index bounds; existing serving cursor-list callers

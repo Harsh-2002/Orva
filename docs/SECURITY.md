@@ -1056,6 +1056,14 @@ redacted are matched only when the whole result is one valid JSON value;
 otherwise the entire result is replaced. External MCP clients still receive the
 value once, as before.
 
+Credentials stored by earlier builds are scrubbed once, on the first boot after
+upgrading (`chat_credential_scrub_done`): for the three tools above the stored
+result, the tool message holding it and any copy of the value in the assistant's
+replies of that conversation become the placeholder. The rewrite is batched and
+resumes across boots; it cannot reach copies outside the database (logs, exports,
+backups, a prompt or later tool arguments that repeated the value), so rotate any
+credential that was ever shown in Chat.
+
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same
 conversation list (they are not isolated per credential). BYO provider
