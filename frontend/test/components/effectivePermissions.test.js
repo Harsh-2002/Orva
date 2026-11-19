@@ -131,7 +131,7 @@ describe('source-aware current access', () => {
     const { w } = await page(s)
     expect(w.text()).toContain('named-reader · Version 1')
     expect(w.text()).toContain('second-reader · Version 1')
-    expect(w.text()).toContain('Removing one source leaves any overlapping grants')
+    expect(w.text()).toContain('Removing a source keeps overlapping grants')
     expect(w.find('[aria-label="Effective platform access"]').text()).toContain('1 permission')
   })
 

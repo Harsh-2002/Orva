@@ -709,6 +709,20 @@ pre {
   font-feature-settings: 'calt' 1, 'ss20' 1;
 }
 
+/* The one measure for helper and intro text. It fills its container, so a
+   short sentence never wraps inside an isolated column next to full-width
+   content, and text-wrap: pretty keeps the last line from being a lone word.
+   measure-long (72ch) is only for genuinely long-form prose and for centered
+   empty states, where an uncapped line would stretch across the page. */
+@utility measure {
+  max-width: none;
+  text-wrap: pretty;
+}
+@utility measure-long {
+  max-width: 72ch;
+  text-wrap: pretty;
+}
+
 /* Body line-height utility surfaced as leading-body (1.55) — wins
    over Tailwind's leading-relaxed (1.625) for the dashboard's
    subhead and operator-paragraph density. */

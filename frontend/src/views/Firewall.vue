@@ -7,7 +7,7 @@
           <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
             Egress
           </h1>
-          <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+          <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
             Control outbound destinations and DNS for function sandboxes.
           </p>
         </div>
@@ -670,11 +670,11 @@ const unenforcedNotices = computed(() => {
 // operator's own label; if no friendly name exists for a shipped rule we
 // fall back to the rule's stored label.
 const friendlyMap = {
-  '169.254.0.0/16':    { name: 'Cloud metadata service',  why: 'Blocks the special address AWS, Azure, and GCP use to expose VM credentials and instance settings. Leaving this open is a common credential-leak path.' },
-  'fd00:ec2::254/128': { name: 'Cloud metadata (IPv6)',   why: 'Same as above, but the IPv6 path GCP uses. Recommended on.' },
-  '10.0.0.0/8':        { name: 'Private network, 10.x', why: 'Standard internal-network range. Turn on if your functions should not reach internal services on your LAN.' },
-  '172.16.0.0/12':     { name: 'Private network, 172.16.x', why: 'Another internal-network range (often used by Docker default bridge). Turn on for stricter isolation.' },
-  '192.168.0.0/16':    { name: 'Private network, 192.168.x', why: 'Common home/office network range. Turn on if functions should not reach your local LAN.' },
+  '169.254.0.0/16':    { name: 'Cloud metadata service',  why: 'The link-local range holding the metadata endpoint AWS, Azure and GCP use to expose VM credentials. Leaving it open is a common credential-leak path.' },
+  'fd00:ec2::254/128': { name: 'Cloud metadata (IPv6)',   why: 'Same as above, over the IPv6 path GCP uses. Recommended on.' },
+  '10.0.0.0/8':        { name: 'Private network, 10.x', why: 'Standard internal range. Turn on to block access to this private range.' },
+  '172.16.0.0/12':     { name: 'Private network, 172.16.x', why: 'Internal range, often Docker\'s default bridge. Turn on for stricter isolation.' },
+  '192.168.0.0/16':    { name: 'Private network, 192.168.x', why: 'Common home or office range. Turn on to block access to this private range.' },
   '100.64.0.0/10':     { name: 'CGNAT / Tailscale',       why: 'Used by Tailscale and large ISPs. Turn on to keep functions out of your tailnet.' },
 }
 
@@ -796,7 +796,7 @@ const statusBannerText = computed(() => {
     case 'unknown':
       return `Could not load the egress policy status, so the state below is unknown. This is NOT a report that enforcement is off. ${loadError.value}`
     case 'unenforced':
-      return 'No egress policy is compiled, so nothing below is in force. Orva fails closed: functions with outbound network enabled cannot start until a policy compiles.'
+      return 'No egress policy is compiled, so nothing here is in force. Orva fails closed: egress functions cannot start until one compiles.'
     case 'stale':
       return `Enforcing the last known-good policy (generation ${status.value.policy_generation}). The newest recompile failed, so recent changes are not live yet.`
     case 'degraded':

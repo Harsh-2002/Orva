@@ -105,6 +105,16 @@ re-declaring tokens flips the app without touching markup.
   absent = follow the OS) and the `theme-color` meta swap.
 - The **code editor stays dark in both themes** and sits on a mat in day.
 
+## Helper text measure
+
+Intro and helper text uses `measure` (`style.css`): full container width with
+`text-wrap: pretty`, never `max-w-prose` or another isolated cap, which makes a
+short sentence wrap early and strand one word. `measure-long` (72ch) is only
+for long-form prose (Docs body) and centered empty states. Copy budget: page
+intro about twelve words or fewer, helper one or two short sentences, labels
+before sentences. Safety notices (one-time secret, destructive, read-only,
+stale) stay visible but short.
+
 ## Shared primitives worth knowing before adding UI
 
 | Component | Rule it encodes |

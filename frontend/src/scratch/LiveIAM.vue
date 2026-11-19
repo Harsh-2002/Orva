@@ -43,7 +43,7 @@
       />
       <p
         v-if="operation === 'stream'"
-        class="max-w-prose text-xs text-foreground-muted"
+        class="measure text-xs text-foreground-muted"
       >
         The selected function reads the source function's stream through the SDK. Removing the call
         permission here, or the accepted caller on the source, cuts a running stream.
@@ -158,7 +158,7 @@
         </ol>
         <p
           v-if="phaseNote"
-          class="max-w-prose text-xs text-foreground-muted"
+          class="measure text-xs text-foreground-muted"
           data-testid="stream-note"
         >
           {{ phaseNote }}

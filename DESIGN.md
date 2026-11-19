@@ -142,7 +142,7 @@ What this system rejects: the SaaS-marketing dashboard family (gradient hero pan
 **Key Characteristics:**
 - Neutral graphite-black surfaces; one muted violet accent carries identity.
 - Inter for prose, JetBrains Mono for any data the operator might compare digit-to-digit.
-- Standardised page heads: `text-xl semibold tracking-tight` over a one-line subhead in muted text, max-w-prose.
+- Standardised page heads: `text-xl semibold tracking-tight` over a one-line subhead in muted text, `measure` (container width, no isolated cap).
 - Thin, low-contrast scrollbars keep nested overflow discoverable without dominating the surface.
 - Status colour is semantic, never decorative. A pill that's amber means in-flight; an amber accent that means nothing is forbidden.
 - No copy uses em dashes. Periods, commas, colons, semicolons, parentheses. The voice is operator-spoken.
@@ -293,7 +293,7 @@ Both load from Google Fonts via `<link rel="preconnect">` plus a single combined
 - **Display** (Inter, weight 600, `clamp(1.875rem, 4vw, 2.25rem)`, line-height 1.1, tracking -0.02em): the 404 wordmark, the Onboarding hero. Rare. Reserved for moments that frame the whole product.
 - **Headline** (Inter, weight 600, `1.25rem` / 20px, line-height 1.2, tracking -0.015em): every page H1. The standardised dashboard header, no exceptions.
 - **Title** (Inter, weight 600, `0.875rem` / 14px, tracking -0.01em): modal headers, drawer headers, panel titles inside the editor.
-- **Body** (Inter, weight 400, `0.875rem` / 14px, line-height 1.55): the dashboard's default. Page subheads, table cells, paragraph copy. Cap reading-flow paragraphs at `max-w-prose` (~65–75ch).
+- **Body** (Inter, weight 400, `0.875rem` / 14px, line-height 1.55): the dashboard's default. Page subheads, table cells, paragraph copy. Helper text uses `measure` (container width); long-form reading prose (Docs body) uses `measure-long` (72ch).
 - **Label** (Inter, weight 700, `0.75rem` / 12px, tracking 0.08em, uppercase): section captions inside cards ("Response time", "Host machine", "Builds"). Currently rendered as styled `<div>`s; should be promoted to `<h2>`/`<h3>` for screen-reader semantics.
 - **Mono Body** (JetBrains Mono, weight 500, `0.875rem` / 14px): paths, IDs, request bodies, code editors, raw JSON.
 - **Mono Tile** (JetBrains Mono, weight 400, `1.125rem` / 18px): the at-a-glance stat values on the Overview page (CPU cores, MB reserved, p95). Slightly larger so the operator's first glance lands here.
@@ -486,7 +486,7 @@ A side panel for inspector-style content (invocation request panel, activity row
 
 ### Do
 
-- **Do** keep page heads to one line above one body subhead, both standardised: `<h1 class="text-xl font-semibold text-foreground-strong tracking-tight">` over `<p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-relaxed">`. Every dashboard view follows this; do not invent variants.
+- **Do** keep page heads to one line above one body subhead, both standardised: `<h1 class="text-xl font-semibold text-foreground-strong tracking-tight">` over `<p class="text-sm text-foreground-muted mt-1.5 measure leading-body">`. Every dashboard view follows this; do not invent variants. The subhead is one short sentence (about twelve words or fewer) and uses `measure`, which fills its container and wraps with `text-wrap: pretty`. Never cap helper text in an isolated column (`max-w-prose`, `max-w-xl`): beside full-width content a short sentence then breaks early and leaves one orphan word. `measure-long` (72ch) is for long-form prose and centered empty states only.
 - **Do** route every status colour through `Badge.vue`'s variant system (`success / warning / error / info`). Status pills owned by `success/20` tints, status borders by `success/30`. Anything else forks the palette.
 - **Do** use JetBrains Mono for any number or identifier the operator might want to compare against another. CPU cores, MB readings, latency, IDs, paths, ports, HTTP methods.
 - **Do** promote section captions inside cards to real `<h2>` / `<h3>` while keeping the `text-xs font-bold uppercase tracking-wider` styling. Visual identity intact, semantics restored.

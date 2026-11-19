@@ -22,8 +22,8 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 66 on this
-> composition; read-only keys see 28 and 22 respectively. This composition also
+> An all-permissions key sees 73 tools on the normal server and 69 on this
+> composition; read-only keys see 28 and 23 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
@@ -297,6 +297,16 @@ print(r.json())
 > dashboard's function settings → "Custom routes" section (it
 > collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
+
+### Saved request fixtures (managed)
+
+Use a function name or UUID in `/api/v1/functions/{id}/fixtures`. `GET` on
+the collection lists presets and `GET /{name}` retrieves one; both require
+`read`. `POST` on the collection creates a preset, `PUT /{name}` creates or
+replaces one, and `DELETE /{name}` removes one; all three require `write`.
+These routes only store or read presets; they do not invoke functions.
+Managed MCP and Chat can also list, save, and delete presets; see “Fixture
+tools” below for tool names and permission tiers.
 
 ### Check response latency
 
@@ -997,7 +1007,12 @@ call directly. API key permissions scope the available tool set.
 
 > **`invoke_function` diagnostic hints.** When the handler crashes with a network-shaped error (`ENETUNREACH`, `ECONNREFUSED`, `fetch failed`, `OrvaUnavailableError`) AND the function's `network_mode` is `"none"`, the response carries an `orva_hint` field telling the agent exactly what to fix (`network_mode='egress'` via `update_function`). Always check this field before doing your own root-cause analysis on a network error.
 
-> **Fixture tools** (`list_fixtures`, `save_fixture`, `delete_fixture`, `test_function_with_fixture`) let you save Postman-style request envelopes per function and replay them — useful for debugging and regression checks. The `test_function_with_fixture` tool accepts a shallow-merge `override` object so a single fixture can be parameterised per call without mutating the saved row.
+> **Fixture tools.** `list_fixtures` (`read`), `save_fixture` and `delete_fixture`
+> (both `write`) manage saved request presets by function name or UUID without
+> invoking code. In managed MCP and Chat, each tool rechecks the operator's live
+> credential and required tier at call time, and works for inactive functions.
+> Only the normal catalog also offers `test_function_with_fixture` to run a
+> preset; its shallow-merge `override` does not change the stored fixture.
 
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 
@@ -2112,16 +2127,17 @@ distros do not need Debian-compatible protobuf or libnl shared-library ABIs.
 orva completion bash | sudo tee /etc/bash_completion.d/orva
 # or zsh / fish / powershell
 ```
-# Staged named Function IAM management (not production-activated)
+# Named Function IAM policies (managed mode)
 
-Explicit scratch hosts can expose source-aware named policies through the shared
-management service. Create/update produces immutable versions; attachment pins a
-specific version per function. New versions never auto-propagate. Effective
-access unions separate inline and enabled managed sources. Inline editing never
-edits the union. Detach removes one contribution; terminal global revoke disables
-only that policy's complete attachment set. Overlapping grants may remain.
+On a managed server, a reusable policy is created once and attached to
+functions. Each attachment pins one version; editing a policy creates a new
+version, and attached functions keep theirs until you roll it out. A function's
+stored policy combines its inline grants and its enabled attached policies;
+grants apply only once approved for the function's current deployment.
+Detaching removes one source; revoking disables a policy for every function it
+is attached to. Other sources may still grant the same access.
 
-The optional shared external-MCP/in-product-AI family is:
+The MCP and in-product Chat tools are:
 list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,
 get_iam_policy_impact, attach_iam_policy, detach_iam_policy, revoke_iam_policy,
 delete_iam_policy, get_function_permissions, set_function_permissions and
@@ -2139,9 +2155,7 @@ detach/revoke/delete and iam permissions get/put/review. Mutations require
 confirmation or --yes and confirm:true in the body. Data remains JSON stdout.
 Never invent a function UUID for policy authoring or silently widen resources.
 
-Normal production routes, tool dependencies and IAM boot schemas remain off.
-The precise scratch HTTP/CLI/MCP contract is docs/IAM_MANAGEMENT.md in the source
-repository. Async, boot, restore and deletion lifecycle qualification is separate.
+Servers that are not in managed mode do not offer these routes or tools.
 # Staged exposure management (internal candidate)
 
 Optional `workloadtrigger` handlers and MCP/shared-AI dependencies delegate

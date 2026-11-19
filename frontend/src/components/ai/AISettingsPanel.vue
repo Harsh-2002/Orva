@@ -14,7 +14,7 @@
         <h3 class="text-sm font-semibold text-foreground">
           Providers
         </h3>
-        <p class="text-xs text-foreground-muted mt-1.5 max-w-prose leading-snug">
+        <p class="text-xs text-foreground-muted mt-1.5 measure leading-snug">
           Keys are encrypted at rest. Choose which provider and model Chat uses.
         </p>
       </div>
@@ -128,7 +128,7 @@
         Add provider
       </summary>
       <div class="mt-4 space-y-3">
-        <p class="text-xs text-foreground-muted max-w-prose leading-snug">
+        <p class="text-xs text-foreground-muted measure leading-snug">
           For compatible endpoints, choose <span class="font-mono">openai</span> and add the Base URL.
         </p>
         <div>

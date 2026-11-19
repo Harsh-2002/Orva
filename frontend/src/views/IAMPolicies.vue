@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
           Policies
         </h1>
-        <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+        <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
           Reusable permissions pinned to a version for each function.
         </p>
       </div>
