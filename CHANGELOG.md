@@ -62,6 +62,27 @@ unreleased range, and the sections below as the record for everything before it.
   another thread is initializing it. Missing/invalid channels still fail closed;
   no transport fallback or permission change is introduced.
 
+### Managed exposure controls in the dashboard and CLI (managed mode only)
+
+- The dashboard gains a **Routes** page and a managed **Inbound webhooks** view,
+  both reachable only when `/api/v1/iam/capabilities` reports `managed: true`.
+  Each lists the mapping's version and publication state, and every create,
+  rebind, update, pause/resume and delete reads the mapping and its owner
+  authority immediately before writing. A `409` keeps the operator's draft and
+  refreshes the list instead of retrying; a `403` renders the view read-only.
+  The inbound signing secret is shown once, on create, with a copy-now note.
+  Non-managed servers keep their existing views unchanged.
+- `orva routes` and `orva webhooks inbound` detect a managed server and send the
+  exact CAS body read first. There, the owner must be the function's exact
+  lowercase UUID — names are not resolved — and a `409` is never retried.
+  New `orva webhooks inbound update`; `--expected-version` on `routes set`,
+  `routes delete`, `webhooks inbound update` and `webhooks inbound delete`
+  overrides the version token just read (deliberately failing a stale CAS),
+  while the authority tokens always come from the read. `routes list` and
+  `webhooks inbound list` add version and published columns on a managed server.
+- These are public-exposure edits only: policy revision, authority epoch,
+  artifact approval, grant sources and the current Factory are preserved.
+
 ### Internal cron controls and UI (not activated)
 
 - Adds opt-in HTTP, compiled CLI, external-MCP/shared-AI controls and schedule

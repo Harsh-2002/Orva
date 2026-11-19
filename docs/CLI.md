@@ -585,6 +585,53 @@ orva routes list
 orva routes delete /webhooks/stripe
 ```
 
+On a **managed** server (`/api/v1/iam/capabilities` reports `managed: true`)
+the mapping is a versioned public exposure, and the command behaves
+differently in three ways:
+
+- `--fn` must be the function's exact lowercase UUID. Names are not resolved
+  and no other spelling (uppercase, braces, unhyphenated) is accepted — get
+  the id from `orva functions list -o json`.
+- Every write reads the mapping and its owner authority first and sends that
+  `version` + `expected` pair unchanged (`GET /api/v1/exposures`). `--expected-version`
+  replaces the version token with one you supply, which is how you deliberately
+  fail the CAS; the authority tokens always come from the read.
+- A `409` means the mapping or its owners changed. Nothing is retried: inspect
+  the current row (the command prints it) and run again. `routes list` adds
+  `VERSION` and `PUBLISHED` columns and reports a truncated list at 256 rows.
+
+```bash
+# Managed: exact owner UUID, and an explicitly known version token.
+orva routes set /hooks/stripe \
+    --fn 0190000a-0000-7000-8000-000000000001 \
+    --expected-version 7
+orva routes list -o json | jq '.routes[] | select(.published == false)'
+```
+
+### Inbound webhook triggers
+
+One function, one signature format, one URL at `/webhook/<trigger-id>`.
+Create prints the plaintext signing secret to stdout **once**; nothing can
+recover it afterwards, so capture it in the same step. Rotation is delete and
+recreate.
+
+```bash
+orva webhooks inbound list payments
+orva webhooks inbound create payments --name github-deploys --format github
+orva webhooks inbound update payments <trigger-id> --active=false
+orva webhooks inbound delete payments <trigger-id> --yes
+```
+
+`update` changes only the flags you pass (`--name`, `--format`, `--header`,
+`--active`). On a managed server the owner and trigger must be exact lowercase
+UUIDs, the trigger's version and owner authority are read immediately before
+the write, a `409` is never retried, and `--expected-version` overrides the
+version token just read. Managed `list` adds `VERSION` and `PUBLISHED` columns.
+
+`orva webhooks inbound test` signs locally with `--secret` and POSTs to the
+trigger URL, so it works on a managed server too — but only for a *published*
+trigger, and the secret must be the one captured at create time.
+
 ### API keys
 
 ```bash
@@ -811,9 +858,9 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | `orva jobs enqueue / list / get / retry / delete` | Durable background queue with idempotency |
 | `orva keys create / list / revoke` | Long-lived API keys (`--expires-in-days`) |
 | `orva channels create / show / rotate / add-functions / remove-functions / delete` | MCP toolbox bundles |
-| `orva routes set / list / delete` | Custom URL → function mappings |
+| `orva routes set / list / delete` | Custom URL → function mappings. On a managed server the owner is an exact UUID and each write sends the inspected version/authority tokens (`--expected-version` overrides the version); no automatic retry after 409 |
 | `orva webhooks create / list / test / delete / deliveries / retry` | Outbound system-event subscriptions |
-| `orva webhooks inbound …` | Inbound signed-POST triggers (GitHub, Stripe, etc.) |
+| `orva webhooks inbound list / create / update / delete / test` | Inbound signed-POST triggers (GitHub, Stripe, etc.). Managed servers take exact owner/trigger UUIDs and CAS tokens; `create` prints the secret once |
 | `orva traces list / get / baseline` | Distributed traces + latency baselines |
 | `orva firewall list / add / enable / disable / delete / resolve` | Sandbox egress policy rules (CIDR or exact hostname) |
 | `orva dns get / set` | Sandbox DNS config |
