@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth.js'
 import { nextTick } from 'vue'
 
 // Editor.vue reads matchMedia during setup to decide whether the console
@@ -25,6 +26,7 @@ const apiClient = {
   delete: vi.fn(async () => ({ data: {} })),
 }
 vi.mock('@/api/client', () => ({ default: apiClient, getApiKey: () => 'test-key' }))
+vi.mock('@/api/managedPolicies.js', () => ({ readManagedIAMMode: vi.fn(async () => 'legacy') }))
 
 const endpoints = {
   listFunctions: vi.fn(async () => ({ data: { functions: [FN_A, FN_B], total: 2 } })),
@@ -97,6 +99,7 @@ const boot = async (routes, path) => {
   router.push(path)
   await router.isReady()
   const pinia = createPinia()
+  useAuthStore(pinia).isAuthenticated = true
   const wrapper = mount(Shell, { global: { plugins: [router, pinia] } })
   mounted.push(wrapper)
   await settle()

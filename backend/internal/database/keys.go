@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"time"
@@ -143,9 +144,7 @@ func (db *Database) CountAPIKeys() (int, error) {
 	return count, err
 }
 
-// PoolConfig represents a per-function pool configuration. The autoscaler
-// reads this at pool creation time; runtime changes require pool recreation
-// (restart Orva, or wait for the pool to be torn down).
+// PoolConfig holds the per-function settings applied when creating a worker pool.
 type PoolConfig struct {
 	FunctionID  string `json:"function_id"`
 	MinWarm     int    `json:"min_warm"`
@@ -155,6 +154,32 @@ type PoolConfig struct {
 }
 
 func (db *Database) UpsertPoolConfig(cfg *PoolConfig) error {
+	return upsertPoolConfig(context.Background(), db.write, cfg)
+}
+
+// UpsertPoolConfigAsOperator rechecks live admin authority in the write transaction.
+func (db *Database) UpsertPoolConfigAsOperator(ctx context.Context, ref OperatorCredentialReference, cfg *PoolConfig) error {
+	tx, err := db.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, expiry, err := authorizeOperatorTx(ctx, tx, ref)
+	if err != nil {
+		return err
+	}
+	if err := upsertPoolConfig(ctx, tx, cfg); err != nil {
+		return err
+	}
+	if (!expiry.IsZero() && !expiry.After(time.Now().UTC())) || ctx.Err() != nil {
+		return operatorDenied(ctx)
+	}
+	return tx.Commit()
+}
+
+func upsertPoolConfig(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, cfg *PoolConfig) error {
 	if cfg.ScaleToZero {
 		cfg.MinWarm = 0
 	} else if cfg.MinWarm < 1 {
@@ -164,7 +189,7 @@ func (db *Database) UpsertPoolConfig(cfg *PoolConfig) error {
 	if cfg.ScaleToZero {
 		sc = 1
 	}
-	_, err := db.write.Exec(`
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO pool_config (function_id, min_warm, max_warm, idle_ttl_s, scale_to_zero)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(function_id) DO UPDATE SET

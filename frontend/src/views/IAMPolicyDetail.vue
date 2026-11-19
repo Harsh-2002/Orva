@@ -9,10 +9,6 @@
         <h2 class="text-lg font-semibold text-foreground-strong">
           {{ state.data.value.policy.name }}
         </h2>
-        <code class="block break-all text-xs text-foreground-muted">{{ policyId }}</code>
-        <p class="text-sm text-foreground-muted">
-          {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
-        </p>
         <p
           v-if="!state.data.value.can_manage"
           class="text-sm text-foreground-muted"
@@ -28,6 +24,32 @@
         Refresh policy
       </Button>
     </header>
+    <div class="flex flex-wrap items-start gap-x-5 gap-y-2">
+      <details>
+        <summary class="cursor-pointer text-sm text-link">
+          Policy ID
+        </summary>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <code class="break-all text-xs text-foreground-muted">{{ policyId }}</code>
+          <Button
+            size="xs"
+            variant="secondary"
+            class="touch-expand-xs"
+            @click="copyPolicyId"
+          >
+            {{ copied ? 'Copied' : 'Copy' }}
+          </Button>
+        </div>
+      </details>
+      <details>
+        <summary class="cursor-pointer text-sm text-link">
+          Versions
+        </summary>
+        <p class="measure mt-2 text-sm text-foreground-muted">
+          {{ state.fresh.value ? 'Latest verified version' : 'Last known version (unverified)' }} {{ state.data.value.policy.latest_version }}. Attached functions keep their reviewed version until explicit rollout.
+        </p>
+      </details>
+    </div>
     <p
       v-if="!state.fresh.value"
       role="status"
@@ -86,6 +108,7 @@
           <fieldset
             :disabled="!!changeReason"
             aria-label="Attach or roll out a version"
+            :aria-describedby="selected.length ? undefined : attachHintId"
             class="space-y-2"
           >
             <Input
@@ -112,14 +135,36 @@
               :title="changeReason"
               @click="prepare('attach')"
             >
-              Review attachment
+              Attach…
             </Button>
+            <p
+              v-if="!selected.length"
+              :id="attachHintId"
+              class="text-sm text-foreground-muted"
+            >
+              Select at least one function.
+            </p>
           </fieldset>
         </div>
       </template>
+      <p
+        v-if="attached.length"
+        role="status"
+        class="text-sm text-success-fg"
+      >
+        Attached to <template
+          v-for="(id, index) in attached"
+          :key="id"
+        >
+          <RouterLink
+            :to="`/functions/${id}/permissions`"
+            class="text-link hover:underline underline-offset-4"
+          >{{ label(id) }}</RouterLink>{{ index < attached.length - 1 ? ', ' : '' }}
+        </template>. {{ attached.length === 1 ? 'Check its Permissions page and approve it there if it is not active yet.' : 'Check each Permissions page and approve any function that is not active yet.' }}
+      </p>
       <div
-        v-if="state.data.value.can_manage"
-        class="flex flex-wrap gap-3"
+        v-if="state.data.value.can_manage && (!state.data.value.policy.revoked || !state.data.value.attachments.length)"
+        class="flex flex-wrap gap-3 border-t border-border pt-4"
       >
         <Button
           v-if="!state.data.value.policy.revoked"
@@ -128,7 +173,7 @@
           :title="changeReason"
           @click="prepare('revoke')"
         >
-          Review global revoke
+          Revoke everywhere…
         </Button>
         <Button
           v-if="!state.data.value.attachments.length"
@@ -137,7 +182,7 @@
           :title="changeReason"
           @click="reviewed = { operation: 'delete', body: { definition_revision: state.data.value.policy.definition_revision, membership_revision: state.data.value.policy.membership_revision, confirm: true }, impact: null }"
         >
-          Review deletion
+          Delete…
         </Button>
       </div>
       <section
@@ -203,7 +248,8 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
 import StatementList from '@/components/permissions/StatementList.vue'
@@ -212,8 +258,9 @@ import ManagedPolicyDraft from '@/components/permissions/ManagedPolicyDraft.vue'
 import { sourceExpectation } from '@/api/managedPolicies.js'
 import { useIAMResource } from '@/composables/useIAMResource.js'
 import { parseCounter } from '@/utils/permissionsModel.js'
+import { copyText } from '@/utils/clipboard'
 const props = defineProps({ policyId: { type: String, required: true }, api: { type: Object, required: true }, functions: { type: Array, default: () => [] } })
-const emit = defineEmits(['deleted', 'changed'])
+const emit = defineEmits(['deleted', 'changed', 'attachments'])
 const state = useIAMResource(() => props.policyId, (id, signal) => props.api.get(id, signal))
 const changeReason = computed(() => {
   if (!state.data.value?.can_manage) return 'Read only. An administrator must change this policy.'
@@ -237,13 +284,27 @@ watch(
 const reviewed = ref(null)
 const editing = ref(false)
 const editingRevision = ref('')
+const copied = ref(false)
+async function copyPolicyId() { copied.value = await copyText(props.policyId) }
+const attached = ref([])
+const attachHintId = useId()
+// The list rows have no attachment data of their own, so the detail reports its
+// verified count for the selected policy. The id travels with the count so a
+// late emission can never label another policy, and a stale/refreshing snapshot
+// clears the count instead of leaving an unverified one behind.
+const attachmentCount = computed(() => (
+  state.fresh.value && Number.isInteger(state.data.value?.attachments?.length)
+    ? state.data.value.attachments.length
+    : null
+))
+watch(attachmentCount, (count) => emit('attachments', { id: props.policyId, count }), { immediate: true })
 function startEdit() {
   if (changeReason.value) return
   editingRevision.value = state.data.value.policy.definition_revision
   editing.value = true
 }
 const label = (id) => props.functions.find((f) => f.id === id)?.name || id
-watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false })
+watch(() => props.policyId, () => { selected.value = []; reviewed.value = null; editing.value = false; copied.value = false; attached.value = [] })
 async function update({ policy }) {
   if (changeReason.value) return
   const result = await state.mutate((signal) => props.api.mutate(props.policyId, 'update', { definition_revision: editingRevision.value, policy }, signal))
@@ -252,6 +313,7 @@ async function update({ policy }) {
 async function prepare(operation) {
   if (changeReason.value) return
   reviewed.value = null
+  attached.value = []
   if (operation === 'attach' && parseCounter(version.value) === null) { state.error.value = 'Enter a valid existing version number.'; return }
   const p = state.data.value.policy
   const ids = operation === 'revoke' ? state.data.value.attachments.map((a) => a.owner_id) : selected.value
@@ -270,7 +332,10 @@ async function apply() {
   const plan = reviewed.value
   reviewed.value = null
   const result = await state.mutate((signal) => props.api.mutate(props.policyId, plan.operation, plan.body, signal))
-  if (result) emit('changed')
+  if (result) {
+    if (plan.operation === 'attach') { selected.value = []; attached.value = plan.body.owners.map((owner) => owner.function_id) }
+    emit('changed')
+  }
   if (result && plan.operation === 'delete') emit('deleted')
 }
 </script>

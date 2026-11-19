@@ -37,6 +37,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadhistory"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadpolicy"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadtrigger"
 
@@ -47,6 +48,8 @@ import (
 // handlers reach into these directly — no HTTP marshaling.
 type Deps struct {
 	ManagedServer bool
+	// ManagedAuthority binds fixture invocation to the serving pool's authority.
+	ManagedAuthority *workloadiam.Authority
 	// IAM is explicit scratch/test wiring only; serving constructors leave nil.
 	IAM              *workloadpolicy.Service
 	Configuration    *workloadconfig.Service

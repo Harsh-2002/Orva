@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { useAuthStore } from '@/stores/auth.js'
 
 // An existing function opens read-only so reading it cannot edit or deploy it
 // by accident; Edit is an explicit switch that the URL (?mode=edit) mirrors.
@@ -36,6 +37,7 @@ const apiClient = {
   delete: vi.fn(async () => ({ data: {} })),
 }
 vi.mock('@/api/client', () => ({ default: apiClient, getApiKey: () => 'k' }))
+vi.mock('@/api/managedPolicies.js', () => ({ readManagedIAMMode: vi.fn(async () => 'legacy') }))
 vi.mock('@/api/endpoints', () => ({
   __esModule: true,
   listFunctions: vi.fn(async () => ({ data: { functions: [FN_A, FN_B], total: 2 } })),
@@ -101,6 +103,7 @@ const boot = async (path) => {
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
+  useAuthStore(pinia).isAuthenticated = true
   const wrapper = mount(Shell, { global: { plugins: [router, pinia] }, attachTo: document.body })
   mounted.push(wrapper)
   await settle()

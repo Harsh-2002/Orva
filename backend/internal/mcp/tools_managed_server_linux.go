@@ -14,6 +14,10 @@ import (
 func registerManagedServerTools(rc *regCtx) {
 	registerManagedOperationTools(rc)
 	registerFixtureTools(rc)
+	if managedFixtureInvocationAvailable(rc.deps) {
+		registerFixtureInvokeTool(rc)
+	}
+	registerFirewallTools(rc)
 	registerIAMTools(rc)
 	registerConfigurationTools(rc)
 	registerWorkloadLifecycleTools(rc)

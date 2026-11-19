@@ -62,7 +62,7 @@ type managedRouteDeps struct {
 	// Managed authentication rereads sessions live; nil is a no-op.
 	InvalidateSession func(token string)
 	// Firewall is the process's egress policy manager — the same instance the
-	// managed builder and Chat guard use. nil leaves the firewall routes
+	// managed builder and Chat guard use. nil leaves the firewall routes and tools
 	// unmounted rather than reporting an empty, unenforced policy.
 	Firewall *firewall.Manager
 
@@ -121,6 +121,10 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
 	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
+	poolConfig := &handlers.PoolConfigHandler{DB: db, Registry: reg, ManagedRefresh: manager.RefreshManagedPool}
+	gateRoute(mux, db, ops, "GET /api/v1/pool/config", managedRead, poolConfig.Get)
+	gateRoute(mux, db, ops, "PUT /api/v1/pool/config", managedAdmin, poolConfig.Upsert)
+	gateRoute(mux, db, ops, "POST /api/v1/pool/config", managedAdmin, poolConfig.Upsert)
 	mountManagedAccess(mux, db, ops)
 	mountManagedOperatorKV(mux, db, reg, ops)
 	mountManagedWebhooks(mux, db, ops)
@@ -139,13 +143,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			mux.Handle("/webhook/", &handlers.InboundTriggerHandler{DB: db, Registry: reg, Pool: manager,
 				Metrics: invoke.Metrics, SDKAuth: invoke.Proxy.SDKAuth, Managed: true})
 		}
-		webAuth := &handlers.AuthHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/auth/status", webAuth.Status)
-		mux.HandleFunc("POST /api/v1/auth/onboard", webAuth.Onboard)
-		mux.HandleFunc("POST /api/v1/auth/login", webAuth.Login)
-		mux.HandleFunc("POST /api/v1/auth/logout", webAuth.Logout)
-		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
-		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
+		mountManagedWebAuth(mux, db, ops)
 		mux.Handle("GET /web/", uiHandler())
 		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})
@@ -157,10 +155,14 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		gateRoute(mux, db, ops, "GET /api/v1/functions", managedRead, deploy.List)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}", managedRead, deploy.Get)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/source", managedRead, readManagedSource(db, publication))
+		// Names only: the editor shows which secrets exist, while every write
+		// stays on the CAS-checked configuration route.
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/secrets", managedRead, listManagedSecretNames(db, reg))
 		gateRoute(mux, db, ops, "POST /api/v1/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy-inline", managedWrite, deploy.DeployInline)
+		gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}/build-cache", managedWrite, purgeManagedBuildCache(db, reg, manager, dataDir))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/rollback", managedWrite, deploy.Rollback)
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}
@@ -182,11 +184,12 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
-			InvalidateKey: ops.invalidateKey()}
+			Firewall: ops.Firewall, InvalidateKey: ops.invalidateKey()}
 		tools.PoolMgr, tools.NsjailBin, tools.Version = manager, ops.NsjailBin, version.Version
 		if invoke != nil {
 			// Channel tokens invoke only through this managed proxy and pool.
 			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+			tools.ManagedAuthority = authority
 			tools.ReplayExecution = managedReplayHandler(db, reg, manager, invoke, ops).Replay
 		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
@@ -356,6 +359,27 @@ func readManagedSource(db *database.Database, publication *builder.PublicationQu
 			return
 		}
 		respond.JSON(w, 200, map[string]string{"code": code, "dependencies": deps})
+	}
+}
+
+// listManagedSecretNames mirrors the legacy list handler's shape so the
+// editor parses both modes identically. Values never leave the cipher.
+func listManagedSecretNames(db *database.Database, reg *registry.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("fn_id")
+		if _, err := reg.Get(id); err != nil {
+			respond.Error(w, 404, "NOT_FOUND", "function not found", r.Header.Get("X-Request-ID"))
+			return
+		}
+		keys, err := db.ListSecretKeys(id)
+		if err != nil {
+			respond.Error(w, 500, "INTERNAL", "failed to list secrets", r.Header.Get("X-Request-ID"))
+			return
+		}
+		if keys == nil {
+			keys = []string{}
+		}
+		respond.JSON(w, 200, map[string]any{"secrets": keys})
 	}
 }
 

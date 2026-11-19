@@ -160,4 +160,29 @@ func TestManagedEgressRotationRejectsLateSpawn(t *testing.T) {
 		offlineWorker.IsDead() || m.CurrentFactory(offline.Owner()) != offline {
 		t.Fatal("egress rotation changed the offline pool")
 	}
+
+	t.Run("concurrent tuning keeps the installed Factory and busy slot", func(t *testing.T) {
+		tuning := &database.PoolConfig{FunctionID: egress.Owner(), IdleTTLS: 47, ScaleToZero: true}
+		start := make(chan struct{})
+		var rotations sync.WaitGroup
+		rotations.Go(func() { <-start; m.RefreshManagedPool(tuning)() })
+		rotations.Go(func() { <-start; m.RetireEgressPools() })
+		close(start)
+		rotations.Wait()
+		current := poolOf(t, m, egress.Owner())
+		if current == next || !next.closing.Load() || current.closing.Load() ||
+			!current.scaleToZero || current.min != 0 || current.idleTTL != 47*time.Second {
+			t.Fatal("egress rotation lost the new tuning")
+		}
+		if current.managed != next.managed || m.CurrentFactory(egress.Owner()) != egress || egress.Retired() {
+			t.Fatal("tuning replaced the installed Factory")
+		}
+		if current.concSem == nil || current.concSem != next.concSem || len(current.concSem) != 1 {
+			t.Fatal("tuning created a second concurrency budget or released a busy slot")
+		}
+		m.Release(acquired, nil)
+		if len(current.concSem) != 0 || !replacementWorker.IsDead() {
+			t.Fatal("release did not free the shared slot and retire the old worker")
+		}
+	})
 }

@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import Layout from '@/components/layout/Layout.vue'
 import { isCanonicalUuid } from '@/utils/permissionsModel.js'
+import { listManagedIAMFunctions } from '@/api/managedPolicies.js'
 
 // The Editor takes `?mode=edit` as a prop for the same reason it takes :name as
 // one: it is keep-alived, and useRoute() keeps moving under a deactivated view.
@@ -82,6 +83,20 @@ const router = createRouter({
   ],
 })
 
+// The managed views address a function by id, but the rest of the dashboard
+// (and anyone sharing a link) uses its name. Resolve an exact name from the
+// same directory those views list. A partial or failed lookup is "no such
+// function" rather than a guess, and listManagedIAMFunctions already refuses
+// a non-canonical id.
+async function managedFunctionId(name) {
+  try {
+    const functions = await listManagedIAMFunctions()
+    return functions.find((fn) => fn.name === name)?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 // Auth guard. The decision matrix:
 //
 //   hasUser  isAuthed  destination          → action
@@ -128,10 +143,30 @@ router.beforeEach(async (to, _from, next) => {
     }
     const iam = useManagedIAMStore()
     if (to.meta.managedIAM) {
-      const id = to.params.functionId ?? to.params.policyId
-      if ((id && !isCanonicalUuid(id)) || !(await iam.check({ fresh: true }))) {
-        return next({ name: 'not-found', params: { pathMatch: to.path.slice(1).split('/') }, replace: true })
+      const notFound = () => next({
+        name: 'not-found',
+        params: { pathMatch: to.path.slice(1).split('/') },
+        replace: true,
+      })
+      // Capability first: an instance without managed IAM must not spend the
+      // directory request deciding a route it refuses either way.
+      if (!(await iam.check({ fresh: true }))) return notFound()
+      const { functionId, policyId } = to.params
+      if (functionId && !isCanonicalUuid(functionId)) {
+        // /functions/<name>/permissions is a URL operators type and share.
+        // Replace it with the canonical one so the keep-alive view only ever
+        // receives an id, and no managed view has to accept both.
+        const id = await managedFunctionId(functionId)
+        if (!id) return notFound()
+        return next({
+          name: to.name,
+          params: { ...to.params, functionId: id },
+          query: to.query,
+          hash: to.hash,
+          replace: true,
+        })
       }
+      if (policyId && !isCanonicalUuid(policyId)) return notFound()
     } else {
       void iam.check()
     }

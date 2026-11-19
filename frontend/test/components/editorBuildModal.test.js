@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
 import { nextTick } from 'vue'
+import { useAuthStore } from '@/stores/auth.js'
 
 // A build is headless: Deploy carries its own progress and the log modal is
 // raised by a failure or on demand, never by starting. Most builds finish in
@@ -30,6 +31,7 @@ const apiClient = {
   delete: vi.fn(async () => ({ data: {} })),
 }
 vi.mock('@/api/client', () => ({ default: apiClient, getApiKey: () => 'k' }))
+vi.mock('@/api/managedPolicies.js', () => ({ readManagedIAMMode: vi.fn(async () => 'legacy') }))
 
 vi.mock('@/api/endpoints', () => ({
   __esModule: true,
@@ -99,9 +101,11 @@ const openEditor = async () => {
   })
   router.push('/functions/alpha?mode=edit')
   await router.isReady()
+  const pinia = createPinia()
+  useAuthStore(pinia).isAuthenticated = true
   const wrapper = mount(
     { template: '<router-view v-slot="{ Component }"><keep-alive><component :is="Component"/></keep-alive></router-view>' },
-    { global: { plugins: [router, createPinia()] }, attachTo: document.body },
+    { global: { plugins: [router, pinia] }, attachTo: document.body },
   )
   await settle()
   return { wrapper, router }

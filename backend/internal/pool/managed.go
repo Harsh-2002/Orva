@@ -2,7 +2,9 @@ package pool
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +24,7 @@ type managedGeneration struct {
 	factory *workloadspawn.Factory
 	pool    atomic.Pointer[functionPool]
 	active  atomic.Bool
+	tuning  *database.PoolConfig  // poolMu
 	pending *PendingConfiguration // IAM gate
 }
 
@@ -70,8 +73,12 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	g := &managedGeneration{factory: factory}
-	p := m.makeManagedPool(g)
+	tuning, err := m.db.GetPoolConfig(factory.Owner())
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("read managed pool config: %w", err)
+	}
+	g := &managedGeneration{factory: factory, tuning: tuning}
+	p := m.makeManagedPool(g, tuning)
 	g.pool.Store(p)
 	m.poolMu.Lock()
 	if err := ctx.Err(); err != nil {
@@ -104,7 +111,7 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 	}
 	var checked error
 	var pending *PendingConfiguration
-	err := m.managed.authority.ChangeHostState(func() {
+	err = m.managed.authority.ChangeHostState(func() {
 		if check != nil {
 			checked = check()
 			if checked != nil {
@@ -140,34 +147,56 @@ func (m *Manager) InstallFactoryChecked(ctx context.Context, factory *workloadsp
 	}, nil
 }
 
-func (m *Manager) makeManagedPool(g *managedGeneration) *functionPool {
+func (m *Manager) makeManagedPool(g *managedGeneration, tuning *database.PoolConfig) *functionPool {
 	facts := g.factory.Resources()
 	return m.makePool(&database.Function{ID: g.factory.Owner(), MemoryMB: facts.MemoryMB, CPUs: facts.CPUs,
-		MaxConcurrency: facts.MaxConcurrency, ConcurrencyPolicy: facts.ConcurrencyPolicy}, g)
+		MaxConcurrency: facts.MaxConcurrency, ConcurrencyPolicy: facts.ConcurrencyPolicy}, g, tuning)
+}
+
+// RefreshManagedPool applies committed tuning while the caller holds the owner
+// mutation lock. Run the returned worker cleanup after releasing that lock.
+func (m *Manager) RefreshManagedPool(tuning *database.PoolConfig) func() {
+	if m.managed != nil && tuning != nil {
+		if g := m.managed.current.Load().generations[tuning.FunctionID]; g != nil {
+			snapshot := *tuning
+			if cleanup := m.rotateManagedPool(g, &snapshot); cleanup != nil {
+				return cleanup
+			}
+		}
+	}
+	return func() {}
 }
 
 func (m *Manager) rotateManagedEgressPools() int {
 	retired := 0
 	for _, g := range m.managed.current.Load().generations {
-		if g.active.Load() && g.factory.Resources().NetworkMode == "egress" && m.rotateManagedPool(g, g.pool.Load()) {
-			retired++
+		if g.active.Load() && g.factory.Resources().NetworkMode == "egress" {
+			if cleanup := m.rotateManagedPool(g, nil); cleanup != nil {
+				cleanup()
+				retired++
+			}
 		}
 	}
 	return retired
 }
 
-func (m *Manager) rotateManagedPool(g *managedGeneration, old *functionPool) bool {
+func (m *Manager) rotateManagedPool(g *managedGeneration, tuning *database.PoolConfig) func() {
 	owner := g.factory.Owner()
-	next := m.makeManagedPool(g)
-	// Busy workers keep their slots until release, even across policy rotations.
-	next.concSem = old.concSem
 	m.poolMu.Lock()
+	defer m.poolMu.Unlock()
 	current := m.managed.current.Load()
 	registered, _ := m.pools.Load(owner)
-	if m.closing.Load() || current.generations[owner] != g || registered != old || g.pool.Load() != old {
-		m.poolMu.Unlock()
-		return false
+	old := g.pool.Load()
+	if m.closing.Load() || current.generations[owner] != g || registered != old || !g.active.Load() {
+		return nil
 	}
+	// Egress rotation must inherit the last published tuning, not a snapshot
+	// captured before a concurrent update replaced this worker pool.
+	if tuning == nil {
+		tuning = g.tuning
+	}
+	next := m.makeManagedPool(g, tuning)
+	next.concSem = old.concSem
 	old.mu.Lock()
 	swapped := false
 	err := m.managed.authority.ChangeHostState(func() {
@@ -175,23 +204,23 @@ func (m *Manager) rotateManagedPool(g *managedGeneration, old *functionPool) boo
 			return
 		}
 		old.markRetired()
+		g.tuning = tuning
 		g.pool.Store(next)
 		m.pools.Store(owner, next)
 		swapped = true
 	})
 	old.mu.Unlock()
-	if err == nil && swapped {
-		m.wg.Add(1)
-		go m.reap(next)
+	if err != nil || !swapped {
+		return nil
 	}
-	m.poolMu.Unlock()
-	if swapped {
+	m.wg.Add(1)
+	go m.reap(next)
+	return func() {
 		drainManagedIdle(old)
 		if m.scaler != nil {
 			m.scaler.nudge()
 		}
 	}
-	return swapped
 }
 
 func (m *Manager) ManagedBy(a *workloadiam.Authority) bool {

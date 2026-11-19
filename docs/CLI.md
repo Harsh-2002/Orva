@@ -808,6 +808,9 @@ orva dns set --server "" --search ""                   # reset to defaults
 
 Per-function warm-sandbox tuning. Always pass `--fn`. Only the fields you
 specify change; the rest keep their current values.
+`get` requires `read`; `set` requires `admin`. On managed servers, tuning
+recycles active workers without changing the installed deployment or its
+permissions. It does not make an inactive function invokable.
 
 ```bash
 orva pool get --fn greeter
@@ -849,7 +852,7 @@ Every subcommand at a glance. Run `orva <cmd> --help` for full flags.
 | Command | What it does |
 |---|---|
 | `orva login [--test]` | Save endpoint + API key to `~/.orva/config.yaml` |
-| `orva functions list / get / create / update / delete / purge-cache` | Function lifecycle. `delete` waits for the server with no client timeout, since a function with a large history can take minutes; Ctrl-C stops waiting, not the delete, and re-running the command resumes one the server left `deleting` |
+| `orva functions list / get / create / update / delete / purge-cache` | Function lifecycle. `delete` waits for the server with no client timeout, since a function with a large history can take minutes; Ctrl-C stops waiting, not the delete, and re-running the command resumes one the server left `deleting`. `purge-cache` also works on managed servers and leaves the installed deployment intact. |
 | `orva deploy <path> [--follow]` | Build + deploy a function from a directory |
 | `orva invoke <name>` | Run a function once and print the response |
 | `orva logs <name> [--follow \| --exec-id]` | Execution history, live tail, or single-row drill-down |

@@ -17,12 +17,15 @@
 > its replacement generation; it returns `409 NOT_ACTIVE`.
 > The managed Editor reads authored source from the seal, not from a legacy
 > `current` symlink. Reading source neither installs nor approves it.
+> After a successful managed build, choose **Install build** before invoking it.
+> Review permissions separately. Create and install a first build before
+> configuring its settings, environment, or secrets.
 > An admin `GET /api/v1/backup` returns a portable v2 archive of SQLite, available
 > keys and current authored source, never the host witness or sealed stores.
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 75 on this
+> An all-permissions key sees 73 tools on the normal server and 82 on this
 > composition; read-only keys see 28 and 25 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
@@ -38,16 +41,26 @@
 > for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
+> Managed `/api/v1/pool/config` requires `read` for GET and live `admin`
+> for PUT or POST. The same `orva pool get/set` commands work in both modes.
+> Tuning rotates active managed workers without changing the installed
+> Factory or permissions. It does not activate an inactive function.
+> Managed `DELETE /api/v1/functions/{fn_id}/build-cache` requires live `write`.
+> `orva functions purge-cache` drops only that function's npm/pip cache, not
+> its installed deployment or permissions. It waits for any current build.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
 > actual connection address; a Chat turn checks the provider endpoint before
 > the turn, not at dial time.
 
-> Internal configuration qualification: optional `workloadconfig` HTTP and
-> MCP/shared-AI adapters publish environment, execution settings and encrypted
+> Managed `workloadconfig` HTTP and MCP/shared-AI adapters publish
+> environment, execution settings and encrypted
 > secret upsert/delete through one exact-CAS/live-operator boundary. These are
-> **not normal routes or default tools**. Mutation publishes review-required
+> **not legacy routes or tools**. The names-only `read` route
+> `GET /api/v1/functions/{id}/secrets` takes a function UUID and returns
+> `{"secrets":["KEY"]}`; values are never returned. Managed secret writes use
+> `/api/v1/functions/{id}/configuration/secrets`. Mutation publishes review-required
 > deny and invalidates the old actual Factory before ACK. Explicit new Factory
 > installation and current aggregate-policy review are separate steps; stored
 > approval cannot establish current runtime authority. Configuration uses the
@@ -1022,8 +1035,17 @@ call directly. API key permissions scope the available tool set.
 > (both `write`) manage saved request presets by function name or UUID without
 > invoking code. In managed MCP and Chat, each tool rechecks the operator's live
 > credential and required tier at call time, and works for inactive functions.
-> Only the normal catalog also offers `test_function_with_fixture` to run a
-> preset; its shallow-merge `override` does not change the stored fixture.
+> `test_function_with_fixture` requires `invoke` and runs a saved preset. In
+> managed mode it rechecks that live tier and uses only the installed managed
+> function, without approving its permissions. Overrides do not change the
+> stored preset; header names are case-insensitive.
+
+> **Managed Egress tools.** `list_firewall_rules`, `get_egress_policy_status`,
+> `add_firewall_rule`, `delete_firewall_rule`, `get_dns_config`, and
+> `set_dns_config` require live `admin` authority in managed MCP and Chat.
+> They use the same serving policy manager as REST. DNS settings are validated
+> together before any value is written. Use policy status to distinguish stored
+> rules from the compiled generation.
 
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 
@@ -1252,6 +1274,7 @@ surface (used by the dashboard, also callable from the CLI):
 | `/api/v1/oauth/connected-apps/{id}` | DELETE | Revoke a grant (idempotent — re-revoke returns 404) |
 | `/api/v1/oauth/clients/{client_id}` | DELETE | Retire the application itself: revokes its grants, drops its pending authorization codes, and blocks re-authorization without fresh consent. Instance-wide |
 | `/api/v1/auth/sessions` | GET | List the calling user's active browser sessions (token returned as 16-char prefix only) |
+| `/api/v1/auth/change-password` | POST | Same-origin browser session only in managed mode. Change the password, keep the current session, and revoke other sessions. A revocation failure returns a warning. |
 | `/api/v1/auth/sessions/{prefix}` | DELETE | Revoke another session by prefix; calling session refuses unless `?allow_self=1` |
 
 ### MCP — Agent channels (function bundles as tools)
@@ -2147,6 +2170,12 @@ stored policy combines its inline grants and its enabled attached policies;
 grants apply only once approved for the function's current deployment.
 Detaching removes one source; revoking disables a policy for every function it
 is attached to. Other sources may still grant the same access.
+
+In the dashboard, open a function's Permissions page from Functions →
+Permissions. A typed `/web/functions/<name>/permissions` URL resolves a name,
+but a segment that is itself a canonical UUID is treated as a function id first,
+so a function whose name is UUID-shaped is ambiguous in a typed URL.
+Functions → Permissions always addresses the exact id.
 
 The MCP and in-product Chat tools are:
 list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,

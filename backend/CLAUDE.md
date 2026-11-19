@@ -38,6 +38,8 @@ over `workload_inbound_publications` (triggers unpublish any non-managed write;
 restore clears them), the existing signature verifiers, and only the managed
 Factory path; `InboundTriggerHandler.Managed` has no legacy fallback.
 Managed custom routes use one published-mapping lookup in `InvokeHandler`.
+Managed password changes use the shared browser authentication handler with a
+live same-origin session and the session invalidation callback.
 Managed MCP/Chat route and inbound-webhook tools (`tools_managed_exposures_linux.go`)
 register only with `Deps.Triggers`, delegate to `workloadtrigger.Service` and share
 the exposure schema with `registerExposureTools`; the normal catalog is unchanged.
@@ -71,17 +73,22 @@ goes through `Proxy.Forward` and therefore the managed pool; managed never serve
 non-`active` function from a prior code directory. `registerManagedOperationTools`
 shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools`,
 `registerKeyTools` and `registerKVTools` with the normal catalog (73/28 unchanged;
-managed 75/25) and adds `list_activity`, `list_channels`, `get_channel` and
+managed 82/25) and adds `list_activity`, `list_channels`, `get_channel` and
 `replay_execution`. Managed KV tools recheck the live operator credential's
 read/write tier at tool entry and never dispatch to a worker.
 Managed MCP and Chat share the DB-only `registerFixtureTools` with legacy mode,
-rechecking the live operator tier per call without registering fixture execution.
+rechecking the live operator tier per call. `test_function_with_fixture` requires
+the exact live invoke tier and a proxy bound to the serving managed authority.
+Managed Firewall/DNS tools share the serving manager and require the live admin
+tier per call. REST and MCP validate DNS before one settings write.
 Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation
 and mark it inactive in the deny publication transaction. Explicit installation
 can recover that association after a same-boot restart; policy review remains
-separate. Managed deletion reserves metadata history and retires the Factory
+separate. Managed build-cache purge shares the builder and GC owner lock and
+rechecks live write access before removing only the dependency cache.
+Managed deletion reserves metadata history and retires the Factory
 at the same gate before deleting the row. It does not reclaim sealed outputs.
 
 `workloadconfig` is an internal opt-in environment/execution-settings/secret
@@ -233,6 +240,9 @@ Internal `ManagedAuthority` mode installs concrete frozen Factories, derives
 resources from the same generation used for spawn, and denies missing owners
 without legacy fallback. Current caller/target observers share the IAM gate;
 retirement and generation-bound Release reject late or obsolete workers.
+Managed pool tuning holds the owner mutation lock through commit and worker
+rotation. Tuning and egress rotations preserve the installed Factory and its
+concurrency semaphore; egress uses the last published tuning.
 Public Proxy timeout/header facts come from the acquired generation. The live
 scratch fixture exercises pooled KV and two-sided buffered calls; normal
 serving construction, boot schemas and production policy routes remain off.
