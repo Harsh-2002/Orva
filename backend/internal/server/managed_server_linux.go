@@ -6,13 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 
 	"github.com/Harsh-2002/Orva/backend/internal/ai"
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
+	"github.com/Harsh-2002/Orva/backend/internal/backup"
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/firewall"
@@ -186,7 +189,16 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 	}
 	handler, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, configuration, publication, in.dataDir,
-		runtime.invoke, runtime.async, mountChat)
+		runtime.invoke, runtime.async, mountChat, func(w http.ResponseWriter, r *http.Request) {
+			handlers.DownloadBackup(w, r, db, in.dataDir, func(ctx context.Context, dst io.Writer, snapshot string) error {
+				stage, err := os.MkdirTemp(in.dataDir, "snapshot-sources-")
+				if err != nil {
+					return err
+				}
+				defer os.RemoveAll(stage)
+				return backup.ArchiveManagedTo(ctx, dst, in.artifacts, in.dataDir, snapshot, stage)
+			})
+		})
 	if err != nil {
 		return nil, err
 	}

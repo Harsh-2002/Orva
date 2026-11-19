@@ -193,12 +193,14 @@ func bindManagedOwnerTx(ctx context.Context, tx *sql.Tx, owner string) error {
 	if _, err := tx.ExecContext(ctx, ownerBindingTable); err != nil {
 		return ErrManagedOwnerInvalid
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workload_owner_binding VALUES(1,1,?);
-		CREATE TRIGGER workload_owner_binding_no_update BEFORE UPDATE ON workload_owner_binding
-			BEGIN SELECT RAISE(ABORT,'managed owner binding is permanent'); END;
-		CREATE TRIGGER workload_owner_binding_no_delete BEFORE DELETE ON workload_owner_binding
-			BEGIN SELECT RAISE(ABORT,'managed owner binding is permanent'); END;`, owner); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workload_owner_binding VALUES(1,1,?);`+ownerBindingTriggers, owner); err != nil {
 		return ErrManagedOwnerInvalid
 	}
 	return nil
 }
+
+const ownerBindingTriggers = `
+		CREATE TRIGGER workload_owner_binding_no_update BEFORE UPDATE ON workload_owner_binding
+			BEGIN SELECT RAISE(ABORT,'managed owner binding is permanent'); END;
+		CREATE TRIGGER workload_owner_binding_no_delete BEFORE DELETE ON workload_owner_binding
+			BEGIN SELECT RAISE(ABORT,'managed owner binding is permanent'); END;`

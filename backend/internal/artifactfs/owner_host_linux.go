@@ -36,6 +36,17 @@ type ownerHostBinding struct {
 	MAC      string      `json:"mac"`
 }
 
+// CheckProvisionedWitness checks an offline operation's pre-existing witness
+// without creating stores or changing the witness.
+func CheckProvisionedWitness(host *OwnerHostConfig, dataDir string) error {
+	w, err := openOwnerWitness(OwnerConfig{Host: host, MetadataRoot: dataDir, CodeRoot: dataDir, RuntimeRoot: dataDir})
+	if err != nil {
+		return err
+	}
+	defer clear(w.token[:])
+	return w.file.Close()
+}
+
 func ownerHostPath(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path &&
 		len(path) <= 4096 && utf8.ValidString(path) && !strings.ContainsRune(path, 0)

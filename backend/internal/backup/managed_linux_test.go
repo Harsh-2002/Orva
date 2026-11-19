@@ -126,6 +126,21 @@ func TestManagedArchive(t *testing.T) {
 		strings.Join(names, ",") != "manifest.json,orva.db,keys/master.key,"+sourceName(digest) {
 		t.Fatalf("wrong archived contents: %v", names)
 	}
+	t.Run("guarded same owner", func(t *testing.T) {
+		dst := t.TempDir()
+		must(RestoreSealedFromGuardedDB(bytes.NewReader(correct), dst, func(path string) error {
+			return database.RequireManagedOwnerBinding(t.Context(), path, owner)
+		}))
+		if _, err := os.Stat(filepath.Join(dst, "sources")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("same-host restore installed portable sources")
+		}
+		other := ids.New()
+		if err := RestoreSealedFromGuardedDB(bytes.NewReader(correct), t.TempDir(), func(path string) error {
+			return database.RequireManagedOwnerBinding(t.Context(), path, other)
+		}); !errors.Is(err, database.ErrManagedOwnerMismatch) {
+			t.Fatalf("foreign restore accepted: %v", err)
+		}
+	})
 	for name, data := range map[string][]byte{
 		"changed": rewrite(func(h *tar.Header, data []byte) []byte {
 			if h.Name == sourceName(digest) {

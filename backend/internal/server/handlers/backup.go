@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -41,7 +43,15 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmp, err := os.CreateTemp(h.Cfg.Data.Dir, "snapshot-*.db")
+	DownloadBackup(w, r, h.DB, h.Cfg.Data.Dir, func(_ context.Context, dst io.Writer, snapshot string) error {
+		return backup.ArchiveTo(dst, h.Cfg.Data.Dir, snapshot)
+	})
+}
+
+func DownloadBackup(w http.ResponseWriter, r *http.Request, db *database.Database, dataDir string,
+	writeArchive func(context.Context, io.Writer, string) error,
+) {
+	tmp, err := os.CreateTemp(dataDir, "snapshot-*.db")
 	if err != nil {
 		respond.Error(w, http.StatusInternalServerError, "BACKUP_FAILED", "create snapshot tempfile: "+err.Error(), "")
 		return
@@ -53,7 +63,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(tmpPath)
 	defer os.Remove(tmpPath)
 
-	if err := backup.SnapshotDB(h.DB.WriteDB(), tmpPath); err != nil {
+	if err := backup.SnapshotDB(db.WriteDB(), tmpPath); err != nil {
 		respond.Error(w, http.StatusInternalServerError, "BACKUP_FAILED", "snapshot: "+err.Error(), "")
 		return
 	}
@@ -68,14 +78,21 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	// Disable any intermediate buffering proxies might do.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	if err := backup.ArchiveTo(w, h.Cfg.Data.Dir, tmpPath); err != nil {
-		// Headers are already flushed, so we can't switch to a JSON
-		// error response. Best we can do is log via the response
-		// writer if it's still open. The client will see a truncated
-		// gzip stream and gunzip will complain — that's the right
-		// signal.
-		return
+	tracked := &archiveResponse{ResponseWriter: w}
+	if err := writeArchive(r.Context(), tracked, tmpPath); err != nil && !tracked.started {
+		w.Header().Del("Content-Disposition")
+		respond.Error(w, http.StatusInternalServerError, "BACKUP_FAILED", "Could not prepare backup", "")
 	}
+}
+
+type archiveResponse struct {
+	http.ResponseWriter
+	started bool
+}
+
+func (w *archiveResponse) Write(p []byte) (int, error) {
+	w.started = true
+	return w.ResponseWriter.Write(p)
 }
 
 // restoreRestartExitCode is what the process exits with after a successful

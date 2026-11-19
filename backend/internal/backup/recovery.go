@@ -34,7 +34,7 @@ func recoveryPathAllowed(rel string) bool {
 	return false
 }
 
-func validateRecoveryStage(stage, dataDir string) error {
+func validateRecoveryStage(stage, dataDir string, portable bool) error {
 	if err := filepath.WalkDir(stage, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -43,7 +43,9 @@ func validateRecoveryStage(stage, dataDir string) error {
 		if err != nil || rel == "." {
 			return err
 		}
-		if !recoveryPathAllowed(filepath.ToSlash(rel)) || d.Type()&os.ModeSymlink != 0 {
+		allowed := recoveryPathAllowed(filepath.ToSlash(rel)) ||
+			(portable && (rel == "sources" || strings.HasPrefix(rel, "sources/")))
+		if !allowed || d.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%w: reserved or unsupported recovery path", ErrBadArchive)
 		}
 		return nil

@@ -38,12 +38,12 @@ const managedMaxBodyBytes = 6 << 20
 
 func managedRoutes(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler) (http.Handler, error) {
-	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil)
+	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil, nil)
 }
 
 func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler,
-	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps),
+	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps), downloadBackup http.HandlerFunc,
 ) (http.Handler, error) {
 	if db == nil || reg == nil || authority == nil || !manager.ManagedBy(authority) {
 		return nil, errManagedServerUnavailable
@@ -66,6 +66,9 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	if downloadBackup != nil {
+		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, true, downloadBackup))
+	}
 	authenticate := managedOperator(db)
 	(&workloadpolicy.ManagedHTTPAdapter{Service: policy, Authenticate: authenticate}).Register(mux)
 	if invoke != nil {

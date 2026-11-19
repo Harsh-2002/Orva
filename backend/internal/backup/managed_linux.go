@@ -335,3 +335,13 @@ func validManagedManifest(m managedManifest) bool {
 }
 
 const managedGzipName = "orva-managed-v2"
+
+func stageIfPortable(r io.Reader, stage string) (io.Reader, bool, error) {
+	b := bufio.NewReader(r)
+	p, _ := b.Peek(10 + len(managedGzipName) + 1)
+	if len(p) < 10 || p[3] != 8 || string(p[10:]) != managedGzipName+"\x00" {
+		return b, false, nil
+	}
+	_, err := StageManaged(context.Background(), b, stage)
+	return b, true, err
+}

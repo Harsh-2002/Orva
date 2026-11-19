@@ -103,6 +103,10 @@ func (l *Lock) relocate(r Record, step func(string) error) error {
 }
 
 func (l *Lock) relocateLocked(r Record, step func(string) error) error {
+	return l.relocateLockedWithMode(r, step, "", nil)
+}
+
+func (l *Lock) relocateLockedWithMode(r Record, step func(string) error, modePhase string, modeStep func(string) error) error {
 	if !r.valid() || r.Mode != Managed {
 		return errors.New("invalid managed relocation identity")
 	}
@@ -232,5 +236,5 @@ func (l *Lock) relocateLocked(r Record, step func(string) error) error {
 	if err := step("relocated"); err != nil {
 		return err
 	}
-	return l.write(r)
+	return l.writeWithStep(r, modePhase, modeStep)
 }

@@ -52,7 +52,7 @@ func newManagedCmd() *cobra.Command {
 	enroll.Flags().BoolVar(&confirm, "confirm", false, "confirm the offline layout conversion")
 	enroll.Flags().StringArrayVar(&exclude, "exclude", nil, "explicit legacy function UUID to leave inactive (repeatable, apply only)")
 	enroll.MarkFlagsMutuallyExclusive("dry-run", "apply")
-	cmd.AddCommand(enroll)
+	cmd.AddCommand(enroll, newManagedRestoreCmd())
 	return cmd
 }
 

@@ -40,26 +40,9 @@ func applyManagedEnrollment(ctx context.Context, root string, lock *servingmode.
 	if int64(count) > maxCurrent {
 		return fmt.Errorf("sealed store can reserve at most %d current builds; explicitly exclude more functions", maxCurrent)
 	}
-	runtimes := []string{}
-	for _, lang := range []string{"node", "python"} {
-		path := filepath.Join(root, "rootfs", lang)
-		resolved, err := filepath.EvalSymlinks(path)
-		if errors.Is(err, os.ErrNotExist) && !required[lang] {
-			continue
-		}
-		if err != nil || resolved != path {
-			return errors.Join(fmt.Errorf("installed %s runtime must be a local rootfs", lang), err)
-		}
-		if err := sandbox.CheckManagedRuntime(path, sandbox.Language(lang)); err != nil {
-			return fmt.Errorf("validate installed %s runtime: %w", lang, err)
-		}
-		runtimes = append(runtimes, lang)
-	}
-	nsjail := config.Defaults().Sandbox.NsjailBin
-	if len(required) != 0 {
-		if st, err := os.Stat(nsjail); err != nil || !st.Mode().IsRegular() || st.Mode()&0111 == 0 {
-			return errors.New("the installed nsjail executable is required before enrollment")
-		}
+	runtimes, nsjail, err := managedBuildPreflight(root, required)
+	if err != nil {
+		return err
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
 	intent, err := lock.BeginEnrollment(digest)
@@ -83,6 +66,31 @@ func applyManagedEnrollment(ctx context.Context, root string, lock *servingmode.
 	return intent.Publish()
 }
 
+func managedBuildPreflight(root string, required map[string]bool) ([]string, string, error) {
+	var runtimes []string
+	for _, lang := range []string{"node", "python"} {
+		path := filepath.Join(root, "rootfs", lang)
+		resolved, err := filepath.EvalSymlinks(path)
+		if errors.Is(err, os.ErrNotExist) && !required[lang] {
+			continue
+		}
+		if err != nil || resolved != path {
+			return nil, "", errors.Join(fmt.Errorf("installed %s runtime must be a local rootfs", lang), err)
+		}
+		if err := sandbox.CheckManagedRuntime(path, sandbox.Language(lang)); err != nil {
+			return nil, "", fmt.Errorf("validate installed %s runtime: %w", lang, err)
+		}
+		runtimes = append(runtimes, lang)
+	}
+	nsjail := config.Defaults().Sandbox.NsjailBin
+	if len(required) != 0 {
+		if st, err := os.Stat(nsjail); err != nil || !st.Mode().IsRegular() || st.Mode()&0111 == 0 {
+			return nil, "", errors.New("the installed nsjail executable is required before rebuilding deployments")
+		}
+	}
+	return runtimes, nsjail, nil
+}
+
 func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record servingmode.Record, runtimes []string,
 	plan *enrollmentPlan, skipped map[string]bool, dbPlan *database.LegacyEnrollment, step func(string) error,
 ) (err error) {
@@ -102,40 +110,11 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 	if err != nil {
 		return err
 	}
-	for _, lang := range runtimes {
-		runtime, err := artifactfs.SealInstalledRuntime(ctx, assets.Runtime, lang, filepath.Join(root, "rootfs", lang))
-		if err != nil {
-			return fmt.Errorf("seal installed %s runtime: %w", lang, err)
-		}
-		lease, err := assets.Runtime.Acquire(runtime.Generation)
-		if err != nil {
-			return err
-		}
-		err = sandbox.CheckManagedRuntime(lease.Path(), sandbox.Language(lang))
-		lease.Release()
-		if err != nil {
-			return fmt.Errorf("validate sealed %s runtime: %w", lang, err)
-		}
-		dbPlan.Runtimes[lang] = runtime.Generation
-		if err := step("runtime_sealed"); err != nil {
-			return err
-		}
-	}
-	outputConfig := managedOutputConfig(root, managedOwnerConfig(root).CodeLimits)
-	outputConfig.CodeStore, outputConfig.ParentDomain = assets.Code, assets.Domain
-	output, err := builder.NewOutputOwner(outputConfig)
+	build, dispose, err := managedRebuilder(ctx, root, nsjail, assets, runtimes, dbPlan.Runtimes, step)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		stop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = errors.Join(err, output.RetryCleanup(stop), output.Close())
-	}()
-	build := builder.New(builder.WithManagedOutput(output), builder.WithRuntimeBinding(func(_ context.Context, req builder.RuntimeRequest) (builder.RuntimeBinding, error) {
-		return builder.RuntimeBinding{Runtime: sandbox.BuildRuntime{Store: assets.Runtime, Generation: dbPlan.Runtimes[string(req.Language)]}}, nil
-	}))
-	build.NsjailBin, build.DataDir = nsjail, root
+	defer func() { err = errors.Join(err, dispose()) }()
 	snapshot, err := database.New(filepath.Join(scratch, "snapshot.db"))
 	if err != nil {
 		return err
@@ -157,6 +136,46 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 		dbPlan.Functions = append(dbPlan.Functions, e)
 	}
 	return nil
+}
+
+func managedRebuilder(ctx context.Context, root, nsjail string, assets artifactfs.OwnerBindings, runtimes []string,
+	generations map[string]string, step func(string) error,
+) (*builder.Builder, func() error, error) {
+	for _, lang := range runtimes {
+		runtime, err := artifactfs.SealInstalledRuntime(ctx, assets.Runtime, lang, filepath.Join(root, "rootfs", lang))
+		if err != nil {
+			return nil, nil, fmt.Errorf("seal installed %s runtime: %w", lang, err)
+		}
+		lease, err := assets.Runtime.Acquire(runtime.Generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = sandbox.CheckManagedRuntime(lease.Path(), sandbox.Language(lang))
+		lease.Release()
+		if err != nil {
+			return nil, nil, fmt.Errorf("validate sealed %s runtime: %w", lang, err)
+		}
+		generations[lang] = runtime.Generation
+		if err := step("runtime_sealed"); err != nil {
+			return nil, nil, err
+		}
+	}
+	outputConfig := managedOutputConfig(root, managedOwnerConfig(root).CodeLimits)
+	outputConfig.CodeStore, outputConfig.ParentDomain = assets.Code, assets.Domain
+	output, err := builder.NewOutputOwner(outputConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	dispose := func() error {
+		stop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return errors.Join(output.RetryCleanup(stop), output.Close())
+	}
+	build := builder.New(builder.WithManagedOutput(output), builder.WithRuntimeBinding(func(_ context.Context, req builder.RuntimeRequest) (builder.RuntimeBinding, error) {
+		return builder.RuntimeBinding{Runtime: sandbox.BuildRuntime{Store: assets.Runtime, Generation: generations[string(req.Language)]}}, nil
+	}))
+	build.NsjailBin, build.DataDir = nsjail, root
+	return build, dispose, nil
 }
 
 func buildEnrollmentFunction(ctx context.Context, root, scratch string, build *builder.Builder, assets artifactfs.OwnerBindings,

@@ -17,12 +17,13 @@ import (
 )
 
 const (
-	MarkerName   = ".orva-serving-mode"
-	enrollIntent = ".orva-enrollment-intent"
-	Env          = "ORVA_SERVING_MODE"
-	Legacy       = "legacy"
-	Provisioning = "provisioning"
-	Managed      = "managed"
+	MarkerName     = ".orva-serving-mode"
+	enrollIntent   = ".orva-enrollment-intent"
+	portableIntent = ".orva-portable-restore-intent"
+	Env            = "ORVA_SERVING_MODE"
+	Legacy         = "legacy"
+	Provisioning   = "provisioning"
+	Managed        = "managed"
 
 	lockName     = ".workload-recovery.lock"
 	managedGuard = ".orva-managed-data"
@@ -54,15 +55,21 @@ type Lock struct {
 
 // Acquire takes the existing recovery lock before resolving any serving mode.
 func Acquire(dataDir string) (*Lock, error) {
-	return acquireLayout(dataDir, true)
+	return acquireLayout(dataDir, true, false)
 }
 
 // AcquireEnrollment never creates the lock, even on a dry run of an old layout.
 func AcquireEnrollment(dataDir string) (*Lock, error) {
-	return acquireLayout(dataDir, false)
+	return acquireLayout(dataDir, false, false)
 }
 
-func acquireLayout(dataDir string, create bool) (*Lock, error) {
+// AcquireForInspection never creates a lock. An uninitialized directory
+// without one is an advisory observation, not an exclusive write capability.
+func AcquireForInspection(dataDir string) (*Lock, error) {
+	return acquireLayout(dataDir, false, true)
+}
+
+func acquireLayout(dataDir string, create, advisory bool) (*Lock, error) {
 	abs, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, err
@@ -100,6 +107,9 @@ func acquireLayout(dataDir string, create bool) (*Lock, error) {
 	}
 	file, err := flock(fd, true, create)
 	if err != nil {
+		if advisory && errors.Is(err, unix.ENOENT) {
+			return &Lock{root: root}, nil
+		}
 		return fail(err)
 	}
 	return &Lock{root: root, file: file}, nil
@@ -136,7 +146,7 @@ func lockLegacy(fd int) (*os.File, error) {
 }
 
 func checkLegacyStart(fd int) error {
-	for _, name := range []string{managedGuard, MarkerName, enrollIntent, dbName} {
+	for _, name := range []string{managedGuard, MarkerName, enrollIntent, portableIntent, dbName} {
 		st, err := statAt(fd, name)
 		if err != nil {
 			return fmt.Errorf("check %s: %w", name, err)
@@ -151,6 +161,8 @@ func checkLegacyStart(fd int) error {
 			return errors.New("legacy serve requires no .orva-serving-mode file")
 		case name == enrollIntent:
 			return errEnrollmentIncomplete
+		case name == portableIntent:
+			return errPortableIncomplete
 		case st.Mode&unix.S_IFMT == unix.S_IFDIR:
 			return errors.New("legacy SQLite path orva.db is a directory; leaving the tombstone intact")
 		}
@@ -188,6 +200,9 @@ func flock(fd int, strict, create bool) (*os.File, error) {
 }
 
 func (l *Lock) Close() error {
+	if l.file == nil {
+		return l.root.Close()
+	}
 	return errors.Join(l.root.Close(), l.file.Close())
 }
 
@@ -214,10 +229,15 @@ func controlFile(fd int, max int64) error {
 }
 
 func (l *Lock) Read() (Record, error) {
-	if st, err := statAt(int(l.root.Fd()), enrollIntent); err != nil {
-		return Record{}, err
-	} else if st != nil {
-		return Record{}, errEnrollmentIncomplete
+	for _, m := range []struct {
+		name string
+		err  error
+	}{{enrollIntent, errEnrollmentIncomplete}, {portableIntent, errPortableIncomplete}} {
+		if st, err := statAt(int(l.root.Fd()), m.name); err != nil {
+			return Record{}, err
+		} else if st != nil {
+			return Record{}, m.err
+		}
 	}
 	return l.readMode()
 }
@@ -352,6 +372,10 @@ func checkTombstone(parent int, name string) error {
 }
 
 func (l *Lock) write(r Record) error {
+	return l.writeWithStep(r, "", nil)
+}
+
+func (l *Lock) writeWithStep(r Record, phase string, step func(string) error) error {
 	if !r.valid() {
 		return errors.New("invalid serving-mode record")
 	}
@@ -364,6 +388,11 @@ func (l *Lock) write(r Record) error {
 	defer unix.Unlinkat(parent, tmp, 0)
 	if err := createSyncedFile(parent, tmp, raw); err != nil {
 		return fmt.Errorf("stage serving-mode record: %w", err)
+	}
+	if step != nil {
+		if err := step(phase); err != nil {
+			return err
+		}
 	}
 	if err := unix.Renameat(parent, tmp, parent, MarkerName); err != nil {
 		return fmt.Errorf("publish serving-mode record: %w", err)

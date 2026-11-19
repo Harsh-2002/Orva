@@ -495,38 +495,39 @@ func restoreFrom(r io.Reader, dataDir string, beforeInstall func(string) error, 
 	// promote the staged tree the dir is already empty.
 	defer os.RemoveAll(stage)
 
-	if err := extractTarGzChecked(r, stage, beforeInstall != nil); err != nil {
-		return fmt.Errorf("restore: extract: %w", err)
-	}
-
-	manifest, err := readAndVerifyManifest(stage, beforeInstall != nil)
-	if err != nil {
-		return err
-	}
-
 	stagedFns := filepath.Join(stage, "functions")
-	if sealed {
-		entries, err := os.ReadDir(stagedFns)
-		if (err != nil && !os.IsNotExist(err)) || len(entries) != 0 {
-			return fmt.Errorf("%w: sealed restore cannot include a mutable functions tree", ErrBadArchive)
-		}
-	} else if err := healReadyMarkers(stagedFns); err != nil {
-		return fmt.Errorf("restore: heal readiness markers: %w", err)
-	}
-
 	stagedDB := filepath.Join(stage, "orva.db")
-	if _, err := os.Stat(stagedDB); err != nil {
-		return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
+	portable := false
+	if sealed {
+		r, portable, err = stageIfPortable(r, stage)
+		if err != nil {
+			return err
+		}
 	}
-	// Validate by opening + integrity-check. If the file is corrupted
-	// or wasn't actually SQLite this fails loudly here, before we touch
-	// the live DB. Validation failures point at the supplied file, not
-	// the server, so flag them as bad-archive too.
-	if err := validateStagedDB(stagedDB); err != nil {
-		return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
+	if !portable {
+		if err := extractTarGzChecked(r, stage, beforeInstall != nil); err != nil {
+			return fmt.Errorf("restore: extract: %w", err)
+		}
+		if _, err := readAndVerifyManifest(stage, beforeInstall != nil); err != nil {
+			return err
+		}
+		if sealed {
+			entries, err := os.ReadDir(stagedFns)
+			if (err != nil && !os.IsNotExist(err)) || len(entries) != 0 {
+				return fmt.Errorf("%w: sealed restore cannot include a mutable functions tree", ErrBadArchive)
+			}
+		} else if err := healReadyMarkers(stagedFns); err != nil {
+			return fmt.Errorf("restore: heal readiness markers: %w", err)
+		}
+		if _, err := os.Stat(stagedDB); err != nil {
+			return fmt.Errorf("%w: archive missing orva.db", ErrBadArchive)
+		}
+		if err := validateStagedDB(stagedDB); err != nil {
+			return fmt.Errorf("%w: validate staged db: %v", ErrBadArchive, err)
+		}
 	}
 	if beforeInstall != nil {
-		if err := validateRecoveryStage(stage, dataDir); err != nil {
+		if err := validateRecoveryStage(stage, dataDir, portable); err != nil {
 			return err
 		}
 		if err := beforeInstall(stagedDB); err != nil {
@@ -625,7 +626,6 @@ func restoreFrom(r io.Reader, dataDir string, beforeInstall func(string) error, 
 		return fmt.Errorf("restore: rebuild symlinks (data installed; symlinks broken): %w", err)
 	}
 
-	_ = manifest // keep available in case we surface stats later
 	return nil
 }
 

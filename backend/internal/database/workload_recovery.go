@@ -96,6 +96,17 @@ func (db *Database) ApplyRecoveryForFixture(ctx context.Context, operation strin
 		return RecoveryResult{}, err
 	}
 	defer tx.Rollback()
+	result, err := applyRecoveryTx(ctx, tx, operation, false)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RecoveryResult{}, fmt.Errorf("recovery commit: %w", err)
+	}
+	return result, nil
+}
+
+func applyRecoveryTx(ctx context.Context, tx *sql.Tx, operation string, portable bool) (RecoveryResult, error) {
 	if err := recoveryPreflight(ctx, tx, &RecoveryReport{}); err != nil {
 		return RecoveryResult{}, err
 	}
@@ -105,7 +116,7 @@ func (db *Database) ApplyRecoveryForFixture(ctx context.Context, operation strin
 		}
 	}
 	var result RecoveryResult
-	err = tx.QueryRowContext(ctx, `SELECT epoch,operation FROM workload_recovery WHERE id=1`).Scan(&result.Epoch, &result.Operation)
+	err := tx.QueryRowContext(ctx, `SELECT epoch,operation FROM workload_recovery WHERE id=1`).Scan(&result.Epoch, &result.Operation)
 	first := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !first {
 		return RecoveryResult{}, err
@@ -129,7 +140,7 @@ func (db *Database) ApplyRecoveryForFixture(ctx context.Context, operation strin
 		if err := quarantineManagedInboundTx(ctx, tx); err != nil {
 			return RecoveryResult{}, err
 		}
-		if err := quarantineIAMTx(ctx, tx, operation); err != nil {
+		if err := quarantineIAMTx(ctx, tx, operation, portable); err != nil {
 			return RecoveryResult{}, err
 		}
 		result.Epoch++
@@ -153,9 +164,6 @@ func (db *Database) ApplyRecoveryForFixture(ctx context.Context, operation strin
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workload_recovery VALUES(1,1,?,?)
 	 ON CONFLICT(id) DO UPDATE SET epoch=excluded.epoch,operation=excluded.operation`, result.Epoch, result.Operation); err != nil {
 		return RecoveryResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return RecoveryResult{}, fmt.Errorf("recovery commit: %w", err)
 	}
 	return result, nil
 }
@@ -220,7 +228,7 @@ func migrateLegacyIAMTx(ctx context.Context, tx *sql.Tx, operation string, quara
 	return nil
 }
 
-func quarantineIAMTx(ctx context.Context, tx *sql.Tx, operation string) error {
+func quarantineIAMTx(ctx context.Context, tx *sql.Tx, operation string, portable bool) error {
 	// Scan bounded identifiers, then validate canonical retained state per owner.
 	rows, err := tx.QueryContext(ctx, `SELECT function_id FROM workload_iam_policies ORDER BY function_id LIMIT ?`, RecoveryMaxOwners+1)
 	if err != nil {
@@ -254,9 +262,14 @@ func quarantineIAMTx(ctx context.Context, tx *sql.Tx, operation string) error {
 		r.Revision++
 		r.AuthorityEpoch++
 		r.Quarantined = true
+		if portable {
+			r.ApprovedArtifact = IAMUnboundArtifact
+			r.ReviewRequired = true
+		}
 		r.UpdatedAt = time.Now().UTC()
-		if _, err := tx.ExecContext(ctx, `UPDATE workload_iam_policies SET revision=?,authority_epoch=?,quarantined=1,updated_at=? WHERE function_id=?`,
-			int64(r.Revision), int64(r.AuthorityEpoch), r.UpdatedAt.Format(time.RFC3339Nano), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE workload_iam_policies SET revision=?,authority_epoch=?,quarantined=1,
+			approved_artifact=?,review_required=?,updated_at=? WHERE function_id=?`, int64(r.Revision), int64(r.AuthorityEpoch),
+			r.ApprovedArtifact, r.ReviewRequired, r.UpdatedAt.Format(time.RFC3339Nano), id); err != nil {
 			return err
 		}
 		if err := appendIAMAudit(ctx, tx, r, IAMActorReference{Kind: "system", ID: operation}); err != nil {
