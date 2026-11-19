@@ -222,7 +222,9 @@ describe('keep-alive route scoping', () => {
   })
 
   it('InboundWebhooks follows the function in the URL', async () => {
-    const InboundWebhooks = (await import('@/views/InboundWebhooks.vue')).default
+    // The legacy view directly: the route dispatcher needs the managed-IAM
+    // store, and this test is about a keep-alived view following the URL.
+    const InboundWebhooks = (await import('@/views/LegacyInboundWebhooks.vue')).default
     const { go } = await boot([
       { path: '/functions/:name/inbound-webhooks', name: 'function-inbound-webhooks', component: InboundWebhooks, props: true },
     ], '/functions/alpha/inbound-webhooks')

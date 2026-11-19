@@ -145,13 +145,27 @@ func init() {
 	// Inbound subcommand tree.
 	inboundWebhooksCmd.AddCommand(inboundListCmd)
 	inboundWebhooksCmd.AddCommand(inboundCreateCmd)
+	inboundWebhooksCmd.AddCommand(inboundUpdateCmd)
 	inboundWebhooksCmd.AddCommand(inboundDeleteCmd)
 	inboundWebhooksCmd.AddCommand(inboundTestCmd)
 
 	inboundCreateCmd.Flags().String("name", "", "subscription name (required)")
 	inboundCreateCmd.Flags().String("format", "hmac_sha256_hex",
 		"signature format: hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack")
+	inboundCreateCmd.Flags().String("header", "",
+		"signature header override (default: the format's own header)")
 	inboundCreateCmd.MarkFlagRequired("name")
+
+	inboundUpdateCmd.Flags().String("name", "", "rename the trigger")
+	inboundUpdateCmd.Flags().String("format", "",
+		"signature format: hmac_sha256_hex|hmac_sha256_base64|github|stripe|slack")
+	inboundUpdateCmd.Flags().String("header", "", "signature header")
+	inboundUpdateCmd.Flags().Bool("active", true, "accept (true) or refuse (false) calls")
+	inboundUpdateCmd.Flags().String("expected-version", "",
+		"managed only: use this version token instead of the one just read")
+
+	inboundDeleteCmd.Flags().String("expected-version", "",
+		"managed only: use this version token instead of the one just read")
 
 	inboundTestCmd.Flags().String("data", `{"hello":"orva"}`, "JSON payload to sign and POST (inline, @file, or @-)")
 	inboundTestCmd.Flags().String("secret", "",
@@ -463,6 +477,23 @@ var inboundDeleteCmd = &cobra.Command{
 	RunE:  runInboundDelete,
 }
 
+var inboundUpdateCmd = &cobra.Command{
+	Use:   "update [function-name-or-id] [trigger-id]",
+	Short: "Update an inbound webhook trigger",
+	Long: `Change a trigger's name, signature format, signature header or active
+state. Only the flags you pass change.
+
+A managed server requires the exact lowercase owner and trigger UUIDs and
+reads the trigger's version and owner authority immediately before the
+update. A 409 means it changed; nothing is retried automatically — inspect
+the current row and run the command again.
+
+  orva webhooks inbound update payments 0190000a-0000-7000-8000-0000000000aa --active=false
+  orva webhooks inbound update payments 0190000a-0000-7000-8000-0000000000aa --name github-deploys --format github`,
+	Args: cobra.ExactArgs(2),
+	RunE: runInboundUpdate,
+}
+
 var inboundTestCmd = &cobra.Command{
 	Use:   "test [function-name-or-id] [trigger-id]",
 	Short: "Sign a payload locally with --secret and POST it to the trigger URL",
@@ -478,11 +509,17 @@ func runInboundList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fnID, err := resolveFnID(client, args[0])
+	managed := managedServer(client)
+	owner := args[0]
+	if managed {
+		owner, err = managedOwnerUUID(args[0])
+	} else {
+		owner, err = resolveFnID(client, args[0])
+	}
 	if err != nil {
 		return err
 	}
-	resp, err := client.Get("/api/v1/functions/" + fnID + "/inbound-webhooks")
+	resp, err := client.Get("/api/v1/functions/" + owner + "/inbound-webhooks")
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
@@ -494,8 +531,36 @@ func runInboundList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if outputJSON(cmd) {
-		return emitRaw(raw)
+	if managed {
+		var result struct {
+			InboundWebhooks []struct {
+				ID              string    `json:"id"`
+				Name            string    `json:"name"`
+				SignatureFormat string    `json:"signature_format"`
+				SecretPreview   string    `json:"secret_preview"`
+				Version         string    `json:"version"`
+				Active          bool      `json:"active"`
+				Published       bool      `json:"published"`
+				CreatedAt       time.Time `json:"created_at"`
+			} `json:"inbound_webhooks"`
+			Truncated bool `json:"truncated"`
+		}
+		if err := jsonUnmarshal(raw, &result); err != nil {
+			return err
+		}
+		if outputJSON(cmd) {
+			return emitRaw(raw)
+		}
+		t := newTable("ID", "NAME", "FORMAT", "VERSION", "PUBLISHED", "ACTIVE", "CREATED")
+		for _, h := range result.InboundWebhooks {
+			t.row(h.ID, h.Name, h.SignatureFormat, h.Version, h.Published, h.Active, h.CreatedAt.Format(time.DateTime))
+		}
+		t.flush()
+		infof(cmd, "\nTotal: %d", len(result.InboundWebhooks))
+		if result.Truncated {
+			infof(cmd, "Showing the first 256 triggers; delete one to see the rest.")
+		}
+		return nil
 	}
 	var result struct {
 		InboundWebhooks []struct {
@@ -507,6 +572,9 @@ func runInboundList(cmd *cobra.Command, args []string) error {
 			Active          bool      `json:"active"`
 			CreatedAt       time.Time `json:"created_at"`
 		} `json:"inbound_webhooks"`
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
 	}
 	if err := jsonUnmarshal(raw, &result); err != nil {
 		return err
@@ -526,20 +594,54 @@ func runInboundCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fnID, err := resolveFnID(client, args[0])
+	managed := managedServer(client)
+	owner := args[0]
+	if managed {
+		owner, err = managedOwnerUUID(args[0])
+	} else {
+		owner, err = resolveFnID(client, args[0])
+	}
 	if err != nil {
 		return err
 	}
 	name, _ := cmd.Flags().GetString("name")
 	format, _ := cmd.Flags().GetString("format")
+	header, _ := cmd.Flags().GetString("header")
+	path := "/api/v1/functions/" + owner + "/inbound-webhooks"
 
-	resp, err := client.Post("/api/v1/functions/"+fnID+"/inbound-webhooks", map[string]any{
-		"name": name, "signature_format": format,
-	})
-	if err != nil {
-		return fmt.Errorf("create: %w", err)
+	var resp *http.Response
+	if managed {
+		// Omit the trigger key: the server mints the id and returns the
+		// create-time expectations for it (version zero).
+		inspection, err := inspectManagedExposure(client, "inbound", "", owner)
+		if err != nil {
+			return err
+		}
+		body := managedCASBody(inspection)
+		body["name"] = name
+		body["signature_format"] = format
+		if header != "" {
+			body["signature_header"] = header
+		}
+		resp, err = client.Post(path, body)
+		if err != nil {
+			return fmt.Errorf("create: %w", err)
+		}
+	} else {
+		body := map[string]any{"name": name, "signature_format": format}
+		if header != "" {
+			body["signature_header"] = header
+		}
+		resp, err = client.Post(path, body)
+		if err != nil {
+			return fmt.Errorf("create: %w", err)
+		}
 	}
-	if err := checkResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	raw, err := io.ReadAll(resp.Body)
@@ -554,23 +656,140 @@ func runInboundCreate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runInboundUpdate(cmd *cobra.Command, args []string) error {
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
+	}
+	managed := managedServer(client)
+	owner := args[0]
+	if managed {
+		owner, err = managedOwnerUUID(args[0])
+		if err == nil && !canonicalManagedUUID(args[1]) {
+			err = fmt.Errorf("managed mode needs the trigger's exact lowercase UUID, got %q", args[1])
+		}
+	} else {
+		owner, err = resolveFnID(client, args[0])
+	}
+	if err != nil {
+		return err
+	}
+	id := args[1]
+
+	f := cmd.Flags()
+	fields := map[string]any{}
+	if f.Changed("name") {
+		value, _ := f.GetString("name")
+		fields["name"] = value
+	}
+	if f.Changed("format") {
+		value, _ := f.GetString("format")
+		fields["signature_format"] = value
+	}
+	if f.Changed("header") {
+		value, _ := f.GetString("header")
+		fields["signature_header"] = value
+	}
+	if f.Changed("active") {
+		value, _ := f.GetBool("active")
+		fields["active"] = value
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("update: nothing to change — pass at least one of --name/--format/--header/--active")
+	}
+
+	body := fields
+	if managed {
+		inspection, err := inspectManagedExposure(client, "inbound", id, owner)
+		if err != nil {
+			return err
+		}
+		version, err := managedVersion(cmd, inspection)
+		if err != nil {
+			return err
+		}
+		cas := managedCASBody(inspection)
+		cas["version"] = version
+		for key, value := range fields {
+			cas[key] = value
+		}
+		body = cas
+	}
+
+	resp, err := client.Put("/api/v1/functions/"+owner+"/inbound-webhooks/"+id, body)
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if outputJSON(cmd) {
+		return emitRaw(raw)
+	}
+	okf(cmd, "Inbound webhook %s updated", id)
+	return nil
+}
+
 func runInboundDelete(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
 		return err
 	}
-	fnID, err := resolveFnID(client, args[0])
+	managed := managedServer(client)
+	owner := args[0]
+	if managed {
+		owner, err = managedOwnerUUID(args[0])
+		if err == nil && !canonicalManagedUUID(args[1]) {
+			err = fmt.Errorf("managed mode needs the trigger's exact lowercase UUID, got %q", args[1])
+		}
+	} else {
+		owner, err = resolveFnID(client, args[0])
+	}
 	if err != nil {
 		return err
 	}
 	if err := confirm(cmd, fmt.Sprintf("Delete inbound webhook %q?", args[1])); err != nil {
 		return err
 	}
-	resp, err := client.Delete("/api/v1/functions/" + fnID + "/inbound-webhooks/" + args[1])
-	if err != nil {
-		return fmt.Errorf("delete: %w", err)
+	path := "/api/v1/functions/" + owner + "/inbound-webhooks/" + args[1]
+
+	var resp *http.Response
+	if managed {
+		inspection, err := inspectManagedExposure(client, "inbound", args[1], owner)
+		if err != nil {
+			return err
+		}
+		version, err := managedVersion(cmd, inspection)
+		if err != nil {
+			return err
+		}
+		cas := managedCASBody(inspection)
+		cas["version"] = version
+		cas["confirm"] = true
+		resp, err = client.Do(http.MethodDelete, path, cas)
+		if err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
+	} else {
+		resp, err = client.Delete(path)
+		if err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
 	}
-	if err := checkResponse(resp); err != nil {
+	if managed {
+		if err := checkManagedResponse(resp); err != nil {
+			return err
+		}
+	} else if err := checkResponse(resp); err != nil {
 		return err
 	}
 	resp.Body.Close()
@@ -584,13 +803,24 @@ func runInboundDelete(cmd *cobra.Command, args []string) error {
 // runInboundTest signs the payload locally with --secret in whatever format the
 // trigger row declares (or --format override) and POSTs it to the trigger URL.
 // Mirrors the verifier in internal/server/handlers/inbound_webhook_trigger.go
-// so all five supported formats round-trip.
+// so all five supported formats round-trip. Managed servers have no /sign
+// endpoint, but signing is local, so this flow is identical there as long as
+// the trigger is published.
 func runInboundTest(cmd *cobra.Command, args []string) error {
 	client, err := getClient(cmd)
 	if err != nil {
 		return err
 	}
-	fnID, err := resolveFnID(client, args[0])
+	managed := managedServer(client)
+	owner := args[0]
+	if managed {
+		owner, err = managedOwnerUUID(args[0])
+		if err == nil && !canonicalManagedUUID(args[1]) {
+			err = fmt.Errorf("managed mode needs the trigger's exact lowercase UUID, got %q", args[1])
+		}
+	} else {
+		owner, err = resolveFnID(client, args[0])
+	}
 	if err != nil {
 		return err
 	}
@@ -605,20 +835,32 @@ func runInboundTest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read data: %w", err)
 	}
 
-	getResp, err := client.Get("/api/v1/functions/" + fnID + "/inbound-webhooks/" + id)
+	getResp, err := client.Get("/api/v1/functions/" + owner + "/inbound-webhooks/" + id)
 	if err != nil {
 		return fmt.Errorf("lookup: %w", err)
 	}
 	if err := checkResponse(getResp); err != nil {
 		return err
 	}
-	var hook struct {
+	// A legacy server returns the row; the managed API wraps it.
+	type triggerLookup struct {
 		ID              string `json:"id"`
 		SignatureFormat string `json:"signature_format"`
 		SignatureHeader string `json:"signature_header"`
 	}
-	if err := decodeJSON(getResp, &hook); err != nil {
+	var lookup struct {
+		triggerLookup
+		InboundWebhook *triggerLookup `json:"inbound_webhook"`
+	}
+	if err := decodeJSON(getResp, &lookup); err != nil {
 		return fmt.Errorf("decode response: %w", err)
+	}
+	hook := lookup.triggerLookup
+	if lookup.InboundWebhook != nil {
+		hook = *lookup.InboundWebhook
+	}
+	if hook.ID == "" {
+		return fmt.Errorf("lookup: the server returned no trigger")
 	}
 
 	format := hook.SignatureFormat

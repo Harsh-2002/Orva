@@ -37,8 +37,9 @@ change.
 |---|---|
 | `src/api/client.js` | Axios instance; injects `X-Orva-API-Key`, and dispatches an `orva:unauthorized` window event on any 401 — `App.vue` listens and redirects to sign-in, because an expired session used to leave every list silently blank |
 | `src/api/endpoints.js` | Every API helper function (one per endpoint) |
+| `src/api/managedExposure.js` | Managed custom-route and inbound-webhook wire adapter. Validates canonical owner/trigger UUIDs and decimal-string counters, forwards the inspected `version`/`expected` pair unchanged, and maps 409 to a `stale` error the views retire into a re-read rather than a retry. Nothing is synthesised: never build a CAS body from a list row |
 | `src/router/` | Vue Router route table |
-| `src/components/layout/Sidebar.vue` | Same flat, task-ordered navigation on desktop and mobile; managed Policies follows Functions. The mobile drawer scrolls, closes on selection, and is excluded from keyboard navigation while closed. |
+| `src/components/layout/Sidebar.vue` | Same flat, task-ordered navigation on desktop and mobile; managed Routes and Policies follow Functions, both under the same capability gate. The mobile drawer scrolls, closes on selection, and is excluded from keyboard navigation while closed. |
 | `src/stores/auth.js` | Auth state + login/logout |
 | `src/stores/confirm.js` | Global confirmation modal store |
 | `src/stores/events.js` | Persistent SSE connection to `/api/v1/events` |
@@ -59,7 +60,9 @@ change.
 | `src/stores/testbench.js` | Test-run state keyed by function id, shared by the editor strip and the workbench. Owns the invoke, the fixtures, and the log fetch |
 | `src/views/InvocationsLog.vue` | Execution history drawer + request panel + replay button + suggest-fix |
 | `src/views/Settings.vue` | System settings, backup/restore card, storage card |
-| `src/views/InboundWebhooks.vue` | Inbound webhook trigger management |
+| `src/views/InboundWebhooks.vue` | Route dispatcher for `/functions/:name/inbound-webhooks`: the managed view when `/api/v1/iam/capabilities` reports managed, otherwise `LegacyInboundWebhooks.vue` (the pre-managed implementation, kept byte-identical). Managed selectors are exact UUIDs and there is no `/sign` endpoint, so the two cannot share one component |
+| `src/views/ManagedInboundWebhooks.vue` + `src/components/exposure/ManagedInboundWebhooksPanel.vue` | Managed inbound triggers. The URL carries a name; the owner UUID comes only from the managed function directory and an unknown name is refused, never resolved by guess. Create/update/pause/resume/delete each read the trigger and its owner authority immediately before writing; a 409 keeps the draft and refreshes, a 403 flips the panel read-only. The secret is shown once with a copy-now note and a published badge per row |
+| `src/views/ManagedRoutes.vue` + `src/components/exposure/ManagedRoutesPanel.vue` | Managed custom routes (`/routes`, `meta.managedIAM`). Lists version/publication state, creates, rebinds and deletes. Save always inspects the path with the intended owner first (so a rebind carries both owners), keeps the draft on 409 and requires a deliberate re-save; 403 is a read-only state. The sidebar entry sits after Functions under the same capability gate as Policies |
 | `src/views/Dashboard.vue` | System overview; its Server response time card uses `response_latency_ms` (full public invoke handler), not the shorter `latency_ms` proxy interval |
 | `src/views/Traces.vue` | Trace list with filters + outlier badges; generation guards discard obsolete successes and failures, including after deactivation |
 | `src/views/TraceDetail.vue` | Single-trace waterfall + span detail; active-only non-overlapping five-second refresh and manual Refresh retain the last snapshot with a stale notice on failure |
