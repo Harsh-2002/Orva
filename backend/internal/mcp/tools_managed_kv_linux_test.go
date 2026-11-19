@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -35,17 +34,9 @@ func TestManagedOperatorKV(t *testing.T) {
 	key := `{"function_id":"` + owner + `","key":"counter"}`
 
 	// Real external MCP request, then a Chat registry read against the same DB.
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
-		rpcBody(t, 1, "tools/call", map[string]any{
-			"_meta": newProtocolMeta(true), "name": "kv_put", "arguments": json.RawMessage(put),
-		})))
-	req.Header.Set("Authorization", "Bearer "+writerKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set(hdrProtocolVersion, protocolVersion20260728)
-	req.Header.Set(hdrMethod, "tools/call")
-	w := httptest.NewRecorder()
-	NewHandler(deps).ServeHTTP(w, req)
+	w := serveModernRPC(t, NewHandler(deps), writerKey, "", "tools/call", map[string]any{
+		"_meta": newProtocolMeta(true), "name": "kv_put", "arguments": json.RawMessage(put),
+	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("kv_put HTTP status: %d", w.Code)
 	}
