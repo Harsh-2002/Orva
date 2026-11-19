@@ -17,6 +17,9 @@
 > its replacement generation; it returns `409 NOT_ACTIVE`.
 > The managed Editor reads authored source from the seal, not from a legacy
 > `current` symlink. Reading source neither installs nor approves it.
+> After a successful managed build, choose **Install build** before invoking it.
+> Review permissions separately. Create and install a first build before
+> configuring its settings, environment, or secrets.
 > An admin `GET /api/v1/backup` returns a portable v2 archive of SQLite, available
 > keys and current authored source, never the host witness or sealed stores.
 > Restore managed archives with the stopped server binary's `orva managed restore`
@@ -37,10 +40,13 @@
 > actual connection address; a Chat turn checks the provider endpoint before
 > the turn, not at dial time.
 
-> Internal configuration qualification: optional `workloadconfig` HTTP and
-> MCP/shared-AI adapters publish environment, execution settings and encrypted
+> Managed `workloadconfig` HTTP and MCP/shared-AI adapters publish
+> environment, execution settings and encrypted
 > secret upsert/delete through one exact-CAS/live-operator boundary. These are
-> **not normal routes or default tools**. Mutation publishes review-required
+> **not legacy routes or tools**. The names-only `read` route
+> `GET /api/v1/functions/{id}/secrets` takes a function UUID and returns
+> `{"secrets":["KEY"]}`; values are never returned. Managed secret writes use
+> `/api/v1/functions/{id}/configuration/secrets`. Mutation publishes review-required
 > deny and invalidates the old actual Factory before ACK. Explicit new Factory
 > installation and current aggregate-policy review are separate steps; stored
 > approval cannot establish current runtime authority. Configuration uses the

@@ -283,6 +283,12 @@
         </div>
       </div>
 
+      <p class="text-sm text-foreground-muted">
+        In managed mode, build and install a function before configuring it.
+        The secrets list returns names only. Configuration changes require
+        installation; permissions review is separate.
+      </p>
+
       <div class="doc-table-wrap scrollable">
         <table class="doc-table">
           <thead>

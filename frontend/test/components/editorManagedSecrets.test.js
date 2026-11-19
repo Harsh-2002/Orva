@@ -22,6 +22,25 @@ const FN = {
 }
 const FN_B = { ...FN, id: 'fn-b', name: 'beta', code_hash: 'hb' }
 const ARTIFACT = 'a'.repeat(64)
+const BUILD = '12345678-1234-7234-8234-123456789abc'
+let buildStream
+
+class ManagedBuildStream {
+  static CLOSED = 2
+  listeners = new Map()
+  readyState = 1
+
+  constructor(url) {
+    this.url = url
+    buildStream = this
+  }
+
+  addEventListener(name, listener) { this.listeners.set(name, listener) }
+  close() { this.readyState = ManagedBuildStream.CLOSED }
+  succeed(owner) {
+    this.listeners.get('succeeded')({ data: JSON.stringify({ id: BUILD, function_id: owner, version: 3, status: 'succeeded' }) })
+  }
+}
 
 const h = vi.hoisted(() => ({
   mode: vi.fn(),
@@ -74,9 +93,18 @@ const body = () => document.body
 const byText = (text) => [...body().querySelectorAll('button')].find((b) => b.textContent.includes(text))
 
 const mounted = []
-const boot = async ({ managed, capability, path = '/functions/alpha?mode=edit' } = {}) => {
+const boot = async ({ managed, capability, path = '/functions/alpha?mode=edit', autoBuild = true } = {}) => {
   if (capability) h.mode.mockImplementation(capability)
   else h.mode.mockResolvedValue(managed ? 'managed' : 'legacy')
+  if (managed) {
+    vi.stubGlobal('EventSource', ManagedBuildStream)
+    h.post.mockImplementation(async (url) => {
+      const owner = /^\/functions\/([^/]+)\/deploy-inline$/.exec(url)?.[1]
+      if (!owner) return { data: {} }
+      if (autoBuild) setTimeout(() => buildStream?.succeed(owner), 0)
+      return { data: { deployment_id: BUILD } }
+    })
+  }
   const Editor = (await import('@/views/Editor.vue')).default
   const editorProps = (r) => ({ ...r.params, mode: r.query.mode === 'edit' ? 'edit' : '' })
   const router = createRouter({
@@ -85,6 +113,7 @@ const boot = async ({ managed, capability, path = '/functions/alpha?mode=edit' }
       { path: '/functions/new', name: 'function-new', component: Editor, props: editorProps },
       { path: '/functions/:name', name: 'function-detail', component: Editor, props: editorProps },
       { path: '/functions/:name/test', name: 'function-test', component: { render: () => null } },
+      { path: '/functions/:functionId/permissions', name: 'function-permissions', component: { render: () => null } },
       { path: '/:rest(.*)*', component: { render: () => null } },
     ],
   })
@@ -204,6 +233,8 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
+  vi.unstubAllGlobals()
+  buildStream = undefined
   document.body.innerHTML = ''
 })
 
@@ -292,6 +323,55 @@ describe('editor secrets in legacy mode', () => {
 })
 
 describe('editor deploy in managed mode', () => {
+  it('shows a separate install action for the exact built deployment, then offers permissions review', async () => {
+    const { editor } = await boot({ managed: true, path: '/functions/new', autoBuild: false })
+    editor.form.name = 'new-function'
+    h.post.mockResolvedValueOnce({ data: { id: 'fn-new' } })
+    await deploy()
+    expect(buildStream.url).toBe(`/api/v1/deployments/${BUILD}/stream`)
+    buildStream.succeed('fn-new')
+    await settle()
+
+    expect(body().textContent).toContain('Build succeeded. Install required.')
+    expect(body().textContent).not.toContain('v3 live')
+    expect(h.post.mock.calls.map(([url]) => url)).toEqual(['/functions', '/functions/fn-new/deploy-inline'])
+    expect(body().querySelector('a[href="/functions/fn-new/permissions"]')).toBeNull()
+    h.post.mockResolvedValueOnce({ data: { review_required: true, artifact: ARTIFACT } })
+    byText('Install build').click()
+    await settle()
+    expect(h.post.mock.calls.at(-1)).toEqual([`/deployments/${BUILD}/install`])
+    expect(body().textContent).toContain('Installed. Permissions review required.')
+    expect(body().querySelector('a[href="/functions/fn-new/permissions"]').textContent).toContain('Review permissions')
+  })
+
+  it('does not show an install acknowledgement on another function', async () => {
+    const first = deferred()
+    const { router } = await boot({ managed: true })
+    await deploy()
+    expect(body().textContent).toContain('Build succeeded. Install required.')
+    h.post.mockReturnValueOnce(first.promise)
+    byText('Install build').click()
+    await settle()
+    expect(h.post.mock.calls.at(-1)).toEqual([`/deployments/${BUILD}/install`])
+
+    await router.push('/functions/beta?mode=edit')
+    await settle()
+    first.resolve({ data: { review_required: true, artifact: ARTIFACT } })
+    await settle()
+    expect(body().textContent).not.toContain('Installed. Permissions review required.')
+    expect(body().querySelector('a[href="/functions/fn-b/permissions"]')).toBeNull()
+  })
+
+  it('does not offer installation for a mismatched build result', async () => {
+    await boot({ managed: true, autoBuild: false })
+    await deploy()
+    buildStream.succeed('fn-b')
+    await settle()
+    expect(body().textContent).toContain('Build result could not be verified')
+    expect(byText('Install build')).toBeUndefined()
+    expect(h.post.mock.calls.map(([url]) => url)).toEqual(['/functions/fn-a/deploy-inline'])
+  })
+
   it('creates a managed owner with only the name, runtime and exact build entrypoint', async () => {
     const { editor } = await boot({ managed: true, path: '/functions/new' })
     editor.form.name = 'new-function'

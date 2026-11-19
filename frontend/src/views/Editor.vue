@@ -241,6 +241,7 @@
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
+          :disabled="installing"
           @click="deployFunction"
         >
           <Check
@@ -251,7 +252,7 @@
             v-else-if="!deploying"
             class="w-4 h-4"
           />
-          {{ deploying ? 'Building' : justDeployed ? 'Deployed' : 'Deploy' }}
+          {{ deploying ? 'Building' : justDeployed && !lastBuild?.managed ? 'Deployed' : 'Deploy' }}
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -319,12 +320,10 @@
             <span class="run-spinner" />
             Building
           </span>
-          <!-- Which version is live is a fact about the function, not an event,
-               so it stays here rather than being announced and taken away. -->
           <span
             v-else-if="lastBuild?.version"
             class="text-[10px] text-success-fg font-medium"
-          >v{{ lastBuild.version }} live</span>
+          >v{{ lastBuild.version }} {{ lastBuild.managed ? 'built' : 'live' }}</span>
           <span
             v-if="viewMode"
             class="text-[10px] text-foreground-muted font-medium"
@@ -357,7 +356,7 @@
         <button
           :disabled="!canTest || testbench.invoking"
           class="run-btn shrink-0"
-          :title="canTest ? 'Replay the current test request' : 'Deploy first'"
+          :title="canTest ? 'Replay the current test request' : awaitingInstall ? 'Install the build first' : 'Deploy first'"
           @click="runTest"
         >
           <Play
@@ -398,6 +397,10 @@
               View log
             </button>
           </template>
+          <span
+            v-else-if="lastBuild?.managed"
+            class="text-xs text-foreground"
+          >{{ lastBuild.installed ? 'Installed. Permissions review required.' : 'Build succeeded. Install required.' }}</span>
           <template v-else>
             <!-- No status chip. "Idle" reported nothing, and "Response" next to
                  a 200 said it twice; the status code carries the tone itself. -->
@@ -432,6 +435,22 @@
             >{{ runLines.length }} log lines</span>
           </template>
         </div>
+        <Button
+          v-if="awaitingInstall && !viewMode && iam.mode === 'managed'"
+          variant="secondary"
+          size="sm"
+          :loading="installing"
+          @click="installManagedBuild"
+        >
+          Install build
+        </Button>
+        <router-link
+          v-if="lastBuild?.managed && lastBuild.installed && iam.mode === 'managed'"
+          :to="{ name: 'function-permissions', params: { functionId: lastBuild.owner } }"
+          class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
+        >
+          Review permissions →
+        </router-link>
         <button
           v-if="lastRun?.failed"
           type="button"
@@ -444,7 +463,7 @@
           Suggest fix
         </button>
         <router-link
-          v-if="fnId && form.name"
+          v-if="fnId && form.name && !awaitingInstall"
           :to="{ name: 'function-test', params: { name: form.name } }"
           class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
         >
@@ -534,7 +553,7 @@
           Suggest fix
         </Button>
         <Button
-          v-if="buildState === 'ok' && fnId && form.name"
+          v-if="buildState === 'ok' && fnId && form.name && !lastBuild?.managed"
           @click="openWorkbench"
         >
           Open workbench →
@@ -947,7 +966,8 @@
           v-if="!totalSecretsCount"
           class="text-xs text-foreground-muted"
         >
-          No secrets yet. Add a key-value pair below.<span v-if="!fnId"> They'll be saved when you deploy.</span>
+          No secrets yet. Add a key-value pair below.<span v-if="!fnId && iam.mode === 'legacy'"> They'll be saved when you deploy.</span>
+          <span v-else-if="newManagedUninstalled"> Install a build before saving secrets.</span>
         </div>
 
         <!-- Persisted secrets (only relevant once the fn exists). -->
@@ -966,8 +986,6 @@
           </button>
         </div>
 
-        <!-- Pending secrets — exist only on the new-function flow. They
-             flush to the API as part of the first deploy. -->
         <div
           v-for="(sec, idx) in pendingSecrets"
           :key="'pending-' + idx"
@@ -1005,7 +1023,7 @@
             variant="secondary"
             @click="saveSecret"
           >
-            <ShieldCheck class="w-4 h-4" /> {{ fnId ? 'Save secret' : 'Queue secret for deploy' }}
+            <ShieldCheck class="w-4 h-4" /> {{ newManagedUninstalled ? 'Keep secret locally' : fnId ? 'Save secret' : 'Queue secret for deploy' }}
           </Button>
         </div>
       </div>
@@ -1036,7 +1054,7 @@
             <span
               v-if="v.is_active"
               class="px-1.5 py-0.5 rounded text-[10px] bg-success-tint text-success-fg border border-success-ring shrink-0"
-            >Active</span>
+            >{{ iam.mode === 'managed' ? 'Current' : 'Active' }}</span>
             <span
               class="font-mono text-foreground-muted truncate"
               :title="v.code_hash"
@@ -1380,7 +1398,7 @@ const form = ref({
   ...initialExecutionSettings,
 })
 const fnId = ref('')  // backend function ID
-let managedCreated = null
+const managedCreated = shallowRef(null)
 
 const concurrencyPolicyOptions = [
   { value: 'queue', label: 'Queue requests' },
@@ -1400,6 +1418,10 @@ const buildError = ref('')
 // What the last build produced, so the modal can name the version it made
 // rather than making the operator read it back out of the log.
 const lastBuild = ref(null)
+const installingBuild = shallowRef(null)
+const installing = computed(() => installingBuild.value !== null && installingBuild.value === lastBuild.value)
+const awaitingInstall = computed(() => lastBuild.value?.managed && !lastBuild.value.installed)
+const newManagedUninstalled = computed(() => !isEditing.value && iam.mode === 'managed' && !deployedThisSession.value)
 const lastDeployAt = ref('')
 const urlCopied = ref(false)
 const suggestingFix = ref(false)
@@ -1426,6 +1448,7 @@ const buildHeadline = computed(() => {
   const b = lastBuild.value
   if (!b) return 'No build has run in this session.'
   const ms = b.durationMs == null ? '' : ` in ${b.durationMs}ms`
+  if (b.managed) return b.installed ? 'Installed. Permissions review required.' : `Build succeeded${ms}. Install required.`
   return b.version ? `v${b.version} live${ms}` : `Build succeeded${ms}`
 })
 
@@ -1648,7 +1671,7 @@ watch(viewMode, (on) => {
 // flight. While `deploying` is true, the warm pool may be holding stale
 // code (or none, on a first deploy) so test invocations should wait.
 const isDeployed = computed(() => isEditing.value || deployedThisSession.value)
-const canTest = computed(() => isDeployed.value && !deploying.value)
+const canTest = computed(() => isDeployed.value && !deploying.value && !awaitingInstall.value)
 
 // Orva offers two runtimes, latest-stable only. The id is generic (node /
 // python); the version shown here is a display label that tracks latest-stable.
@@ -2010,7 +2033,7 @@ const resetEditorState = () => {
   editorEpoch += 1
   invalidateBuild()
   fnId.value = ''
-  managedCreated = null
+  managedCreated.value = null
   loadedFunction.value = null
   managedSettingsCAS = null
   loadedEntrypoint.value = ''
@@ -2376,7 +2399,7 @@ const managedCreation = (form, entrypoint) => {
 const runDeploy = async () => {
   const inScope = editorScope()
   let id = fnId.value
-  if (!inScope() || viewMode.value || deploying.value || (isEditing.value && !id)) return
+  if (!inScope() || viewMode.value || deploying.value || installing.value || (isEditing.value && !id)) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2426,7 +2449,7 @@ const runDeploy = async () => {
       }
       const creation = managedCreation(formDraft, build.filename)
       if (id) {
-        if (!managedCreated || Object.keys(creation).some((key) => creation[key] !== managedCreated[key])) {
+        if (!managedCreated.value || Object.keys(creation).some((key) => creation[key] !== managedCreated.value[key])) {
           throw new Error('The function was already created. Open it from Functions to build again.')
         }
       } else {
@@ -2434,7 +2457,7 @@ const runDeploy = async () => {
         if (!current()) return
         if (!res.data?.id) throw new Error('Function creation could not be verified. Check Functions before retrying.')
         fnId.value = id = res.data.id
-        managedCreated = creation
+        managedCreated.value = creation
         buildLogs.value.push(`Created function: ${id}`)
       }
     } else if (!id) {
@@ -2520,6 +2543,9 @@ const runDeploy = async () => {
     const depId = deployRes.data.deployment_id
     // The editor may have been re-scoped while the upload was in flight.
     if (!current()) return
+    if (mode === 'managed' && !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(depId)) {
+      throw new Error('No exact deployment ID returned. Check deployment history before retrying.')
+    }
     if (!depId) {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
@@ -2534,7 +2560,7 @@ const runDeploy = async () => {
     // the stream emits `succeeded`. Deploying flag stays true so the
     // Deploy button keeps its loading state.
     buildLogs.value.push(`Build queued (${depId})`)
-    await streamBuild(depId, current)
+    await streamBuild(depId, current, mode, id)
   } catch (err) {
     if (!current()) return
     buildError.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
@@ -2551,7 +2577,7 @@ const runDeploy = async () => {
 //   event: succeeded     — final deployment row
 //   event: failed        — final deployment row (with error_message)
 //   event: error         — transport/server error; we fall back to polling
-const streamBuild = (depId, current) => new Promise((resolve) => {
+const streamBuild = (depId, current, mode, owner) => new Promise((resolve) => {
   if (abortActiveStream) abortActiveStream()
   const es = new EventSource(`/api/v1/deployments/${depId}/stream`)
 
@@ -2576,7 +2602,21 @@ const streamBuild = (depId, current) => new Promise((resolve) => {
     release()
     if (!current()) { resolve(); return }
     deploying.value = false
-    if (ok) {
+    if (ok && mode === 'managed') {
+      if (payload?.id !== depId || payload?.function_id !== owner) {
+        buildError.value = 'Build result could not be verified. Check deployment history.'
+        buildModalOpen.value = true
+      } else {
+        adoptDeployBaseline()
+        lastBuild.value = {
+          managed: true, owner, deploymentId: depId, installed: false,
+          version: payload.version || null, durationMs: payload.duration_ms ?? null,
+        }
+        buildLogs.value.push('Build succeeded. Install required.')
+        refreshVersions()
+        buildModalOpen.value = false
+      }
+    } else if (ok) {
       deployedThisSession.value = true
       adoptDeployBaseline()
       lastDeployAt.value = new Date().toISOString()
@@ -2641,6 +2681,36 @@ const streamBuild = (depId, current) => new Promise((resolve) => {
     }
   }
 })
+
+const installManagedBuild = async () => {
+  const build = lastBuild.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === build?.owner
+    && lastBuild.value === build && !viewMode.value && iam.mode === 'managed'
+  if (!awaitingInstall.value || deploying.value || installing.value || !current()) return
+  installingBuild.value = build
+  try {
+    const res = await apiClient.post(`/deployments/${build.deploymentId}/install`)
+    if (!current()) return
+    if (res.data?.review_required !== true || !res.data.artifact) {
+      throw new Error('Installation could not be verified. Check deployment history.')
+    }
+    build.installed = true
+    deployedThisSession.value = true
+    lastDeployAt.value = new Date().toISOString()
+    buildLogs.value.push('Installed. Permissions review required.')
+    refreshVersions()
+  } catch (err) {
+    if (!current()) return
+    confirmStore.notify({
+      title: 'Install failed',
+      message: err.response?.data?.error?.message || err.message,
+      danger: true,
+    })
+  } finally {
+    if (installingBuild.value === build) installingBuild.value = null
+  }
+}
 
 // The strip reads one run object, so its dot, status and duration cannot
 // disagree the way three independently-cleared refs could.
@@ -3014,7 +3084,7 @@ const saveSecret = async () => {
   const name = inputName.trim()
   if (!name) return
   // A new managed owner has no configuration target until installation.
-  if (!id || managedCreated) {
+  if (!id || newManagedUninstalled.value) {
     // Replace any prior pending entry with the same name.
     pendingSecrets.value = pendingSecrets.value.filter((s) => s.name !== name)
     pendingSecrets.value.push({ name, value })
@@ -3129,6 +3199,7 @@ const resetForm = async () => {
   }
   form.value.name = ''
   fnId.value = ''
+  managedCreated.value = null
   code.value = ''
   form.value.sdk = false
   deployedThisSession.value = false
