@@ -18,8 +18,10 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
+	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
+	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 	"github.com/Harsh-2002/Orva/backend/internal/urlhint"
@@ -38,13 +40,37 @@ const managedMaxBodyBytes = 6 << 20
 
 func managedRoutes(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler) (http.Handler, error) {
-	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil, nil)
+	return managedRoutesWithAsync(db, reg, authority, manager, configuration, publication, dataDir, invoke, nil, nil, nil, nil)
+}
+
+// managedRouteDeps carries the process-level services the operator surfaces
+// share with the legacy router. Every field is optional; nil/zero disables the
+// matching feature rather than falling back to a legacy equivalent.
+type managedRouteDeps struct {
+	Hub       *events.Hub
+	Metrics   *metrics.Metrics
+	StartTime time.Time
+	NsjailBin string
+	// InvalidateKey evicts an API key hash from any authentication cache. The
+	// managed authenticator reads keys live, so the default is a no-op, but
+	// the REST and MCP key surfaces must share this one closure.
+	InvalidateKey func(keyHash string)
+}
+
+func (d *managedRouteDeps) invalidateKey() func(string) {
+	if d == nil || d.InvalidateKey == nil {
+		return func(string) {}
+	}
+	return d.InvalidateKey
 }
 
 func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, manager *pool.Manager,
 	configuration *workloadconfig.Service, publication *builder.PublicationQueue, dataDir string, invoke *handlers.InvokeHandler,
-	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps), downloadBackup http.HandlerFunc,
+	async *workloadasync.Service, chat func(*http.ServeMux, mcp.Deps), downloadBackup http.HandlerFunc, ops *managedRouteDeps,
 ) (http.Handler, error) {
+	if ops == nil {
+		ops = &managedRouteDeps{}
+	}
 	if db == nil || reg == nil || authority == nil || !manager.ManagedBy(authority) {
 		return nil, errManagedServerUnavailable
 	}
@@ -69,7 +95,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	if downloadBackup != nil {
 		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, true, downloadBackup))
 	}
-	authenticate := managedOperator(db)
+	authenticate := managedActivityOperator(db)
 	(&workloadpolicy.ManagedHTTPAdapter{Service: policy, Authenticate: authenticate}).Register(mux)
 	if invoke != nil {
 		if invoke.Registry != reg || invoke.DB != db || invoke.Proxy == nil || invoke.Proxy.Pool != manager || invoke.Proxy.DB != db {
@@ -134,7 +160,8 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		}))
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
-			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers}
+			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
+			InvalidateKey: ops.invalidateKey()}
 		mux.Handle("/mcp", mcp.NewHandler(tools))
 		if chat != nil {
 			chat(mux, tools)
@@ -156,7 +183,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, true, cron.Delete))
 		}
 	}
-	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, dispatch)), nil
+	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, managedActivityMiddleware(db, ops.Hub, dispatch))), nil
 }
 
 func mountManagedCustomRoutes(mux *http.ServeMux, triggers *workloadtrigger.Service,
@@ -323,6 +350,29 @@ func managedOperator(db *database.Database) func(*http.Request) (*auth.Principal
 	}
 }
 
+func managedActor(principal *auth.Principal) *Actor {
+	source := "api"
+	if principal.Kind == auth.KindSession {
+		source = "web"
+	}
+	return &Actor{Source: source, ID: principal.ID, Type: string(principal.Kind), Label: principal.Label}
+}
+
+// managedActivityOperator is managedOperator for adapters that authenticate
+// themselves: it also attributes the request in the activity log.
+func managedActivityOperator(db *database.Database) func(*http.Request) (*auth.Principal, error) {
+	inner := managedOperator(db)
+	return func(r *http.Request) (*auth.Principal, error) {
+		principal, err := inner(r)
+		if err == nil {
+			if slot, ok := r.Context().Value(actorSlotKey{}).(*actorSlot); ok {
+				slot.set(managedActor(principal))
+			}
+		}
+		return principal, err
+	}
+}
+
 func managedSessionOrigin(r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true
@@ -341,9 +391,7 @@ func requireManagedOperator(db *database.Database, mutation bool, next http.Hand
 			respond.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Operator authentication required", "")
 			return
 		}
-		ctx := auth.WithOperator(WithActor(r.Context(), &Actor{
-			ID: principal.ID, Type: string(principal.Kind), Label: principal.Label,
-		}), principal)
+		ctx := auth.WithOperator(WithActor(r.Context(), managedActor(principal)), principal)
 		ref, ok := auth.OperatorFromContext(ctx)
 		if !ok || db.CheckIAMOperator(ctx, ref, mutation) != nil {
 			respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Current operator authority required", "")

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/ai"
 	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
@@ -29,6 +30,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/sdkauth"
 	"github.com/Harsh-2002/Orva/backend/internal/sdkhost"
 	"github.com/Harsh-2002/Orva/backend/internal/secrets"
+	"github.com/Harsh-2002/Orva/backend/internal/server/events"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadasync"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
@@ -42,6 +44,9 @@ type managedRuntime struct {
 	invoke    *handlers.InvokeHandler
 	scheduler *scheduler.Scheduler
 	async     *workloadasync.Service
+	hub       *events.Hub
+	metrics   *metrics.Metrics
+	startTime time.Time
 }
 
 func newManagedRuntime(db *database.Database, reg *registry.Registry, authority *workloadiam.Authority, sm *secrets.Manager, tmpl pool.SandboxTemplate, limiter *sandbox.Limiter) *managedRuntime {
@@ -63,11 +68,17 @@ func newManagedRuntime(db *database.Database, reg *registry.Registry, authority 
 	manager = pool.NewManager(pool.ManagerConfig{ManagedAuthority: authority}, tmpl, db, reg, limiter)
 	host.SetInvoker(&handlers.InternalInvokeHandler{DB: db, Registry: reg, Pool: manager, Metrics: m, SDKAuth: sdkAuth})
 	p := &proxy.Proxy{Pool: manager, DB: db, SDKAuth: sdkAuth, Config: proxy.ProxyConfig{MaxBodyBytes: managedMaxBodyBytes}}
-	invoke := &handlers.InvokeHandler{Registry: reg, Proxy: p, DB: db, Metrics: m, DataDir: tmpl.DataDir, Secrets: sm}
+	hub := events.NewHub()
+	reg.PublishEvent = hub.Publish
+	invoke := &handlers.InvokeHandler{Registry: reg, Proxy: p, DB: db, Metrics: m, DataDir: tmpl.DataDir, Secrets: sm, PublishEvent: hub.Publish}
 	s := scheduler.New(db, manager, tmpl.DataDir, nil, scheduler.WithAsyncIAM(async), scheduler.WithCronIAM(async))
 	s.SetMetrics(m)
 	s.SetSDKAuth(sdkAuth)
-	return &managedRuntime{pool: manager, invoke: invoke, scheduler: s, async: async}
+	return &managedRuntime{pool: manager, invoke: invoke, scheduler: s, async: async, hub: hub, metrics: m, startTime: time.Now()}
+}
+
+func (r *managedRuntime) routeDeps(nsjail string) *managedRouteDeps {
+	return &managedRouteDeps{Hub: r.hub, Metrics: r.metrics, StartTime: r.startTime, NsjailBin: nsjail}
 }
 
 // managedServerInput is supplied only after exclusive, admission-closed
@@ -198,7 +209,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 				defer os.RemoveAll(stage)
 				return backup.ArchiveManagedTo(ctx, dst, in.artifacts, in.dataDir, snapshot, stage)
 			})
-		})
+		}, runtime.routeDeps(in.nsjail))
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +269,7 @@ func (s *managedServer) Shutdown(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.runtime.hub.Close()
 	if s.chat != nil {
 		s.chat.Close()
 	}

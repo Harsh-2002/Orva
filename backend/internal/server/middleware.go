@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Harsh-2002/Orva/backend/internal/database"
@@ -60,12 +61,42 @@ func withActorOnly(ctx context.Context, a *Actor) context.Context {
 	if a == nil {
 		return ctx
 	}
+	if slot, ok := ctx.Value(actorSlotKey{}).(*actorSlot); ok {
+		slot.set(a)
+	}
 	return context.WithValue(ctx, actorKey, a)
+}
+
+// actorSlot lets an outer observer see an actor that an inner handler resolves.
+// Legacy auth runs outside loggerMiddleware; the managed router authenticates
+// per handler, inside it, so the activity logger reads the actor from here.
+type actorSlotKey struct{}
+
+type actorSlot struct {
+	mu    sync.Mutex
+	actor *Actor
+}
+
+func (s *actorSlot) set(a *Actor) {
+	s.mu.Lock()
+	s.actor = a
+	s.mu.Unlock()
+}
+
+func (s *actorSlot) get() *Actor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.actor
 }
 
 // ActorFromContext returns the actor stashed by authMiddleware, or a
 // best-effort anonymous fallback if none was set.
 func ActorFromContext(ctx context.Context) *Actor {
+	if slot, ok := ctx.Value(actorSlotKey{}).(*actorSlot); ok {
+		if a := slot.get(); a != nil {
+			return a
+		}
+	}
 	if a, ok := ctx.Value(actorKey).(*Actor); ok && a != nil {
 		return a
 	}
@@ -95,6 +126,16 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Trace-Id", tID)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// managedActivityMiddleware is loggerMiddleware for a router whose per-handler
+// authentication runs inside it: the actor resolved there reaches the row.
+func managedActivityMiddleware(db *database.Database, hub *events.Hub, next http.Handler) http.Handler {
+	logged := loggerMiddleware(db, hub, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), actorSlotKey{}, &actorSlot{})
+		logged.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
