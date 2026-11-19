@@ -106,7 +106,7 @@ func (h *HTTPAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, 200, out)
 }
 
-// RegisterManagedRoutes exposes only custom routes, with no legacy write handler.
+// RegisterManagedRoutes exposes custom routes and inbound webhooks, with no legacy write handler.
 func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*http.Request) (*auth.Principal, error)) {
 	register := func(pattern string, next http.HandlerFunc) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
@@ -125,24 +125,44 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 	}
 	register("GET /api/v1/exposures", func(w http.ResponseWriter, r *http.Request) {
 		q, err := managedRouteQuery(r, "kind", "key", "function_id")
-		owner := q.Get("function_id")
-		if err != nil || q.Get("kind") != "route" || q.Get("key") == "" || (owner != "" && !ids.IsUUID(owner)) {
+		owner, kind := q.Get("function_id"), q.Get("kind")
+		validKind := (kind == "route" && q.Get("key") != "") || (kind == "inbound" && owner != "")
+		if err != nil || !validKind || (owner != "" && !ids.IsUUID(owner)) || (kind == "inbound" && q.Get("key") != "" && !ids.IsUUID(q.Get("key"))) {
 			HTTPError(w, database.ErrExposureInvalid)
 			return
+		}
+		key := q.Get("key")
+		if key == "" {
+			// A fresh inbound selector inspects the owner's expectations for create.
+			key = database.NewInboundWebhookID()
 		}
 		ref, ok := auth.OperatorFromContext(r.Context())
 		if !ok {
 			HTTPError(w, database.ErrOperatorDenied)
 			return
 		}
-		out, err := s.db.InspectExposure(r.Context(), ref, "route", q.Get("key"), owner)
+		out, err := s.db.InspectExposure(r.Context(), ref, kind, key, owner)
 		if err != nil {
 			HTTPError(w, err)
 			return
 		}
 		respond.JSON(w, http.StatusOK, map[string]any{
 			"version": strconv.FormatUint(out.Version, 10), "expected": out.Expected, "route": out.Route, "route_published": out.RoutePublished,
+			"inbound_webhook": out.InboundWebhook, "inbound_published": out.InboundPublished,
 		})
+	})
+	register("GET /api/v1/routes", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := managedRouteQuery(r); err != nil {
+			HTTPError(w, err)
+			return
+		}
+		ref, _ := auth.OperatorFromContext(r.Context())
+		rows, truncated, err := s.db.ListRouteExposures(r.Context(), ref)
+		if err != nil {
+			HTTPError(w, err)
+			return
+		}
+		respond.JSON(w, http.StatusOK, map[string]any{"routes": rows, "truncated": truncated})
 	})
 	register("POST /api/v1/routes", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := managedRouteQuery(r); err != nil {
@@ -158,6 +178,72 @@ func (s *Service) RegisterManagedRoutes(mux *http.ServeMux, authenticate func(*h
 			return
 		}
 		s.HTTP(w, r, "route_delete", "", q.Get("path"))
+	})
+	// Owners and triggers are exact UUIDs; names are never adopted.
+	exact := func(r *http.Request, keys ...string) bool {
+		if _, err := managedRouteQuery(r); err != nil {
+			return false
+		}
+		for _, k := range keys {
+			if !ids.IsUUID(r.PathValue(k)) {
+				return false
+			}
+		}
+		return true
+	}
+	const collection = "/api/v1/functions/{fn_id}/inbound-webhooks"
+	register("GET "+collection, func(w http.ResponseWriter, r *http.Request) {
+		if !exact(r, "fn_id") {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		ref, _ := auth.OperatorFromContext(r.Context())
+		rows, expected, truncated, err := s.db.ListInboundExposures(r.Context(), ref, r.PathValue("fn_id"))
+		if err != nil {
+			HTTPError(w, err)
+			return
+		}
+		respond.JSON(w, http.StatusOK, map[string]any{"inbound_webhooks": rows, "expected": expected, "truncated": truncated})
+	})
+	register("POST "+collection, func(w http.ResponseWriter, r *http.Request) {
+		if !exact(r, "fn_id") {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		s.HTTP(w, r, "inbound_create", r.PathValue("fn_id"), "")
+	})
+	register("GET "+collection+"/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !exact(r, "fn_id", "id") {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		ref, _ := auth.OperatorFromContext(r.Context())
+		out, err := s.db.InspectExposure(r.Context(), ref, "inbound", r.PathValue("id"), r.PathValue("fn_id"))
+		if err != nil || out.InboundWebhook == nil {
+			if err == nil {
+				err = database.ErrExposureUnavailable
+			}
+			HTTPError(w, err)
+			return
+		}
+		respond.JSON(w, http.StatusOK, map[string]any{
+			"inbound_webhook": out.InboundWebhook, "published": out.InboundPublished,
+			"version": strconv.FormatUint(out.Version, 10), "expected": out.Expected,
+		})
+	})
+	register("PUT "+collection+"/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !exact(r, "fn_id", "id") {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		s.HTTP(w, r, "inbound_update", r.PathValue("fn_id"), r.PathValue("id"))
+	})
+	register("DELETE "+collection+"/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !exact(r, "fn_id", "id") {
+			HTTPError(w, database.ErrExposureInvalid)
+			return
+		}
+		s.HTTP(w, r, "inbound_delete", r.PathValue("fn_id"), r.PathValue("id"))
 	})
 }
 

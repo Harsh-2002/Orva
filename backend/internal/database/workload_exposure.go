@@ -35,6 +35,8 @@ type ExposureInspection struct {
 	Route          *Route                           `json:"route,omitempty"`
 	RoutePublished bool                             `json:"route_published,omitempty"`
 	InboundWebhook *InboundWebhook                  `json:"inbound_webhook,omitempty"`
+	// InboundPublished reports whether this exact mapping is dispatchable.
+	InboundPublished bool `json:"inbound_published,omitempty"`
 }
 
 // ExposureMutation contains authorable fields only; credential provenance is separate.
@@ -97,13 +99,18 @@ func readExposure(ctx context.Context, q iamQuery, kind, key string) (exposureSt
 	} else {
 		w := &InboundWebhook{}
 		var created int64
+		var digest sql.NullString
 		err = q.QueryRowContext(ctx, `SELECT id,function_id,
  CASE WHEN length(CAST(name AS BLOB))<=256 THEN name END,
  CASE WHEN length(CAST(secret AS BLOB))<=4096 THEN secret END,
  CASE WHEN length(CAST(signature_header AS BLOB))<=256 THEN signature_header END,
- CASE WHEN length(CAST(signature_format AS BLOB))<=64 THEN signature_format END,active,created_at
- FROM inbound_webhooks WHERE id=?`, key).Scan(&w.ID, &w.FunctionID, &w.Name, &w.Secret, &w.SignatureHeader, &w.SignatureFormat, &w.Active, &created)
+ CASE WHEN length(CAST(signature_format AS BLOB))<=64 THEN signature_format END,active,created_at,
+ (SELECT p.secret_digest FROM workload_inbound_publications AS p WHERE p.id=inbound_webhooks.id
+  AND p.version=? AND p.function_id=inbound_webhooks.function_id AND p.signature_format=inbound_webhooks.signature_format
+  AND p.signature_header=inbound_webhooks.signature_header AND p.active=inbound_webhooks.active)
+ FROM inbound_webhooks WHERE id=?`, out.version, key).Scan(&w.ID, &w.FunctionID, &w.Name, &w.Secret, &w.SignatureHeader, &w.SignatureFormat, &w.Active, &created, &digest)
 		if err == nil {
+			out.published = digest.Valid && digest.String == InboundSecretDigest(w.Secret)
 			w.CreatedAt = time.UnixMilli(created).UTC()
 			if len(w.Secret) >= 8 {
 				w.SecretPreview = w.Secret[:8] + "…"
@@ -176,7 +183,12 @@ func (db *Database) InspectExposure(ctx context.Context, ref OperatorCredentialR
 	if kind == "inbound" && state.inbound != nil && state.inbound.FunctionID != owner {
 		return nil, ErrExposureUnavailable
 	}
-	out := &ExposureInspection{Version: state.version, Expected: map[string]ExposureOwnerExpected{}, Route: state.route, RoutePublished: state.published, InboundWebhook: state.inbound}
+	out := &ExposureInspection{Version: state.version, Expected: map[string]ExposureOwnerExpected{}, Route: state.route, InboundWebhook: state.inbound}
+	if kind == "route" {
+		out.RoutePublished = state.published
+	} else {
+		out.InboundPublished = state.published
+	}
 	for _, id := range exposureOwnerIDs(state, owner) {
 		o, e := readExposureOwner(ctx, tx, id)
 		if e != nil {
@@ -409,6 +421,20 @@ func (db *Database) CommitExposure(ctx context.Context, ref OperatorCredentialRe
 	_, err = tx.ExecContext(ctx, `INSERT INTO workload_exposure_versions(kind,key,version) VALUES(?,?,?) ON CONFLICT(kind,key) DO UPDATE SET version=excluded.version`, kind, c.Key, c.Version+1)
 	if err != nil {
 		return nil, ErrExposureUnavailable
+	}
+	switch c.Operation {
+	case "inbound_create", "inbound_update":
+		// The row triggers cleared any prior publication; this is the sole way to publish.
+		w := p.after
+		_, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO workload_inbound_publications(id,version,function_id,signature_format,signature_header,active,secret_digest)
+ VALUES(?,?,?,?,?,?,?)`, w.ID, c.Version+1, w.FunctionID, w.SignatureFormat, w.SignatureHeader, boolToInt(w.Active), InboundSecretDigest(w.Secret))
+		if err != nil {
+			return nil, ErrExposureUnavailable
+		}
+	case "inbound_delete":
+		if _, err = tx.ExecContext(ctx, `DELETE FROM workload_inbound_publications WHERE id=?`, c.Key); err != nil {
+			return nil, ErrExposureUnavailable
+		}
 	}
 	if c.Operation == "route_set" {
 		// Updating the mapping clears its prior publication, even for same-value legacy writes.

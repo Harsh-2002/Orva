@@ -36,6 +36,19 @@ CREATE TRIGGER IF NOT EXISTS workload_route_unpublish_on_update
  AFTER UPDATE ON routes BEGIN DELETE FROM workload_route_publications WHERE path IN (OLD.path,NEW.path); END;
 CREATE TRIGGER IF NOT EXISTS workload_route_unpublish_on_insert
  AFTER INSERT ON routes BEGIN DELETE FROM workload_route_publications WHERE path=NEW.path; END;
+CREATE TABLE IF NOT EXISTS workload_inbound_publications (
+ id TEXT PRIMARY KEY REFERENCES inbound_webhooks(id) ON DELETE CASCADE,
+ version INTEGER NOT NULL CHECK(typeof(version)='integer' AND version>0),
+ function_id TEXT NOT NULL,
+ signature_format TEXT NOT NULL,
+ signature_header TEXT NOT NULL,
+ active INTEGER NOT NULL CHECK(active IN (0,1)),
+ secret_digest TEXT NOT NULL CHECK(length(secret_digest)=64)
+);
+CREATE TRIGGER IF NOT EXISTS workload_inbound_unpublish_on_update
+ AFTER UPDATE ON inbound_webhooks BEGIN DELETE FROM workload_inbound_publications WHERE id IN (OLD.id,NEW.id); END;
+CREATE TRIGGER IF NOT EXISTS workload_inbound_unpublish_on_insert
+ AFTER INSERT ON inbound_webhooks BEGIN DELETE FROM workload_inbound_publications WHERE id=NEW.id; END;
 `)
 	return err
 }

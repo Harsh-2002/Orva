@@ -53,6 +53,10 @@ type InboundTriggerHandler struct {
 	Metrics  *metrics.Metrics
 	SDKAuth  *sdkauth.Authenticator
 
+	// Managed resolves only attested, published mappings and dispatches only to
+	// the exact current managed Factory generation. There is no legacy fallback.
+	Managed bool
+
 	// PublishEvent fires an `event: execution` so the live UI sees
 	// inbound-triggered runs in the same feed as HTTP invokes. Wired in
 	// server.New from events.Hub.Publish; nil-safe.
@@ -77,7 +81,20 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	hook, err := h.DB.GetInboundWebhook(id)
+	var hook *database.InboundWebhook
+	var err error
+	if h.Managed {
+		hook, err = h.DB.MatchManagedInbound(r.Context(), id)
+		if errors.Is(err, database.ErrExposureUnavailable) {
+			respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "inbound webhook lookup unavailable", reqID)
+			return
+		}
+		if err == nil && hook == nil {
+			err = errors.New("unpublished")
+		}
+	} else {
+		hook, err = h.DB.GetInboundWebhook(id)
+	}
 	if err != nil {
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "inbound webhook not found", reqID)
 		return
@@ -156,10 +173,23 @@ func (h *InboundTriggerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		respond.ErrorWithDetail(w, status, opts)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
 	var reqErr error
 	defer func() { h.Pool.Release(acq, reqErr) }()
+	if h.Managed {
+		if !h.Pool.AcceptsManagedVersion(acq, fn.Version) {
+			status, opts := invokeError(proxy.ErrInvocationVersionChanged, fn, reqID)
+			respond.ErrorWithDetail(w, status, opts)
+			return
+		}
+		if facts, managed := acq.ManagedResources(); managed && facts.Timeout > 0 {
+			timeout = facts.Timeout
+		} else {
+			respond.Error(w, http.StatusServiceUnavailable, "FUNCTION_UNAVAILABLE", "target function not available", reqID)
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
 
 	// Generate execution id up-front so the activity + execution rows
 	// stay correlated. Format mirrors invoke / cron / job.

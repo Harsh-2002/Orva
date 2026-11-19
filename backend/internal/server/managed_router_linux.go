@@ -83,6 +83,9 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 				return nil, err
 			}
 			dispatch = mountManagedCustomRoutes(mux, triggers, authenticate, invoke)
+			// Published, attested inbound triggers only; never the legacy row lookup.
+			mux.Handle("/webhook/", &handlers.InboundTriggerHandler{DB: db, Registry: reg, Pool: manager,
+				Metrics: invoke.Metrics, SDKAuth: invoke.Proxy.SDKAuth, Managed: true})
 		}
 		webAuth := &handlers.AuthHandler{DB: db}
 		mux.HandleFunc("GET /api/v1/auth/status", webAuth.Status)

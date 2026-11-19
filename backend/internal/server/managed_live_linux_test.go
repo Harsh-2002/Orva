@@ -5,7 +5,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -333,6 +335,72 @@ func TestManagedServingLive(t *testing.T) {
 			t.Fatal("published route not observed through inspection")
 		}
 	})
+	hookCollection := "/api/v1/functions/" + node.ID + "/inbound-webhooks"
+	var hookID, hookSecret string
+	type hookState struct {
+		Version   string                     `json:"version"`
+		Expected  map[string]json.RawMessage `json:"expected"`
+		Published bool                       `json:"inbound_published"`
+	}
+	inspectHook := func(t *testing.T, id string) hookState {
+		t.Helper()
+		var state hookState
+		params := url.Values{"kind": {"inbound"}, "function_id": {node.ID}}
+		if id != "" {
+			params.Set("key", id)
+		}
+		managedMust(t, json.Unmarshal(call(t, http.MethodGet, "/api/v1/exposures?"+params.Encode(), nil, 200), &state))
+		return state
+	}
+	webhookPost := func(t *testing.T, id, body, secret string, want int) string {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, listener.URL+"/webhook/"+id, strings.NewReader(body))
+		managedMust(t, err)
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write([]byte(body))
+		req.Header.Set("X-Orva-Signature", hex.EncodeToString(mac.Sum(nil)))
+		res, err := listener.Client().Do(req)
+		managedMust(t, err)
+		defer res.Body.Close()
+		b, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		managedMust(t, err)
+		if res.StatusCode != want {
+			t.Fatalf("POST /webhook/<id>: got %d want %d: %s", res.StatusCode, want, b)
+		}
+		return string(b)
+	}
+	t.Run("inbound-webhook", func(t *testing.T) {
+		fresh := inspectHook(t, "")
+		if fresh.Version != "0" || fresh.Published {
+			t.Fatal("unexpected state for a webhook that does not exist")
+		}
+		var created struct {
+			Webhook struct {
+				ID string `json:"id"`
+			} `json:"inbound_webhook"`
+			Secret string `json:"secret"`
+		}
+		request := map[string]any{"name": "live hook", "version": fresh.Version, "expected": fresh.Expected}
+		managedMust(t, json.Unmarshal(call(t, http.MethodPost, hookCollection, request, 201), &created))
+		hookID, hookSecret = created.Webhook.ID, created.Secret
+		if hookID == "" || len(hookSecret) != 64 {
+			t.Fatal("create did not return the trigger and its one-time secret")
+		}
+		call(t, http.MethodPost, hookCollection, request, 409)
+		for _, path := range []string{hookCollection, hookCollection + "/" + hookID} {
+			if strings.Contains(string(call(t, http.MethodGet, path, nil, 200)), hookSecret) {
+				t.Fatal("inspection returned the signature secret")
+			}
+		}
+		// Rejected requests never reach the sealed worker.
+		webhookPost(t, hookID, `{"event":"push"}`, strings.Repeat("0", 64), 401)
+		if got := webhookPost(t, hookID, `{"event":"push"}`, hookSecret, 200); got != "allowed:changed" {
+			t.Fatalf("signed webhook did not use the same managed Factory and SDK policy: %q", got)
+		}
+		if current := inspectHook(t, hookID); !current.Published || current.Version != "1" {
+			t.Fatal("published webhook not observed through inspection")
+		}
+	})
 	if !t.Run("restore-archive", func(t *testing.T) {
 		owners := make([]string, 0, 2)
 		for _, lang := range []string{"node", "python"} {
@@ -394,6 +462,15 @@ func TestManagedServingLive(t *testing.T) {
 		publishRoute(t, route, 201)
 		if got := string(call(t, http.MethodGet, routeInvokePath, nil, 200)); got != "denied:403" {
 			t.Fatalf("republished route changed quarantined workload authority: %q", got)
+		}
+		webhookPost(t, hookID, `{"event":"push"}`, hookSecret, 404)
+		hook := inspectHook(t, hookID)
+		if hook.Published || hook.Version != "1" {
+			t.Fatal("restore did not preserve the webhook CAS counter while removing publication")
+		}
+		call(t, http.MethodPut, hookCollection+"/"+hookID, map[string]any{"version": hook.Version, "expected": hook.Expected}, 200)
+		if got := webhookPost(t, hookID, `{"event":"push"}`, hookSecret, 200); got != "denied:403" {
+			t.Fatalf("republished webhook changed quarantined workload authority: %q", got)
 		}
 	}) {
 		t.FailNow()

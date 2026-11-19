@@ -123,7 +123,7 @@ func TestManagedCustomRouteHTTP(t *testing.T) {
 	call("POST", "/web/index.html", "", "", 405)
 	call("GET", "/web/index.html", "", "", 204)
 	call("POST", "/fn/"+protected, "", "", 401)
-	call("GET", routes, read, "", 405)
+	call("GET", routes, read, "", 200)
 	managedMust(t, db.DeleteAPIKey(writerID))
 	call("POST", routes, write, bind("/revoked", public, "*", "0"), 403)
 }
