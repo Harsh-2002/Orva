@@ -218,4 +218,67 @@ describe('source-aware current access', () => {
     const { w } = await page(raw())
     expect(w.find('[data-testid="permissions-approval"]').exists()).toBe(false)
   })
+
+  const pending = () => {
+    let answer
+    const ask = vi.fn(() => new Promise((resolve) => { answer = resolve }))
+    return { ask, answer: (v) => answer(v) }
+  }
+  const unapproved = (revision = '2') => {
+    const s = raw()
+    s.host.review_required = true
+    s.host.approved_artifact = null
+    s.host.revision = revision
+    return s
+  }
+
+  it('does not approve expectations that changed while the confirmation was open', async () => {
+    setActivePinia(createPinia())
+    const { w, api } = await page(unapproved())
+    const dialog = pending()
+    useConfirmStore().ask = dialog.ask
+    await w.find('[data-testid="permissions-approve"]').trigger('click')
+    api.permissions.mockImplementation(async () => unapproved('3'))
+    // A full refresh: both the source view and the inline controller now hold revision 3.
+    w.findComponent(FunctionPermissions).vm.$emit('retry')
+    await flushPromises()
+    expect(w.find('[data-testid="permissions-approve"]').attributes('disabled')).toBeDefined()
+    dialog.answer(true)
+    await flushPromises()
+    expect(api.review).not.toHaveBeenCalled()
+    expect(w.find('[data-testid="permissions-approval"]').text()).toContain('Permissions changed while you were confirming')
+  })
+
+  it('does not approve another function after navigation while the confirmation was open', async () => {
+    setActivePinia(createPinia())
+    const { w, api } = await page(unapproved())
+    const dialog = pending()
+    useConfirmStore().ask = dialog.ask
+    await w.find('[data-testid="permissions-approve"]').trigger('click')
+    api.permissions.mockImplementation(async (id) => {
+      const s = unapproved()
+      s.function = { id, name: 'other-worker' }
+      return s
+    })
+    await w.setProps({ functionId: OTHER_FN_ID })
+    await flushPromises()
+    expect(w.find('[data-testid="permissions-approval"]').exists()).toBe(true)
+    dialog.answer(true)
+    await flushPromises()
+    expect(api.review).not.toHaveBeenCalled()
+  })
+
+  it('opens one confirmation and sends one approval for a double click', async () => {
+    setActivePinia(createPinia())
+    const { w, api } = await page(unapproved())
+    const dialog = pending()
+    useConfirmStore().ask = dialog.ask
+    const button = w.find('[data-testid="permissions-approve"]')
+    await button.trigger('click')
+    await button.trigger('click')
+    expect(dialog.ask).toHaveBeenCalledTimes(1)
+    dialog.answer(true)
+    await flushPromises()
+    expect(api.review).toHaveBeenCalledTimes(1)
+  })
 })

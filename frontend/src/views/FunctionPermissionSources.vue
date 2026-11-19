@@ -22,10 +22,15 @@
       <p class="measure text-sm text-foreground">
         <span class="font-medium text-foreground-strong">Not active yet.</span>
         {{ approval.text }}
+        <span
+          v-if="approveStale"
+          role="alert"
+          class="block text-warning-fg"
+        >{{ approveStale }}</span>
       </p>
       <Button
         v-if="approval.canApprove"
-        :disabled="!!approveReason"
+        :disabled="!!approveReason || approving"
         :title="approveReason"
         data-testid="permissions-approve"
         @click="approve"
@@ -302,20 +307,36 @@ const approveReason = computed(() => {
   if (controller.snapshot.value?.host.revision !== source.value?.host.revision) return 'Refresh before approving.'
   return ''
 })
+const approving = ref(false)
+const approveStale = ref('')
+// The confirmation dialog is async: approve only the owner, page lifetime and
+// exact expectations the operator saw when it opened.
 async function approve() {
-  if (approveReason.value) return
-  const confirm = useConfirmStore()
+  if (approveReason.value || approving.value) return
   const r = buildReviewPayload(controller.snapshot.value)
   if (!r.ok) return
-  const ok = await confirm.ask({
-    title: `Approve ${source.value.function.name}?`,
-    message: 'The stored grants listed on this page become active for the current deployment.',
-    confirmLabel: 'Approve',
-  })
-  if (ok && !approveReason.value) await mutateInline('review', r.payload)
+  const seen = { epoch: lifetime, owner: props.functionId, expected: JSON.stringify(r.payload.expected) }
+  approving.value = true
+  approveStale.value = ''
+  try {
+    const ok = await useConfirmStore().ask({
+      title: `Approve ${source.value.function.name}?`,
+      message: 'The stored grants listed on this page become active for the current deployment.',
+      confirmLabel: 'Approve',
+    })
+    if (!ok || seen.epoch !== lifetime || seen.owner !== props.functionId) return
+    const now = buildReviewPayload(controller.snapshot.value)
+    if (approveReason.value || !now.ok || JSON.stringify(now.payload.expected) !== seen.expected) {
+      approveStale.value = 'Permissions changed while you were confirming. Review them again.'
+      return
+    }
+    await mutateInline('review', r.payload)
+  } finally {
+    if (seen.epoch === lifetime) approving.value = false
+  }
 }
 watch(source, () => { detach.value = null })
-watch(() => props.functionId, () => { detach.value = null })
+watch(() => props.functionId, () => { detach.value = null; approving.value = false; approveStale.value = '' })
 function refresh() { detach.value = null; void actions.refresh(); void controller.refresh() }
 async function refreshInspector(epoch = lifetime) {
   await nextTick()
