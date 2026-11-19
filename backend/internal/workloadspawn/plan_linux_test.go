@@ -192,16 +192,15 @@ func artifactSchema(t *testing.T) string {
 	}
 	var statements []string
 	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || len(call.Args) != 2 {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "workloadArtifactSchema" {
 			return true
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "ExecContext" {
-			return true
+		if len(spec.Values) != 1 {
+			t.Fatal("expected one canonical schema initializer")
 		}
-		lit, ok := call.Args[1].(*ast.BasicLit)
-		if !ok {
+		lit, ok := spec.Values[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
 			t.Fatal("canonical schema changed")
 		}
 		text, err := strconv.Unquote(lit.Value)
@@ -209,7 +208,7 @@ func artifactSchema(t *testing.T) string {
 			t.Fatal(err)
 		}
 		statements = append(statements, text)
-		return true
+		return false
 	})
 	if len(statements) != 1 {
 		t.Fatal("expected one canonical schema statement")

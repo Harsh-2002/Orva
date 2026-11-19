@@ -77,32 +77,25 @@ func canonicalArtifactSchema(t *testing.T) string {
 		t.Fatal(err)
 	}
 	var statements []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "initWorkloadArtifactSchema" {
-			continue
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) < 2 {
-				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "ExecContext" {
-				return true
-			}
-			literal, ok := call.Args[1].(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				t.Fatal("canonical schema SQL changed shape; update fixture extraction")
-			}
-			sql, err := strconv.Unquote(literal.Value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			statements = append(statements, sql)
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "workloadArtifactSchema" {
 			return true
-		})
-	}
+		}
+		if len(spec.Values) != 1 {
+			t.Fatal("expected one canonical schema initializer")
+		}
+		literal, ok := spec.Values[0].(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			t.Fatal("canonical schema SQL changed shape; update fixture extraction")
+		}
+		sql, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements = append(statements, sql)
+		return false
+	})
 	if len(statements) != 1 {
 		t.Fatal("expected one canonical artifact schema statement")
 	}
