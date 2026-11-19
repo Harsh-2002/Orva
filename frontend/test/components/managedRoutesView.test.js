@@ -6,7 +6,7 @@ import router from '@/router/index.js'
 import { useManagedIAMStore } from '@/stores/managedIAM.js'
 
 vi.mock('@/api/managedPolicies.js', () => ({
-  readManagedIAMCapability: vi.fn(async () => false),
+  readManagedIAMMode: vi.fn(async () => 'legacy'),
   listManagedIAMFunctions: vi.fn(async () => []),
 }))
 vi.mock('@/components/exposure/ManagedRoutesPanel.vue', () => ({
