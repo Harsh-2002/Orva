@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -201,7 +202,7 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		return err
 	}
 	gens := make(map[string]string)
-	build, dispose, err := managedRebuilder(ctx, root, nsjail, assets, runtimes, gens, step)
+	build, dispose, err := managedRebuilder(ctx, root, nsjail, assets, runtimes, gens, backup.ManagedSourceLimit, step)
 	if err != nil {
 		return err
 	}
@@ -236,10 +237,9 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		if err != nil {
 			return err
 		}
-		hash := sha256.New()
-		err = lease.WriteBuildSource(ctx, hash)
+		err = verifyPortableSource(ctx, lease, source)
 		lease.Release()
-		if err != nil || fmt.Sprintf("%x", hash.Sum(nil)) != want || built.SourceArchiveSHA256 != want {
+		if err != nil || built.SourceArchiveSHA256 != want {
 			return errors.Join(artifactfs.ErrIntegrity, err)
 		}
 		rebuilt[d.Deployment] = database.WorkloadBuildOutput{
@@ -286,4 +286,30 @@ func rebuildPortable(ctx context.Context, root, nsjail string, intent *servingmo
 		return errors.Join(errors.New("portable SQLite checkpoint incomplete"), err)
 	}
 	return step("database_checkpointed")
+}
+
+func verifyPortableSource(ctx context.Context, lease *artifactfs.Lease, source string) error {
+	f, err := openEnrollmentFile(source)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	original := sha256.New()
+	n, err := io.Copy(original, io.LimitReader(gz, backup.ManagedSourceLimit+1))
+	if err != nil || n > backup.ManagedSourceLimit {
+		return errors.Join(artifactfs.ErrIntegrity, err)
+	}
+	actual := sha256.New()
+	if err := lease.WriteBuildSourceTar(ctx, actual); err != nil {
+		return err
+	}
+	if string(original.Sum(nil)) != string(actual.Sum(nil)) {
+		return artifactfs.ErrIntegrity
+	}
+	return nil
 }

@@ -65,7 +65,7 @@ func TestWriteBuildSource(t *testing.T) {
 	if !bytes.Equal(a.Bytes(), b.Bytes()) {
 		t.Fatal("source representation is not deterministic")
 	}
-	gz, err := gzip.NewReader(&a)
+	gz, err := gzip.NewReader(bytes.NewReader(a.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +82,18 @@ func TestWriteBuildSource(t *testing.T) {
 	}
 	if _, err := tr.Next(); !errors.Is(err, io.EOF) {
 		t.Fatalf("unexpected seal metadata: %v", err)
+	}
+	var raw bytes.Buffer
+	if err := l.WriteBuildSourceTar(t.Context(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	gz, err = gzip.NewReader(&a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := io.ReadAll(gz)
+	if err := errors.Join(err, gz.Close()); err != nil || !bytes.Equal(decoded, raw.Bytes()) {
+		t.Fatalf("gzip and raw projections differ: %v", err)
 	}
 	if err := os.WriteFile(path, []byte("changed"), 0600); err != nil {
 		t.Fatal(err)

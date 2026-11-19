@@ -26,7 +26,9 @@ const (
 	ManagedFormatVersion = 2
 	maxManagedManifest   = 1 << 20
 	maxManagedDatabase   = 32 << 30
-	maxManagedSource     = 64 << 20
+	// Regeneration can emit explicit headers even for implicit upload
+	// directories. Budget 50 MiB payload and up to 16K long-name headers.
+	ManagedSourceLimit = 160 << 20
 )
 
 type managedManifest struct {
@@ -51,7 +53,7 @@ func managedEntryLimit(name string) int64 {
 	}
 	if digest, ok := strings.CutPrefix(name, "sources/"); ok {
 		if digest, ok := strings.CutSuffix(digest, ".tar.gz"); ok && isVersionHash(digest) {
-			return maxManagedSource
+			return ManagedSourceLimit
 		}
 	}
 	return 0

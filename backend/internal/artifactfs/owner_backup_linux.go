@@ -54,6 +54,16 @@ func checkBackupPaths(path string, witnessFile *os.File, roots, files []string) 
 // The managed builder has no dependency or compilation phase; its queue
 // discards the input tar. Host ownership and seal metadata are not portable.
 func (l *Lease) WriteBuildSource(ctx context.Context, w io.Writer) (err error) {
+	gz := gzip.NewWriter(w)
+	if err := l.WriteBuildSourceTar(ctx, gz); err != nil {
+		return err
+	}
+	return gz.Close()
+}
+
+// WriteBuildSourceTar is the same projection without the gzip encoding so
+// restore verification does not depend on the compressor version.
+func (l *Lease) WriteBuildSourceTar(ctx context.Context, w io.Writer) (err error) {
 	if l == nil || l.id.Kind != KindCode || l.store.boundKind != KindCode {
 		return ErrInvalid
 	}
@@ -61,11 +71,9 @@ func (l *Lease) WriteBuildSource(ctx context.Context, w io.Writer) (err error) {
 	if err := verify(ctx, l.path, KindCode, m, l.store.limits, l.rec.reserved); err != nil {
 		return err
 	}
-	gz := gzip.NewWriter(w)
-	tw := tar.NewWriter(gz)
+	tw := tar.NewWriter(w)
 	defer func() {
-		tarErr := tw.Close()
-		err = errors.Join(err, tarErr, gz.Close())
+		err = errors.Join(err, tw.Close())
 	}()
 	for _, e := range m.Entries {
 		if err := ctx.Err(); err != nil {

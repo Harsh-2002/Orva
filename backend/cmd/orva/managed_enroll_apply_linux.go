@@ -110,7 +110,7 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 	if err != nil {
 		return err
 	}
-	build, dispose, err := managedRebuilder(ctx, root, nsjail, assets, runtimes, dbPlan.Runtimes, step)
+	build, dispose, err := managedRebuilder(ctx, root, nsjail, assets, runtimes, dbPlan.Runtimes, 0, step)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func produceEnrollment(ctx context.Context, root, scratch, nsjail string, record
 }
 
 func managedRebuilder(ctx context.Context, root, nsjail string, assets artifactfs.OwnerBindings, runtimes []string,
-	generations map[string]string, step func(string) error,
+	generations map[string]string, archiveLimit int64, step func(string) error,
 ) (*builder.Builder, func() error, error) {
 	for _, lang := range runtimes {
 		runtime, err := artifactfs.SealInstalledRuntime(ctx, assets.Runtime, lang, filepath.Join(root, "rootfs", lang))
@@ -161,6 +161,9 @@ func managedRebuilder(ctx context.Context, root, nsjail string, assets artifactf
 		}
 	}
 	outputConfig := managedOutputConfig(root, managedOwnerConfig(root).CodeLimits)
+	if archiveLimit > 0 {
+		outputConfig.ArchiveBytes = archiveLimit
+	}
 	outputConfig.CodeStore, outputConfig.ParentDomain = assets.Code, assets.Domain
 	output, err := builder.NewOutputOwner(outputConfig)
 	if err != nil {
