@@ -6,8 +6,7 @@
       class="rounded-lg border border-border bg-surface p-4 text-sm text-foreground-muted"
       role="status"
     >
-      Managed routes are unavailable: this server does not report the managed
-      IAM capability.
+      Managed routes are unavailable: the server does not report managed IAM.
     </p>
     <template v-else>
       <LoadError

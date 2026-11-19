@@ -13,8 +13,8 @@
           >
             {{ functionName }}
           </router-link>
-          from external services. Each change is checked against the trigger and
-          owner authority it was read from.
+          from external services. A concurrent change fails instead of
+          overwriting.
         </p>
         <p class="mt-1.5 text-[11px] text-foreground-muted">
           <span class="uppercase tracking-wider text-[10px]">Owner</span>
@@ -57,8 +57,7 @@
       class="rounded-lg border border-border bg-surface p-3 text-sm text-foreground-muted"
       role="status"
     >
-      Read-only. Creating, editing, pausing and deleting triggers needs current
-      write access on this server.
+      Read-only. Changing triggers needs current write access.
     </p>
 
     <div
@@ -395,8 +394,8 @@
           >Accept calls</label>
         </div>
         <p class="text-xs text-foreground-muted">
-          The signing secret is generated server-side and returned once, on
-          create. Rotating it means deleting this trigger and creating another.
+          The signing secret is returned once, on create. Rotating means delete
+          and recreate.
         </p>
         <p
           v-if="draft.error"
@@ -494,7 +493,7 @@ async function refresh() {
   } catch (error) {
     if (error?.forbidden) {
       denied.value = true
-      loadError.value = 'Reading inbound webhooks needs read access on this server.'
+      loadError.value = 'Reading inbound webhooks needs read access.'
     } else {
       loadError.value = error?.message || 'Request failed'
     }
@@ -581,7 +580,7 @@ async function save() {
       draft.error = 'You do not have write access to inbound webhooks.'
     } else if (error?.stale) {
       draft.stale = true
-      draft.error = 'The trigger or its owner authority changed since it was read. Review the current row, then save again.'
+      draft.error = 'The trigger or its owner authority changed since it was read. Review the row, then save again.'
       await refresh()
     } else {
       draft.error = error?.message || 'Save failed'
@@ -624,7 +623,7 @@ async function remove(row) {
   if (isReadOnly.value) return
   const ok = await confirmStore.ask({
     title: `Delete trigger "${row.name}"?`,
-    message: 'The URL and its signing secret stop working immediately. This cannot be undone; rotation means delete and recreate.',
+    message: 'The URL and its signing secret stop working immediately. This cannot be undone.',
     confirmLabel: 'Delete',
     danger: true,
   })
@@ -639,7 +638,7 @@ async function remove(row) {
     if (error?.forbidden) {
       denied.value = true
     } else if (error?.stale) {
-      staleNotice.value = 'The trigger changed since it was read and was not deleted. The list below is current; review it and try again.'
+      staleNotice.value = 'The trigger changed since it was read and was not deleted. The list is current; review and retry.'
       await refresh()
     } else {
       confirmStore.notify({ title: 'Delete failed', message: error?.message || 'Request failed', danger: true })
