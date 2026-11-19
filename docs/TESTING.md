@@ -1306,14 +1306,16 @@ that can actually build unlocks `code_sealed`.
 `test/managed-enroll-kill.sh OUT SRC` runs the whole thing: builds the test
 binary, creates an offline `msb` VM, extracts the runtime, installs the current
 adapters, mounts cgroup2 with `+cpu +memory +pids`, runs the suite under a clean
-`env -i`, copies the log back, removes the VM and verifies its absence.
+`env -i`, and copies the evidence into a fresh directory under `OUT`. It
+requires all six named cases to pass without skips, then removes the VM and
+verifies its absence.
 
 **Each case needs its own budget cgroup.** A killed case leaves the owner's
 controller-enabled children populated, and cgroup v2 refuses to put a new process
 in such a cgroup — reusing one budget fails with `printf: I/O error` writing
 `cgroup.procs`, which reads like a harness bug rather than a refusal. The suite
-makes a per-case `case-*` cgroup under the root budget. This is a harness lesson,
-not a product one: no product path reuses a budget after a process death.
+makes a per-case `case-*` cgroup under the root budget because each case has
+independent state. This is not the daemon's existing-budget recovery path.
 
 **Two fixture shapes are load-bearing, both found in a VM.** The host witness
 must sit in a dedicated directory the provisioner *creates*, so it is chmod'ed to
@@ -1333,8 +1335,9 @@ before `go test ./backend/cmd/orva` instead of finding it in the VM.
 **What green does not prove.** `intent` proves the interrupt and the refusal
 path; everything downstream is only as real as the runtime the VM was given. With
 a synthetic tree, `runtime_sealed` proves the seal-and-check ordering, not that a
-real Node tree seals; only `code_sealed` runs a real build. Neither suite is
-CI-gated — no job provides the cgroup or the VM.
+real Node tree seals; only `code_sealed` runs a real build. Linux CI runs the
+publication suite and the host-only `intent` case through the Go tests. The
+VM runner and its kernel-dependent cases are not CI-gated.
 
 ---
 
