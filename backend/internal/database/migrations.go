@@ -919,6 +919,10 @@ PRAGMA foreign_keys = ON;
 	// against live traffic would delete it as an orphan.
 	db.reclaimOrphanedExecutionRows()
 
+	// One-shot scrub of one-time credentials that Chat stored before it redacted
+	// them at the source. Resumable; see ai_credential_scrub.go.
+	db.scrubChatCredentials()
+
 	// Kick off the batched async writer now that the schema exists. Safe
 	// to call multiple times — Migrate is idempotent and we only start the
 	// writer if it's nil. Tests that don't call Migrate use direct bounded
