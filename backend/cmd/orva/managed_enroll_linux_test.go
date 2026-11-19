@@ -196,3 +196,81 @@ func TestManagedEnrollApplyGate(t *testing.T) {
 	enrollmentMust(t, os.WriteFile(source, []byte("exports.handler = () => ({body:'changed'})\n"), 0644))
 	assertGate([]string{excluded}, "plan differs")
 }
+
+func TestManagedEnrollDatabaseAtomic(t *testing.T) {
+	dir, first, second, hash := enrollmentFixture(t, false)
+	db, err := database.New(filepath.Join(dir, "orva.db"))
+	enrollmentMust(t, err)
+	defer func() { enrollmentMust(t, db.Close()) }()
+	f, err := db.GetFunction(first)
+	enrollmentMust(t, err)
+	other, err := db.GetFunction(second)
+	enrollmentMust(t, err)
+	gen, digest := ids.New(), strings.Repeat("b", 64)
+	plan := database.LegacyEnrollment{
+		Owner: ids.New(), Operation: ids.New(), PlanDigest: digest, Runtimes: map[string]string{"node": gen},
+		Functions: []database.LegacyEnrollmentFunction{
+			{ID: first, Generation: ids.New(), LegacyHash: hash, Revision: digest,
+				DeploymentID: f.ActiveDeploymentID, ApprovedArtifact: digest,
+				Build: database.WorkloadBuildOutput{CodeGeneration: ids.New(), CodeDigest: digest,
+					RuntimeGeneration: gen, RuntimeDigest: digest, CodeHash: hash, Entrypoint: f.Entrypoint}},
+			{ID: second, Generation: ids.New(), LegacyHash: hash, Revision: digest, LegacySDK: false, Excluded: true},
+		},
+	}
+	if err := db.CommitLegacyEnrollment(t.Context(), plan); err == nil {
+		t.Fatal("late row conflict committed")
+	}
+	fn, err := db.GetFunction(first)
+	enrollmentMust(t, err)
+	if fn.SDK {
+		t.Fatal("earlier mutation survived rollback")
+	}
+	var tables int
+	enrollmentMust(t, db.ReadDB().QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name GLOB 'workload_*'`).Scan(&tables))
+	if tables != 0 {
+		t.Fatal("partial managed schema survived rollback")
+	}
+	plan.Functions[1].LegacySDK = true
+	enrollmentMust(t, db.CommitLegacyEnrollment(t.Context(), plan))
+	enrollmentMust(t, database.RequireManagedOwnerBinding(t.Context(), filepath.Join(dir, "orva.db"), plan.Owner))
+	fn, err = db.GetFunction(first)
+	enrollmentMust(t, err)
+	if !fn.SDK || fn.Status != "active" {
+		t.Fatal("enrolled current deployment was not configured for managed transport")
+	}
+	fn, err = db.GetFunction(second)
+	enrollmentMust(t, err)
+	if fn.Status != "inactive" || fn.ActiveDeploymentID != other.ActiveDeploymentID {
+		t.Fatal("excluded deployment was lost or left serveable")
+	}
+	for id, sdk := range map[string]bool{first: false, second: true} {
+		policy, err := db.GetIAMPolicy(t.Context(), id)
+		enrollmentMust(t, err)
+		if policy.PolicyJSON != database.RecoveryEmptyPolicy || policy.ReviewRequired != sdk || policy.Quarantined != sdk {
+			t.Fatalf("unexpected policy state for legacy sdk=%t", sdk)
+		}
+		audit, err := db.ListIAMPolicyAudit(t.Context(), id)
+		enrollmentMust(t, err)
+		if len(audit) != 1 || audit[0].Actor.Kind != "system" || audit[0].Actor.ID != plan.Operation {
+			t.Fatal("missing enrollment audit")
+		}
+	}
+	for query, want := range map[string]int{
+		`SELECT count(*) FROM jobs WHERE origin_kind='function' AND authority_state='suspended'`:                   1,
+		`SELECT count(*) FROM jobs WHERE origin_kind='legacy_unknown' AND authority_state='quarantined'`:           1,
+		`SELECT count(*) FROM cron_schedules WHERE origin_kind='legacy_unknown' AND authority_state='quarantined'`: 1,
+		`SELECT count(*) FROM workload_enrollment_functions WHERE excluded=1 AND note LIKE '%review required%'`:    1,
+		`SELECT count(*) FROM workload_deployment_capture`:                                                         1,
+	} {
+		var n int
+		enrollmentMust(t, db.ReadDB().QueryRow(query).Scan(&n))
+		if n != want {
+			t.Fatalf("%s: got %d want %d", query, n, want)
+		}
+	}
+	runtimes, err := db.LegacyEnrollmentRuntimes(t.Context())
+	enrollmentMust(t, err)
+	if len(runtimes) != 1 || runtimes["node"] != gen {
+		t.Fatal("missing enrolled runtime")
+	}
+}

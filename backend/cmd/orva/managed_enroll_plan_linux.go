@@ -256,7 +256,7 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 	tw := tar.NewWriter(gz)
 	found := false
 	var entries int
-	var total int64
+	var total, tarBytes int64
 	treeCapacity := errors.New("legacy source tree exceeds the enrollment scan capacity")
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -304,6 +304,21 @@ func (f *enrollmentFunction) inspect(ctx context.Context, dataDir, scratch strin
 		}
 		if info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 			f.reject("source tree contains special permission bits")
+		}
+		if n, err := unix.Llistxattr(path, nil); err != nil {
+			return err
+		} else if n != 0 {
+			f.reject("source tree contains extended attributes")
+		}
+		tarBytes += 512
+		if len(rel) > 100 {
+			tarBytes += 512 + ((int64(len(rel))+1+511)/512)*512
+		}
+		if !d.IsDir() {
+			tarBytes += ((info.Size() + 511) / 512) * 512
+		}
+		if tarBytes >= (64<<20)-(512<<10) {
+			f.reject("source tree exceeds the managed builder archive budget")
 		}
 		if d.IsDir() {
 			if f.Reason != "" {

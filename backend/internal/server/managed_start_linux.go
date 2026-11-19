@@ -62,9 +62,22 @@ func StartManaged(ctx context.Context, in ManagedOptions) (*ManagedInstance, err
 	db, _, err := recovery.StartBound(ctx, ownerID, func(ctx context.Context, db *database.Database) error {
 		return db.InitManagedServingSchemas(ctx)
 	}, func(ctx context.Context, db *database.Database) error {
-		var err error
+		defaults, err := db.LegacyEnrollmentRuntimes(ctx)
+		if err != nil {
+			return err
+		}
+		runtimes := in.RuntimeGenerations
+		if len(defaults) != 0 {
+			runtimes = make(map[sandbox.Language]string, len(defaults)+len(in.RuntimeGenerations))
+			for lang, generation := range defaults {
+				runtimes[sandbox.Language(lang)] = generation
+			}
+			for lang, generation := range in.RuntimeGenerations {
+				runtimes[lang] = generation
+			}
+		}
 		service, err = newManagedServer(ctx, db, managedServerInput{
-			artifacts: in.Artifacts, output: in.Output, runtimeGenerations: in.RuntimeGenerations,
+			artifacts: in.Artifacts, output: in.Output, runtimeGenerations: runtimes,
 			dataDir: recovery.DataDir(), nsjail: in.NsjailBin, chatGuard: in.ChatGuard,
 		})
 		return err

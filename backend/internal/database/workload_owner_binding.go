@@ -179,6 +179,17 @@ func (db *Database) BindManagedOwner(ctx context.Context, owner string) error {
 	}
 	// In WAL a stale transaction cannot upgrade to a writer if another writer
 	// changed the database after the read above; SQLite refuses the upgrade.
+	if err := bindManagedOwnerTx(ctx, tx, owner); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("bind managed owner: %w", ErrManagedOwnerInvalid)
+	}
+	return nil
+}
+
+// Enrollment calls this only after the entire legacy population has been classified and seeded.
+func bindManagedOwnerTx(ctx context.Context, tx *sql.Tx, owner string) error {
 	if _, err := tx.ExecContext(ctx, ownerBindingTable); err != nil {
 		return ErrManagedOwnerInvalid
 	}
@@ -188,9 +199,6 @@ func (db *Database) BindManagedOwner(ctx context.Context, owner string) error {
 		CREATE TRIGGER workload_owner_binding_no_delete BEFORE DELETE ON workload_owner_binding
 			BEGIN SELECT RAISE(ABORT,'managed owner binding is permanent'); END;`, owner); err != nil {
 		return ErrManagedOwnerInvalid
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("bind managed owner: %w", ErrManagedOwnerInvalid)
 	}
 	return nil
 }

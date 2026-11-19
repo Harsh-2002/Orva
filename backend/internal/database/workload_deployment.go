@@ -15,27 +15,26 @@ import (
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
 
-// InitWorkloadDeploymentSchema is explicit scratch provisioning, never normal boot.
-func (db *Database) InitWorkloadDeploymentSchema(ctx context.Context) error {
-	_, err := db.write.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workload_deployment_capture (
+const workloadDeploymentSchema = `CREATE TABLE IF NOT EXISTS workload_deployment_capture (
 		deployment_id TEXT PRIMARY KEY REFERENCES deployments(id) ON DELETE CASCADE,
 		function_id TEXT NOT NULL REFERENCES functions(id) ON DELETE CASCADE,
 		provenance TEXT NOT NULL CHECK(length(CAST(provenance AS BLOB)) BETWEEN 1 AND 16384),
 		output TEXT NOT NULL DEFAULT '' CHECK(length(CAST(output AS BLOB)) <= 16384),
 		published_generation TEXT NOT NULL DEFAULT ''
-	)`)
-	if err != nil {
-		return workloadArtifactStorageError(ctx, "deployment schema")
-	}
-	_, err = db.write.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workload_deployment_promotion (
+	);
+	CREATE TABLE IF NOT EXISTS workload_deployment_promotion (
 		function_id TEXT PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
 		deployment_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
 		generation TEXT NOT NULL,
 		association_digest TEXT NOT NULL CHECK(length(association_digest)=64),
 		installed INTEGER NOT NULL CHECK(installed IN (0,1))
-	)`)
+	);`
+
+// InitWorkloadDeploymentSchema is explicit managed provisioning, never legacy boot.
+func (db *Database) InitWorkloadDeploymentSchema(ctx context.Context) error {
+	_, err := db.write.ExecContext(ctx, workloadDeploymentSchema)
 	if err != nil {
-		return workloadArtifactStorageError(ctx, "deployment promotion schema")
+		return workloadArtifactStorageError(ctx, "deployment schema")
 	}
 	return nil
 }

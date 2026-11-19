@@ -5,14 +5,7 @@ import (
 	"fmt"
 )
 
-// initWorkloadArtifactSchema is test-only; normal opening/migration stays inert.
-func (db *Database) initWorkloadArtifactSchema(ctx context.Context) error {
-	tx, err := db.write.BeginTx(ctx, nil)
-	if err != nil {
-		return workloadArtifactStorageError(ctx, "schema")
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `
+const workloadArtifactSchema = `
 CREATE TABLE IF NOT EXISTS workload_artifact_generations (
  function_id TEXT PRIMARY KEY REFERENCES functions(id) ON DELETE CASCADE,
  revision INTEGER NOT NULL CHECK(typeof(revision) = 'integer' AND revision > 0),
@@ -23,7 +16,16 @@ CREATE TABLE IF NOT EXISTS workload_artifact_generations (
  change_kind TEXT NOT NULL CHECK(change_kind IN ('initialize','rotate','secret_upsert','secret_delete')),
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL
-);`)
+);`
+
+// Explicit initialization only; normal opening/migration stays inert.
+func (db *Database) initWorkloadArtifactSchema(ctx context.Context) error {
+	tx, err := db.write.BeginTx(ctx, nil)
+	if err != nil {
+		return workloadArtifactStorageError(ctx, "schema")
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, workloadArtifactSchema)
 	if err != nil {
 		return workloadArtifactStorageError(ctx, "schema")
 	}

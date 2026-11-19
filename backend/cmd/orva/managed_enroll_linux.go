@@ -28,11 +28,12 @@ func newManagedCmd() *cobra.Command {
 				if !confirm || planPath == "" {
 					return errors.New("--apply requires --plan FILE and --confirm")
 				}
-				return withEnrollmentPlan(cmd.Context(), dataDir, func(_ string, _ *servingmode.Lock, _ string, plan *enrollmentPlan) error {
-					if _, err := validateEnrollmentApply(planPath, plan, exclude); err != nil {
+				return withEnrollmentPlan(cmd.Context(), dataDir, func(root string, lock *servingmode.Lock, scratch string, plan *enrollmentPlan) error {
+					skipped, err := validateEnrollmentApply(planPath, plan, exclude)
+					if err != nil {
 						return err
 					}
-					return errors.New("enrollment apply is not yet available")
+					return applyManagedEnrollment(cmd.Context(), root, lock, scratch, plan, skipped, func(stage string) error { return nil })
 				})
 			}
 			if !dryRun || confirm || len(exclude) != 0 {
