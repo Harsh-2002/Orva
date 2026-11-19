@@ -13,6 +13,7 @@ import (
 
 func registerManagedServerTools(rc *regCtx) {
 	registerManagedOperationTools(rc)
+	registerFixtureTools(rc)
 	registerIAMTools(rc)
 	registerConfigurationTools(rc)
 	registerWorkloadLifecycleTools(rc)

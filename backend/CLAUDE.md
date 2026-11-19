@@ -64,9 +64,11 @@ goes through `Proxy.Forward` and therefore the managed pool; managed never serve
 non-`active` function from a prior code directory. `registerManagedOperationTools`
 shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools`,
 `registerKeyTools` and `registerKVTools` with the normal catalog (73/28 unchanged;
-managed 72/24) and adds `list_activity`, `list_channels`, `get_channel` and
+managed 75/25) and adds `list_activity`, `list_channels`, `get_channel` and
 `replay_execution`. Managed KV tools recheck the live operator credential's
 read/write tier at tool entry and never dispatch to a worker.
+Managed MCP and Chat share the DB-only `registerFixtureTools` with legacy mode,
+rechecking the live operator tier per call without registering fixture execution.
 Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation

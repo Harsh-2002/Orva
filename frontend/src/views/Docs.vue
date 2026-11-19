@@ -258,6 +258,18 @@
         (include the route path as <code class="doc-chip">key</code>).
         Restored mappings must be explicitly republished before they can receive requests.
       </Callout>
+      <p class="doc-prose">
+        The managed REST API stores request presets at
+        <code class="doc-chip">/api/v1/functions/{id}/fixtures</code> (function name or UUID).
+        Listing or getting a preset requires <code class="doc-chip">read</code>;
+        creating, replacing, or deleting one requires <code class="doc-chip">write</code>.
+        Managed MCP and Chat also offer <code class="doc-chip">list_fixtures</code>
+        (<code class="doc-chip">read</code>), <code class="doc-chip">save_fixture</code>
+        and <code class="doc-chip">delete_fixture</code> (both <code class="doc-chip">write</code>).
+        Each tool rechecks the live credential and required permission. These tools
+        only manage stored presets; <code class="doc-chip">test_function_with_fixture</code>
+        is not available on the managed catalog.
+      </p>
     </section>
 
     <!-- ── 3. Configuration reference ─────────────────────────────── -->
@@ -771,7 +783,7 @@
         <code class="doc-chip">cacheScope: "private"</code> because the tool
         list depends on the caller. On a standard server, a full-permission
         key lists 73 tools and a read-only key lists 28. Channel tokens list
-        only their bundled functions. The managed server lists 72 and 24
+        only their bundled functions. The managed server lists 75 and 25
         tools respectively and dispatches channel calls through the managed pool.
         Use <code class="doc-chip">tools/list</code> for your exact count.
         <code class="doc-chip">ttlMs</code> is

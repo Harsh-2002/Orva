@@ -1277,6 +1277,71 @@ install, CLI, or kata harness reads it.
 
 ---
 
+### 3.6 The enrollment process-kill suites — two layers, one VM gate
+
+`orva managed enroll --apply` converts a stopped legacy instance into the managed
+layout across many durable boundaries. Two Go suites die at each one and check
+what the death left behind:
+
+| Suite | Runs | Covers |
+|---|---|---|
+| `servingmode.TestEnrollmentPublicationProcessKill` | `make test`, every host | the publication half: `intent`, `source_archived`, `staged`, `exchanged`, `tombstone`, `relocated`, `intent_removed`, `mode_staged`, and the completed layout |
+| `cmd/orva.TestManagedEnrollProcessKill` | `intent` everywhere; the rest only in a disposable VM | artifact production: `owner_provisioned`, `runtime_sealed`, `database_committed`, `code_sealed`, and the completion control |
+
+Both re-exec the test binary as a child that calls `os.Exit` at a named step, so
+no deferred cleanup runs and the flock is released only by the kernel. The
+publication suite checks refusal through the `AcquireLegacy` and `OpenData`
+library gates and checks that the payloads survive. The apply suite additionally
+checks that a real `orva serve` child exits 78 on interrupted apply. In both
+suites the serving mode must not be published early.
+
+**The gates skip, they never pass.** `ORVA_OWNER_KERNEL_TEST=disposable-vm`
+plus `ORVA_MANAGED_BOOT_BUDGET=<cgroup dir>` gate every boundary after `intent`,
+because owner capture precedes them and refuses a process outside a delegated
+budget; the child is launched through
+`printf '%s' "$$" > "$1/cgroup.procs"; exec …` so capture sees it inside. An
+executable at `/usr/local/bin/nsjail` unlocks `runtime_sealed` (a stub suffices:
+the kill precedes any build), and `ORVA_ENROLL_VM_ROOTFS` naming a runtime tree
+that can actually build unlocks `code_sealed`.
+
+`test/managed-enroll-kill.sh OUT SRC` runs the whole thing: builds the test
+binary, creates an offline `msb` VM, extracts the runtime, installs the current
+adapters, mounts cgroup2 with `+cpu +memory +pids`, runs the suite under a clean
+`env -i`, and copies the evidence into a fresh directory under `OUT`. It
+requires all six named cases to pass without skips, then removes the VM and
+verifies its absence.
+
+**Each case needs its own budget cgroup.** A killed case leaves the owner's
+controller-enabled children populated, and cgroup v2 refuses to put a new process
+in such a cgroup — reusing one budget fails with `printf: I/O error` writing
+`cgroup.procs`, which reads like a harness bug rather than a refusal. The suite
+makes a per-case `case-*` cgroup under the root budget because each case has
+independent state. This is not the daemon's existing-budget recovery path.
+
+**Two fixture shapes are load-bearing, both found in a VM.** The host witness
+must sit in a dedicated directory the provisioner *creates*, so it is chmod'ed to
+0700; a pre-existing parent keeps the mode it was born with, and under a setgid
+temp area that is 2700 → `artifactfs: integrity mismatch` before any child runs.
+The fixture data directory is chmod'ed to exactly 0700 for the same reason:
+`openManagedBootOwner` creates `sealed-*` and `managed-build` inside it with
+`Mkdir(0700)`, so they inherit the setgid bit, and while `openStore` and
+`outputPrivatePath` only read `Perm()` and tolerate it, `builder.NewOutputOwner`
+compares `Mode()` to `ModeDir|0700` exactly — `owner_provisioned` passed while
+every later boundary failed with `artifactfs: invalid input or state`.
+
+`TestManagedEnrollWitnessPlacement` asserts both placements on every host.
+Reproduce a setgid temp area with `TMPDIR=$(mktemp -d); chmod 2700 "$TMPDIR"`
+before `go test ./backend/cmd/orva` instead of finding it in the VM.
+
+**What green does not prove.** `intent` proves the interrupt and the refusal
+path; everything downstream is only as real as the runtime the VM was given. With
+a synthetic tree, `runtime_sealed` proves the seal-and-check ordering, not that a
+real Node tree seals; only `code_sealed` runs a real build. Linux CI runs the
+publication suite and the host-only `intent` case through the Go tests. The
+VM runner and its kernel-dependent cases are not CI-gated.
+
+---
+
 ## 4. Real user journeys
 
 This is the part that matters. Each journey below was executed end to end; the
