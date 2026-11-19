@@ -5,6 +5,8 @@
     :step="step"
     :first-step="initial ? 2 : 1"
     :final-label="initial ? 'Update permission' : 'Add to policy'"
+    :hint="hint"
+    :next-disabled="!!hint"
     :error="errors.step || (step === 4 ? problem : '')"
     :disabled="disabled"
     @back="back"
@@ -499,13 +501,42 @@ function enterStep(n) {
 
 const built = computed(() => (step.value === 4 ? buildStatement(formToInput(form.value, props.functionId)) : null))
 
-function next() {
-  if (props.disabled) return
-  const e = validate(step.value)
-  if (Object.keys(e).length) {
-    errors.value = e
-    return
+// The forward button is unavailable until the current step can be finished, so
+// the reason is stated before a click instead of after one.
+const hint = computed(() => {
+  const f = form.value
+  if (step.value === 1) return f.service ? '' : 'Choose a service'
+  if (step.value === 2) {
+    if (!f.actions.length) return 'Choose at least one action'
+    const bad = f.actions.filter(invalidAtStartup)
+    return bad.length ? `Untick ${bad.map((a) => ACTION_LABELS[a]).join(', ')}, or choose While handling a request` : ''
   }
+  if (step.value === 3) {
+    if (f.service === 'storage') {
+      if (f.mode === 'key' && listPicked.value) return 'List keys needs a prefix or every key'
+      if (f.mode !== 'all' && f.value === '') return 'Enter a key or prefix'
+    }
+    if (f.service === 'functions' && !f.targetId) return 'Choose a function'
+    if (f.service === 'schedules') {
+      if (f.mode === 'prefix' && f.value === '') return 'Enter a schedule name prefix'
+      if (f.mode === 'name' && f.value === '') return 'Enter a schedule name'
+    }
+    if (f.service === 'schedules' && f.targetId && f.targetId !== props.functionId) return 'Schedules may run only this function'
+    const check = buildStatement(formToInput(f, props.functionId))
+    if (!check.ok) {
+      const { actions, context, ...fields } = check.errors
+      return fields.value || fields.targetId || fields.kind || actions || context || 'Complete this step'
+    }
+    return ''
+  }
+  if (!built.value || !built.value.ok) return 'This permission is not valid yet. Check the previous steps.'
+  const all = { ...validate(1), ...validate(2), ...validate(3) }
+  if (!Object.keys(all).length) return ''
+  return all.step || all.value || all.targetId || 'This permission is not valid yet. Check the previous steps.'
+})
+
+function next() {
+  if (props.disabled || hint.value) return
   if (step.value < 4) {
     enterStep(step.value + 1)
     return

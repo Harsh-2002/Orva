@@ -396,23 +396,29 @@ describe('FunctionPermissions draft and save', () => {
     expect(w.emitted('save')).toBeUndefined()
   })
 
-  it('rejects an invalid step with an announced error and no change', async () => {
+  it('an incomplete step keeps Next disabled and says what is missing, with no change', async () => {
     const w = make()
     await enterEdit(w)
     await click(w, 'Add permission')
-    await nextStep(w)
-    expect(w.find('[role="alert"]').text()).toContain('Choose a service')
+    const next = () => w.findAll('button').find((b) => b.text() === 'Next')
+    expect(next().attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('Choose a service')
     expect(w.text()).toContain('Step 1 of 4')
     await pick(w, 'Storage')
+    expect(next().attributes('disabled')).toBeUndefined()
     await nextStep(w)
-    await nextStep(w)
-    expect(w.find('[role="alert"]').text()).toContain('Pick at least one action')
+    expect(next().attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('Choose at least one action')
     expect(w.text()).toContain('Step 2 of 4')
     await pick(w, 'Read a key')
     await nextStep(w)
-    await nextStep(w)
-    expect(w.find('[role="alert"]').text()).toContain('at most 256 characters')
     expect(w.text()).toContain('Step 3 of 4')
+    expect(next().attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('Enter a key or prefix')
+    // A literal that cannot be stored never becomes a draft entry.
+    await field(w, 'Key').setValue('x'.repeat(257))
+    expect(next().attributes('disabled')).toBeDefined()
+    expect(w.text()).toContain('at most 256 characters')
     expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(false)
   })
 
@@ -506,7 +512,8 @@ describe('FunctionPermissions draft and save', () => {
       await field(w, 'Key').setValue('state')
       await nextStep(w)
       expect(w.text()).toContain('Step 3 of 4: Resources')
-      expect(w.find('[role="alert"]').text()).toContain('List keys needs a prefix or every key')
+      expect(w.text()).toContain('List keys needs a prefix or every key')
+      expect(btn(w, 'Next').attributes('disabled')).toBeDefined()
       await click(w, 'Every key')
       expect(w.text()).toContain('Broad:')
       await nextStep(w)
@@ -524,7 +531,8 @@ describe('FunctionPermissions draft and save', () => {
       expect(field(w, 'Key').element.value).toBe('state')
       await nextStep(w)
       expect(w.text()).toContain('Step 3 of 4: Resources')
-      expect(w.find('[role="alert"]').text()).toContain('Choose Prefix or Every key')
+      expect(w.text()).toContain('List keys needs a prefix or every key')
+      expect(btn(w, 'Next').attributes('disabled')).toBeDefined()
       expect(w.find('[aria-label="Unsaved permission changes"]').exists()).toBe(false)
       // Going back keeps all three ticks; nothing was dropped or converted.
       await click(w, 'Back')
@@ -548,7 +556,8 @@ describe('FunctionPermissions draft and save', () => {
       expect(field(w, 'Key prefix').element.value).toBe('')
       await nextStep(w)
       expect(w.text()).toContain('Step 3 of 4: Resources')
-      expect(w.find('[role="alert"]').text()).toContain('choose Every key')
+      expect(w.text()).toContain('Enter a key or prefix')
+      expect(btn(w, 'Next').attributes('disabled')).toBeDefined()
       expect(has(w, 'Add to policy')).toBe(false)
       // Spaces and NUL are a real literal: never trimmed, never treated as blank.
       const literal = ' \u0000 '
@@ -583,7 +592,8 @@ describe('FunctionPermissions draft and save', () => {
       await nextStep(s)
       await click(s, 'Name prefix')
       await nextStep(s)
-      expect(s.find('[role="alert"]').text()).toContain('choose Every schedule')
+      expect(s.text()).toContain('Enter a schedule name prefix')
+      expect(btn(s, 'Next').attributes('disabled')).toBeDefined()
       expect(s.text()).toContain('Step 3 of 4')
     })
 
@@ -600,7 +610,8 @@ describe('FunctionPermissions draft and save', () => {
       expect(w.text()).toContain('Not allowed at startup')
       await nextStep(w)
       expect(w.text()).toContain('Step 2 of 4: Actions')
-      expect(w.find('[role="alert"]').text()).toContain('Startup access can only read and list. Untick Write')
+      expect(btn(w, 'Next').attributes('disabled')).toBeDefined()
+      expect(w.text()).toContain('Untick Write, or choose While handling a request')
       await radio(w, 'Write').setValue(false)
       // With it unticked, no new write can be added while startup is chosen.
       expect(radio(w, 'Write').element.disabled).toBe(true)
@@ -935,9 +946,9 @@ describe('FunctionPermissions draft and save', () => {
       await nextStep(w)
       await pick(w, 'Queue a job')
       await nextStep(w)
-      // Unchosen: Next is refused with a reason, nothing is guessed.
-      await nextStep(w)
-      expect(w.text()).toContain('Choose a function, or enter its function ID.')
+      // Unchosen: Next stays disabled with a reason, nothing is guessed.
+      expect(btn(w, 'Next').attributes('disabled')).toBeDefined()
+      expect(w.text()).toContain('Choose a function')
       await w.find('#wizard-function').trigger('click')
       await flushPromises()
       const options = [...document.body.querySelectorAll('[role="menuitemradio"]')]
