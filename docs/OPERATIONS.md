@@ -121,7 +121,13 @@ the trusted runtime trees and retry `orva serve`; do not delete the Owner or
 edit the mode marker. One configured or installed runtime is sufficient for
 startup, but builds in the other language remain unavailable. A present
 untrusted, oversized, or invalid runtime tree that would need to be sealed
-causes startup to refuse rather than silently accepting it.
+causes startup to refuse rather than silently accepting it. The refusal names
+the first offending tree-relative path and the rule it broke, then the repair:
+every entry must be owned by root or the daemon user and must not be group- or
+other-writable, so `chown -R <daemon user> <data>/rootfs/<lang>` and
+`chmod -R go-w <data>/rootfs/<lang>` fixes an unpacked-as-the-wrong-user tree.
+Reinstall trees from the verified installer or image rather than unpacking a
+release tarball as another user.
 
 SIGTERM closes and drains HTTP, then closes the managed instance (including
 its scheduler), then fences and closes its Owner. Startup or shutdown refusal

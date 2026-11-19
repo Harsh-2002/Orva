@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Harsh-2002/Orva/backend/internal/artifactfs"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
 	"github.com/Harsh-2002/Orva/internal/ids"
@@ -52,5 +55,27 @@ func TestManagedRuntimeSelections(t *testing.T) {
 	managedMust(t, err)
 	if !maps.Equal(got, want) || calls[sandbox.Node] != 1 || calls[sandbox.Python] != 1 {
 		t.Fatalf("restart selection = %v; seal calls = %v", got, calls)
+	}
+}
+
+func TestManagedRuntimeSealRefusalHint(t *testing.T) {
+	dir := t.TempDir()
+	db, err := database.New(filepath.Join(dir, "orva.db"))
+	managedMust(t, err)
+	defer func() { managedMust(t, db.Close()) }()
+	in := ManagedOptions{RootfsDir: filepath.Join(dir, "rootfs")}
+	tree := filepath.Join(in.RootfsDir, string(sandbox.Node))
+	managedMust(t, os.MkdirAll(tree, 0755))
+	_, err = managedRuntimeSelections(t.Context(), in, db, func(context.Context, sandbox.Language, string) (string, error) {
+		return "", fmt.Errorf("%w: usr/bin/node: owned by uid 1001", artifactfs.ErrUnsupported)
+	})
+	if !errors.Is(err, artifactfs.ErrUnsupported) || !strings.Contains(err.Error(), "chown -R") || !strings.Contains(err.Error(), tree) {
+		t.Fatalf("unsupported-tree refusal is not actionable: %v", err)
+	}
+	_, err = managedRuntimeSelections(t.Context(), in, db, func(context.Context, sandbox.Language, string) (string, error) {
+		return "", artifactfs.ErrCapacity
+	})
+	if !errors.Is(err, artifactfs.ErrCapacity) || strings.Contains(err.Error(), "chown -R") {
+		t.Fatalf("capacity refusal gained an ownership hint: %v", err)
 	}
 }

@@ -143,7 +143,11 @@ func managedRuntimeSelections(ctx context.Context, in ManagedOptions, db *databa
 		}
 		generation, err := seal(ctx, lang, tree)
 		if err != nil {
-			return nil, fmt.Errorf("seal installed %s runtime: %w", lang, err)
+			hint := ""
+			if errors.Is(err, artifactfs.ErrUnsupported) {
+				hint = fmt.Sprintf("; fix: chown -R %d %s and chmod -R go-w %s", os.Geteuid(), tree, tree)
+			}
+			return nil, fmt.Errorf("seal installed %s runtime tree %s: %w%s", lang, tree, err, hint)
 		}
 		sealed[string(lang)] = generation
 	}
