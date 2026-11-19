@@ -74,7 +74,7 @@ const body = () => document.body
 const byText = (text) => [...body().querySelectorAll('button')].find((b) => b.textContent.includes(text))
 
 const mounted = []
-const boot = async ({ managed, capability } = {}) => {
+const boot = async ({ managed, capability, path = '/functions/alpha?mode=edit' } = {}) => {
   if (capability) h.mode.mockImplementation(capability)
   else h.mode.mockResolvedValue(managed ? 'managed' : 'legacy')
   const Editor = (await import('@/views/Editor.vue')).default
@@ -88,7 +88,7 @@ const boot = async ({ managed, capability } = {}) => {
       { path: '/:rest(.*)*', component: { render: () => null } },
     ],
   })
-  router.push('/functions/alpha?mode=edit')
+  router.push(path)
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -99,7 +99,7 @@ const boot = async ({ managed, capability } = {}) => {
   }, { global: { plugins: [router, pinia] }, attachTo: document.body })
   mounted.push(wrapper)
   await settle()
-  if (!capability) {
+  if (!capability && path !== '/functions/new') {
     const { useManagedIAMStore } = await import('@/stores/managedIAM.js')
     expect(useManagedIAMStore(pinia).mode).toBe(managed ? 'managed' : 'legacy')
   }
@@ -292,6 +292,72 @@ describe('editor secrets in legacy mode', () => {
 })
 
 describe('editor deploy in managed mode', () => {
+  it('creates a managed owner with only the name, runtime and exact build entrypoint', async () => {
+    const { editor } = await boot({ managed: true, path: '/functions/new' })
+    editor.form.name = 'new-function'
+    editor.form.runtime = 'node'
+    editor.templateEntrypoint = 'handler.ts'
+    h.post.mockResolvedValueOnce({ data: { id: 'fn-new' } })
+
+    await deploy()
+
+    expect(h.post.mock.calls[0]).toEqual([
+      '/functions', { name: 'new-function', runtime: 'node', entrypoint: 'handler.ts' },
+    ])
+    expect(deployInlineCalls()).toEqual([
+      ['/functions/fn-new/deploy-inline', expect.objectContaining({ filename: 'handler.ts' })],
+    ])
+    expect(h.put).not.toHaveBeenCalled()
+  })
+
+  it('does not resolve or deploy to a same-name owner after a managed create conflict', async () => {
+    const { editor } = await boot({ managed: true, path: '/functions/new' })
+    editor.form.name = FN.name
+    const reads = h.get.mock.calls.length
+    h.post.mockRejectedValueOnce({ response: { status: 409, data: { error: { message: 'Function name already exists' } } } })
+
+    await deploy()
+
+    expect(h.post.mock.calls.map(([url]) => url)).toEqual(['/functions'])
+    expect(h.get.mock.calls).toHaveLength(reads)
+    expect(h.put).not.toHaveBeenCalled()
+    expect(editor.fnId).toBe('')
+    expect(body().textContent).toContain('Function name already exists')
+  })
+
+  it('keeps queued secrets and unsupported settings without writing or creating an owner', async () => {
+    const { editor } = await boot({ managed: true, path: '/functions/new' })
+    editor.form.name = 'new-function'
+    editor.form.memory_mb = 128
+    editor.envVars = [{ key: 'DRAFT', value: 'kept' }]
+    editor.secretForm = { name: 'PENDING', value: 'local-only' }
+    await editor.saveSecret()
+
+    await deploy()
+
+    noMutations()
+    expect(editor.pendingSecrets).toEqual([{ name: 'PENDING', value: 'local-only' }])
+    expect(editor.form.memory_mb).toBe(128)
+    expect(editor.envVars).toEqual([{ key: 'DRAFT', value: 'kept' }])
+    expect(body().textContent).toContain('install before configuring')
+  })
+
+  it.each([
+    { name: 'Uppercase' },
+    { runtime: 'invalid' },
+    { entrypoint: '../handler.py' },
+  ])('rejects invalid managed creation input %j before any write', async (invalid) => {
+    const { editor } = await boot({ managed: true, path: '/functions/new' })
+    editor.form.name = invalid.name ?? 'new-function'
+    if (invalid.runtime) editor.form.runtime = invalid.runtime
+    if (invalid.entrypoint) editor.templateEntrypoint = invalid.entrypoint
+
+    await deploy()
+
+    noMutations()
+    expect(editor.buildError).not.toBe('')
+  })
+
   it('can deploy code without settings CAS when the configuration is unchanged', async () => {
     h.configuration = () => ({ data: { ...settings(5).data, current_artifact: '' } })
     await boot({ managed: true })
@@ -399,6 +465,30 @@ describe('editor deploy in managed mode', () => {
 })
 
 describe('editor deploy in legacy mode', () => {
+  it('preserves the full create body and flushes legacy secrets before the first build', async () => {
+    const { editor } = await boot({ managed: false, path: '/functions/new' })
+    editor.form.name = 'new-function'
+    editor.form.description = 'description'
+    editor.form.memory_mb = 128
+    editor.envVars = [{ key: 'DRAFT', value: 'env' }]
+    editor.secretForm = { name: 'PENDING', value: 'secret' }
+    await editor.saveSecret()
+    h.post.mockResolvedValueOnce({ data: { id: 'fn-new' } })
+
+    await deploy()
+
+    expect(h.post.mock.calls).toEqual([
+      ['/functions', {
+        name: 'new-function', description: 'description', runtime: 'python', memory_mb: 128, cpus: 0.5,
+        env_vars: { DRAFT: 'env' }, network_mode: 'none', sdk: false, max_concurrency: 0,
+        concurrency_policy: 'queue', auth_mode: 'none', rate_limit_per_min: 0,
+      }],
+      ['/functions/fn-new/secrets', { key: 'PENDING', value: 'secret' }],
+      ['/functions/fn-new/deploy-inline', expect.objectContaining({ filename: 'handler.py' })],
+    ])
+    expect(editor.pendingSecrets).toEqual([])
+  })
+
   it('keeps the legacy configuration update unchanged', async () => {
     await boot({ managed: false })
     await deploy()

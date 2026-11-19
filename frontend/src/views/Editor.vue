@@ -1363,10 +1363,7 @@ let deployedTimer = null
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
 const code = ref('')
-const form = ref({
-  name: '',
-  description: '',                // surfaces in list_functions, get_function, the channel picker, and as the MCP tool description
-  runtime: 'python',
+const initialExecutionSettings = {
   memory_mb: 64,
   cpus: 0.5,
   network_mode: 'none',          // 'none' | 'egress'
@@ -1375,8 +1372,15 @@ const form = ref({
   concurrency_policy: 'queue',    // 'queue' | 'reject'
   auth_mode: 'none',              // 'none' | 'platform_key' | 'signed'
   rate_limit_per_min: 0,          // 0 = unlimited
+}
+const form = ref({
+  name: '',
+  description: '',
+  runtime: 'python',
+  ...initialExecutionSettings,
 })
 const fnId = ref('')  // backend function ID
+let managedCreated = null
 
 const concurrencyPolicyOptions = [
   { value: 'queue', label: 'Queue requests' },
@@ -2006,6 +2010,7 @@ const resetEditorState = () => {
   editorEpoch += 1
   invalidateBuild()
   fnId.value = ''
+  managedCreated = null
   loadedFunction.value = null
   managedSettingsCAS = null
   loadedEntrypoint.value = ''
@@ -2018,14 +2023,7 @@ const resetEditorState = () => {
     name: '',
     description: '',
     runtime: 'python',
-    memory_mb: 64,
-    cpus: 0.5,
-    network_mode: 'none',
-    sdk: false,
-    max_concurrency: 0,
-    concurrency_policy: 'queue',
-    auth_mode: 'none',
-    rate_limit_per_min: 0,
+    ...initialExecutionSettings,
   }
   envVars.value = []
   code.value = ''
@@ -2362,6 +2360,19 @@ const confirmFirstDeploy = async () => {
   await runDeploy()
 }
 
+const managedCreation = (form, entrypoint) => {
+  const { name, runtime } = form
+  if (name.length > 128 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.trim() !== name) {
+    throw new Error('Use a lowercase function name with letters, numbers and single dashes.')
+  }
+  if (!runtimes.some(({ id }) => id === runtime) || !entrypoint
+    || new TextEncoder().encode(entrypoint).length > 4096 || /[:\\\uFFFD]/u.test(entrypoint) || entrypoint.includes('\0')
+    || entrypoint.split('/').some((part) => !part.trim() || part === '.' || part === '..')) {
+    throw new Error('Choose a supported runtime and a relative entrypoint file.')
+  }
+  return { name, runtime, entrypoint }
+}
+
 const runDeploy = async () => {
   const inScope = editorScope()
   let id = fnId.value
@@ -2408,7 +2419,25 @@ const runDeploy = async () => {
     requireEditorMode(mode)
 
     // Step 1: Create or update function config.
-    if (!id) {
+    if (mode === 'managed' && !isEditing.value) {
+      if (pending.length || formDraft.description || draft.formState.env.length
+        || Object.entries(initialExecutionSettings).some(([key, value]) => formDraft[key] !== value)) {
+        throw new Error('Drafts were kept. Clear custom settings, environment and secrets to build; install before configuring.')
+      }
+      const creation = managedCreation(formDraft, build.filename)
+      if (id) {
+        if (!managedCreated || Object.keys(creation).some((key) => creation[key] !== managedCreated[key])) {
+          throw new Error('The function was already created. Open it from Functions to build again.')
+        }
+      } else {
+        const res = await apiClient.post('/functions', creation)
+        if (!current()) return
+        if (!res.data?.id) throw new Error('Function creation could not be verified. Check Functions before retrying.')
+        fnId.value = id = res.data.id
+        managedCreated = creation
+        buildLogs.value.push(`Created function: ${id}`)
+      }
+    } else if (!id) {
       // New function — create it.
       try {
         const createRes = await apiClient.post('/functions', {
@@ -2479,9 +2508,8 @@ const runDeploy = async () => {
       buildLogs.value.push('Updated function config')
     }
 
-    // Step 1.5: Flush any secrets queued before the function existed.
-    // For first-time deploys this is the moment they actually persist.
-    await flushPendingSecrets(id, current, mode, pending)
+    // The managed configuration service needs an installed artifact.
+    if (mode === 'legacy') await flushPendingSecrets(id, current, mode, pending)
     if (!current()) return
     requireEditorMode(mode)
 
@@ -2985,8 +3013,8 @@ const saveSecret = async () => {
   const { name: inputName, value } = secretForm.value
   const name = inputName.trim()
   if (!name) return
-  // Pre-deploy: queue locally; flush during deployFunction.
-  if (!id) {
+  // A new managed owner has no configuration target until installation.
+  if (!id || managedCreated) {
     // Replace any prior pending entry with the same name.
     pendingSecrets.value = pendingSecrets.value.filter((s) => s.name !== name)
     pendingSecrets.value.push({ name, value })
@@ -3062,30 +3090,23 @@ const removeSecret = async (key) => {
   }
 }
 
-// flushPendingSecrets POSTs queued secrets after the function row exists.
-// Called from runDeploy between the create step and deploy-inline.
+// Legacy creation can persist queued secrets before the first build.
 const flushPendingSecrets = async (id, current, mode, pending) => {
   if (!id || !pending.length) return
   for (const sec of pending) {
     if (!current()) return
     requireEditorMode(mode)
     try {
-      if (mode === 'managed') {
-        await writeManagedSecret(id, current, sec.name, sec.value)
-      } else {
-        await apiClient.post(`/functions/${id}/secrets`, {
-          key: sec.name, value: sec.value,
-        })
-      }
+      await apiClient.post(`/functions/${id}/secrets`, {
+        key: sec.name, value: sec.value,
+      })
       if (!current()) return
       requireEditorMode(mode)
       buildLogs.value.push(`Saved secret: ${sec.name}`)
     } catch (err) {
       if (!current()) return
       requireEditorMode(mode)
-      const msg = mode === 'managed'
-        ? managedConfigurationError(err, err.message)
-        : (err.response?.data?.error?.message || err.message)
+      const msg = err.response?.data?.error?.message || err.message
       buildLogs.value.push(`Failed to save secret ${sec.name}: ${msg}`)
     }
   }
