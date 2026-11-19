@@ -31,7 +31,7 @@ apiClient.interceptors.response.use(
       // A caller that treats a status as an ordinary answer marks the request
       // quiet for it. The log poll expects 404 until the execution row is
       // written, and logged twelve console errors per run saying so.
-      if (!(error.config?.quietStatuses || []).includes(error.response.status)) {
+      if (!error.config?.sensitive && !(error.config?.quietStatuses || []).includes(error.response.status)) {
         console.error('API Error:', error.response.data)
       }
       // An expired session used to leave every list silently blank with no
@@ -41,7 +41,7 @@ apiClient.interceptors.response.use(
       if (error.response.status === 401 && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('orva:unauthorized'))
       }
-    } else if (error.request) {
+    } else if (error.request && !error.config?.sensitive) {
       console.error('Network Error:', error.message)
     }
     return Promise.reject(error)

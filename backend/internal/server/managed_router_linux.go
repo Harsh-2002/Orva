@@ -161,6 +161,9 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		gateRoute(mux, db, ops, "GET /api/v1/functions", managedRead, deploy.List)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}", managedRead, deploy.Get)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/source", managedRead, readManagedSource(db, publication))
+		// Names only: the editor shows which secrets exist, while every write
+		// stays on the CAS-checked configuration route.
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/secrets", managedRead, listManagedSecretNames(db, reg))
 		gateRoute(mux, db, ops, "POST /api/v1/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
@@ -360,6 +363,27 @@ func readManagedSource(db *database.Database, publication *builder.PublicationQu
 			return
 		}
 		respond.JSON(w, 200, map[string]string{"code": code, "dependencies": deps})
+	}
+}
+
+// listManagedSecretNames mirrors the legacy list handler's shape so the
+// editor parses both modes identically. Values never leave the cipher.
+func listManagedSecretNames(db *database.Database, reg *registry.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("fn_id")
+		if _, err := reg.Get(id); err != nil {
+			respond.Error(w, 404, "NOT_FOUND", "function not found", r.Header.Get("X-Request-ID"))
+			return
+		}
+		keys, err := db.ListSecretKeys(id)
+		if err != nil {
+			respond.Error(w, 500, "INTERNAL", "failed to list secrets", r.Header.Get("X-Request-ID"))
+			return
+		}
+		if keys == nil {
+			keys = []string{}
+		}
+		respond.JSON(w, 200, map[string]any{"secrets": keys})
 	}
 }
 

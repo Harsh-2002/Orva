@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import InboundWebhooksView from '@/views/InboundWebhooks.vue'
 import { useAuthStore } from '@/stores/auth.js'
-import { readManagedIAMCapability } from '@/api/managedPolicies.js'
+import { readManagedIAMMode } from '@/api/managedPolicies.js'
+import { useManagedIAMStore } from '@/stores/managedIAM.js'
 
 vi.mock('@/api/managedPolicies.js', () => ({
-  readManagedIAMCapability: vi.fn(),
+  readManagedIAMMode: vi.fn(),
   listManagedIAMFunctions: vi.fn(async () => []),
 }))
 vi.mock('@/views/LegacyInboundWebhooks.vue', () => ({
@@ -35,7 +36,7 @@ let wrapper
 beforeEach(() => {
   setActivePinia(createPinia())
   useAuthStore().isAuthenticated = true
-  readManagedIAMCapability.mockReset()
+  readManagedIAMMode.mockReset()
 })
 afterEach(() => wrapper?.unmount())
 
@@ -47,7 +48,7 @@ const mountView = () => {
 describe('inbound webhooks route dispatch', () => {
   it('mounts neither view while the capability answer is pending', async () => {
     const gate = deferred()
-    readManagedIAMCapability.mockReturnValue(gate.promise)
+    readManagedIAMMode.mockReturnValue(gate.promise)
     const view = mountView()
     await flushPromises()
 
@@ -55,7 +56,7 @@ describe('inbound webhooks route dispatch', () => {
     expect(view.find('[data-testid="legacy-inbound"]').exists()).toBe(false)
     expect(view.find('[data-testid="managed-inbound"]').exists()).toBe(false)
 
-    gate.resolve(true)
+    gate.resolve('managed')
     await flushPromises()
 
     expect(view.find('[data-testid="inbound-capability-pending"]').exists()).toBe(false)
@@ -64,7 +65,7 @@ describe('inbound webhooks route dispatch', () => {
   })
 
   it('keeps the legacy view when the server is not managed', async () => {
-    readManagedIAMCapability.mockResolvedValue(false)
+    readManagedIAMMode.mockResolvedValue('legacy')
     const view = mountView()
     await flushPromises()
 
@@ -73,11 +74,20 @@ describe('inbound webhooks route dispatch', () => {
   })
 
   it('treats a failed probe as absent capability and mounts legacy', async () => {
-    readManagedIAMCapability.mockRejectedValue(new Error('network down'))
+    readManagedIAMMode.mockRejectedValue(new Error('network down'))
     const view = mountView()
     await flushPromises()
 
     expect(view.get('[data-testid="legacy-inbound"]').text()).toBe('payments')
     expect(view.find('[data-testid="inbound-capability-pending"]').exists()).toBe(false)
+  })
+
+  it('lets strict callers retry an unknown answer without treating it as legacy', async () => {
+    const iam = useManagedIAMStore()
+    readManagedIAMMode.mockResolvedValueOnce('unknown').mockResolvedValueOnce('managed')
+    expect(await iam.checkMode()).toBe('unknown')
+    expect(iam.available).toBe(false)
+    expect(await iam.checkMode()).toBe('managed')
+    expect(readManagedIAMMode).toHaveBeenCalledTimes(2)
   })
 })

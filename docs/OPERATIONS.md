@@ -211,6 +211,21 @@ Factory using the fresh complete expectations, then explicitly review the new
 installed artifact and current aggregate sources through the managed-policy
 service. Mutation/installation cannot clear quarantine.
 
+In the managed editor, if settings or environment were saved but code submission
+was rejected or the build failed, choose **Install configuration** to install the
+saved settings with the previous code, or retry the code build without saving the
+same settings again. A successful code build uses **Install build** instead.
+Neither action reviews permissions.
+
+If you leave the editor or lose the install receipt, inspect deployment history
+first if the code build outcome is unclear. For a current configuration
+publication, use `GET /api/v1/functions/{id}/configuration` with READ to inspect
+the exact `expected` fields, then deliberately send them under `expected` to
+`POST /api/v1/functions/{id}/configuration/install` as an administrator. Review
+permissions separately after installation. If a code publication is awaiting
+installation instead, use the deployment's install workflow, not configuration
+install. See [Managed configuration publication](API.md#managed-configuration-publication).
+
 On conflict, inspect again and get a new deliberate decision; do not silently
 retry with refreshed revisions. A failed transaction leaves old host/cache and
 durable state unchanged. If installation fails after a successful mutation,
