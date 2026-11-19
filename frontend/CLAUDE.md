@@ -53,7 +53,7 @@ change.
 | `src/views/IAMPolicies.vue`, `IAMPolicyDetail.vue`, `FunctionPermissionSources.vue` | Managed-only named-policy management and source-aware function permissions. Effective access precedes separate inline editing; versions stay pinned until reviewed rollout. Conflicts invalidate authority freshness without discarding the draft. The dashboard links and routes require authenticated `/api/v1/iam/capabilities` with `managed: true`; disabled or absent responses deny navigation. |
 | `src/components/permissions/EffectiveAccess.vue` + `src/composables/useIAMResource.js` | Human-readable effective/stored/stale authority and owner-correlated request lanes. Source invalidation never aborts its own mutation; only an authoritative current response restores freshness. The inline-only presentation is explicitly scoped and never receives the effective union as its draft. |
 | `src/utils/rowNav.js` | Whole-row navigation for lists: `rowNav(router, to)` / `rowAction(fn)` run on a row click unless it starts in a control (decided from `composedPath()`, not `target.closest`, because a control that re-renders on click - the copy button swaps its icon - is already detached when the event reaches the row), a text selection exists, or it is not the primary button. The name stays a real `<router-link>`/`<button>` so keyboard users have a target. Functions, Channels, CronJobs use it; Deployments/KV/Activity/Invocations already had the pattern |
-| `src/views/Editor.vue` (View / Edit) | An existing function opens in **view** (read-only editor; Reset, Deploy, Rollback and the Config items Settings/Env/Deps/Secrets hidden; Cmd/Ctrl-S, `deployFunction`, `resetForm` and `rollbackToVersion` are guarded by `viewMode`). **Edit** is an explicit `SegmentedControl` (`components/common/SegmentedControl.vue`, radiogroup, "Mode") next to the name; `/functions/new` is always edit and has no switch. The mode is mirrored in `?mode=edit` and reaches the Editor as the `mode` **route prop** (`editorProps` in `router/index.js`), never `useRoute()`, because the view is keep-alived; a different function resets to view. Edit → View with unsaved code/deps/form/env asks "Discard changes?" (confirm store) and Discard restores the baseline taken after load/deploy/rollback. A route test must mount the Editor with the same `editorProps` and `?mode=edit` to reach Deploy. |
+| `src/views/Editor.vue` (View / Edit) | An existing function opens in **view** (read-only editor; Reset, Deploy, Rollback and the Config items Settings/Env/Deps/Secrets hidden; Cmd/Ctrl-S, `deployFunction`, `resetForm` and `rollbackToVersion` are guarded by `viewMode`). **Edit** is an explicit `SegmentedControl` (`components/common/SegmentedControl.vue`, radiogroup, "Mode") next to the name; `/functions/new` is always edit and has no switch. The mode is mirrored in `?mode=edit` and reaches the Editor as the `mode` **route prop** (`editorProps` in `router/index.js`), never `useRoute()`, because the view is keep-alived; a different function resets to view. Edit → View with unsaved code/deps/form/env asks "Discard changes?" (confirm store) and Discard restores the baseline taken after load/deploy/rollback. A route test must mount the Editor with the same `editorProps` and `?mode=edit` to reach Deploy. In managed mode (`managedIAM` store available) secret names come from the read-only `GET /functions/{id}/secrets`; secret writes and Deploy's settings/env save use `/functions/{id}/configuration/{secrets,settings}` with `expected`/`current_artifact` read fresh from `GET …/configuration` immediately before each write (never reused; 409 stops with a reload message). Deploy sends settings only when settings or env differ from the loaded record; description is not managed configuration. Legacy requests are unchanged. |
 | `src/components/common/CodeEditor.vue` | `readOnly` is reactive: held in a `Compartment` and reconfigured in place, so a View/Edit switch keeps buffer, scroll and selection. It uses `EditorState.readOnly`, not `editable`, so the content stays focusable, selectable and copyable |
 | `src/utils/editorSyntax.js` | Local CodeMirror syntax hints for the authored entrypoint. The filename selects JS vs TS grammar; errors appear as gutter dots and inline marks, without an all-clear status or problems panel. The editor has an accessible name, announces the first error's line and column to screen readers, and soft-wraps long lines below 640px. An incomplete parse stays unmarked rather than claiming success. These hints never block Deploy; the jailed runtime/tsc build is authoritative. |
 | `src/views/TestWorkbench.vue` | `/functions/:name/test` — the request workbench: method/path/headers/body, saved fixtures, run history, full stderr + `orva.log.*` output |
@@ -135,6 +135,21 @@ the same legibility floor from opposite sides. Use the token; do not re-derive
 which violet is correct.
 
 ## Non-obvious
+
+- Managed editor secret writes leave the function inactive. Close Secrets and
+  choose **Install configuration**, then **Review permissions**. The editor
+  installs only from the exact successor acknowledged by that write, not from
+  a fresh guess; an install conflict clears the action and asks for a reload.
+  The receipt does not survive leaving the editor. A verified settings/env
+  publication uses the same exact install flow after a rejected submission or
+  failed build; a manual code retry does not repeat the settings PUT. While
+  the build is pending or unverified, no configuration install is shown.
+  A verified successful build replaces the receipt with its own install action.
+
+- Editor managed rollback promotes an exact deployment ID without restoring
+  configuration. A verified inactive, review-required response offers explicit
+  installation in the existing result strip; navigation invalidates pending
+  confirmation and response handling. Legacy rollback still restores its snapshot.
 
 - Cron descriptions are advisory: `cronDescription.js` spells out known aliases
   and exact whole-second `@every` intervals. Complex durations/time-zone prefixes

@@ -17,12 +17,15 @@
 > its replacement generation; it returns `409 NOT_ACTIVE`.
 > The managed Editor reads authored source from the seal, not from a legacy
 > `current` symlink. Reading source neither installs nor approves it.
+> After a successful managed build, choose **Install build** before invoking it.
+> Review permissions separately. Create and install a first build before
+> configuring its settings, environment, or secrets.
 > An admin `GET /api/v1/backup` returns a portable v2 archive of SQLite, available
 > keys and current authored source, never the host witness or sealed stores.
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 75 on this
+> An all-permissions key sees 73 tools on the normal server and 82 on this
 > composition; read-only keys see 28 and 25 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
@@ -44,10 +47,13 @@
 > actual connection address; a Chat turn checks the provider endpoint before
 > the turn, not at dial time.
 
-> Internal configuration qualification: optional `workloadconfig` HTTP and
-> MCP/shared-AI adapters publish environment, execution settings and encrypted
+> Managed `workloadconfig` HTTP and MCP/shared-AI adapters publish
+> environment, execution settings and encrypted
 > secret upsert/delete through one exact-CAS/live-operator boundary. These are
-> **not normal routes or default tools**. Mutation publishes review-required
+> **not legacy routes or tools**. The names-only `read` route
+> `GET /api/v1/functions/{id}/secrets` takes a function UUID and returns
+> `{"secrets":["KEY"]}`; values are never returned. Managed secret writes use
+> `/api/v1/functions/{id}/configuration/secrets`. Mutation publishes review-required
 > deny and invalidates the old actual Factory before ACK. Explicit new Factory
 > installation and current aggregate-policy review are separate steps; stored
 > approval cannot establish current runtime authority. Configuration uses the
@@ -1022,8 +1028,10 @@ call directly. API key permissions scope the available tool set.
 > (both `write`) manage saved request presets by function name or UUID without
 > invoking code. In managed MCP and Chat, each tool rechecks the operator's live
 > credential and required tier at call time, and works for inactive functions.
-> Only the normal catalog also offers `test_function_with_fixture` to run a
-> preset; its shallow-merge `override` does not change the stored fixture.
+> `test_function_with_fixture` requires `invoke` and runs a saved preset. In
+> managed mode it rechecks that live tier and uses only the installed managed
+> function, without approving its permissions. Overrides do not change the
+> stored preset; header names are case-insensitive.
 
 > **Managed Egress tools.** `list_firewall_rules`, `get_egress_policy_status`,
 > `add_firewall_rule`, `delete_firewall_rule`, `get_dns_config`, and

@@ -7,8 +7,8 @@ record. It mounts managed handlers without falling back to legacy mutation route
 Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
 on this composition.
 
-- `POST /api/v1/iam/functions` accepts `name`, `runtime` (`node` or `python`)
-  and optional `entrypoint`. The route requires `write`; creation also
+- `POST /api/v1/functions` (also `/api/v1/iam/functions`) accepts `name`,
+  `runtime` (`node` or `python`) and optional `entrypoint`. The route requires `write`; creation also
   rechecks live admin authority at commit.
   `201` returns `id`, `name`, `runtime` and `status`. The new function has
   an unbound empty policy and a private SDK channel, not SDK grants.
@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  75 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
+  82 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -133,11 +133,10 @@ to run. Channel tokens remain
 request. Channels are created, rotated and deleted only through the admin REST
 routes above and the dashboard.
 
-## Internal opt-in configuration publication (not normal routes)
+## Managed configuration publication
 
-`workloadconfig.HTTPAdapter` is an explicitly registered Linux scratch adapter.
-Normal function/secret handlers retain legacy behavior; no boot schema or normal
-route is activated. See
+These routes are mounted in managed serving. Legacy function and secret
+routes retain their existing contracts. See
 [`workloadconfig/README.md`](../backend/internal/workloadconfig/README.md).
 
 All mutation bodies include `expected` with **seven string fields**:
@@ -147,7 +146,7 @@ positive decimal strings; generation is the exact durable UUID, and stored
 approval is only a CAS token. Also supply `current_artifact`, the actual installed
 Factory digest, except for installation. Owner is the exact path UUID, not a name.
 
-| Optional endpoint | Other required fields |
+| Managed endpoint | Other required fields |
 | --- | --- |
 | `GET /api/v1/functions/{id}/configuration` | READ-only metadata inspection; no body |
 | `PUT /api/v1/functions/{id}/configuration/environment` | `environment`: complete string-to-string environment |
@@ -698,12 +697,18 @@ The function's stderr from this invocation.
 List secret keys for a function. Values are not returned (encrypted at
 rest; only injected into the sandbox at spawn time).
 
+In managed mode this route requires `read`, takes the function UUID, and
+returns `200` with `{"secrets":["KEY"]}` (an empty array when there are no
+secrets). For writes, use the managed `PUT` and `DELETE`
+`/api/v1/functions/{id}/configuration/secrets` routes. A successful write
+leaves the function inactive until installation, with review separate.
+
 ### `POST /api/v1/functions/{id}/secrets`
-Upsert. Body: `{"key": "STRIPE_KEY", "value": "sk_..."}`. Triggers a
+Legacy only. Upsert. Body: `{"key": "STRIPE_KEY", "value": "sk_..."}`. Triggers a
 pool refresh so the next invocation sees the new value.
 
 ### `DELETE /api/v1/functions/{id}/secrets/{key}`
-Remove. Triggers a pool refresh.
+Legacy only. Remove. Triggers a pool refresh.
 
 ## Function data, fixtures, and schedules
 
@@ -727,8 +732,11 @@ function name or UUID for `{id}`. `GET` requires `read`; `POST`, `PUT`, and
 invoking the function. Managed MCP and Chat share `list_fixtures` (`read`),
 `save_fixture` and `delete_fixture` (both `write`). Each tool rechecks the
 operator's live credential and required tier before accessing stored presets,
-including for inactive functions. `test_function_with_fixture` is not available
-in managed MCP or Chat.
+including for inactive functions. `test_function_with_fixture` (`invoke`) is
+available in managed MCP and Chat for installed functions. It uses managed
+admission and applies overrides only to that invocation. The dashboard loads a
+fixture and runs it via the ordinary `/fn/{id}` path; there is no fixture-run
+REST route.
 
 KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
 JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are

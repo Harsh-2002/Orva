@@ -7,7 +7,7 @@ import { useManagedIAMStore } from '@/stores/managedIAM.js'
 const OWNER = '0190000a-0000-7000-8000-000000000001'
 
 vi.mock('@/api/managedPolicies.js', () => ({
-  readManagedIAMCapability: vi.fn(async () => true),
+  readManagedIAMMode: vi.fn(async () => 'managed'),
   listManagedIAMFunctions: vi.fn(async () => [{ id: OWNER, name: 'payments' }]),
 }))
 vi.mock('@/components/exposure/ManagedInboundWebhooksPanel.vue', () => ({

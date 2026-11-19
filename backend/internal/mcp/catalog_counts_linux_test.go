@@ -33,6 +33,7 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 		// catalog silently omits replay_execution and the count is short by one.
 		ReplayExecution: func(http.ResponseWriter, *http.Request) {},
 	}
+	managed = withManagedFixtureProxy(t, f, managed)
 	withFirewall := managed
 	withFirewall.Firewall = firewall.NewManager(f.db, t.TempDir())
 	all := permSet{permRead: true, permWrite: true, permInvoke: true, permAdmin: true}
@@ -48,8 +49,8 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 	}{
 		{"normal-admin", "orva_catalog_all_test", normal, all, "invoke_function", 73},
 		{"normal-read", "orva_catalog_read_test", normal, read, "list_functions", 28},
-		{"managed-admin-no-firewall", "orva_catalog_all_test", managed, all, "create_iam_policy", 75},
-		{"managed-admin", "orva_catalog_all_test", withFirewall, all, "set_dns_config", 81},
+		{"managed-admin-no-firewall", "orva_catalog_all_test", managed, all, "create_iam_policy", 76},
+		{"managed-admin", "orva_catalog_all_test", withFirewall, all, "set_dns_config", 82},
 		{"managed-read", "orva_catalog_read_test", withFirewall, read, "list_iam_policies", 25},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,6 +98,9 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 				t.Fatal("managed catalog registered legacy invocation")
 			}
 			if tc.deps.ManagedServer {
+				if has := slices.Contains(external, "test_function_with_fixture"); has != tc.perms.Has(permInvoke) {
+					t.Fatalf("test_function_with_fixture present=%v for perms %v", has, tc.perms)
+				}
 				// Replay is a WRITE tool: in both the external MCP and the Chat catalog
 				// (equal above) for a write-capable key, and absent for a read-only one.
 				if has := slices.Contains(external, "replay_execution"); has != tc.perms.Has(permWrite) {
