@@ -158,6 +158,7 @@
           v-if="form.mode === 'key' || form.mode === 'prefix'"
           v-model="form.value"
           :label="form.mode === 'key' ? 'Key' : 'Key prefix'"
+          :placeholder="form.mode === 'prefix' ? 'app/' : ''"
           :hint="form.mode === 'prefix' ? 'Keys that start with this text. Matched exactly, case sensitive, not trimmed. To allow every key, choose Every key.' : 'Matched exactly, case sensitive, not trimmed.'"
           :error="errors.value || ''"
           :disabled="disabled"
@@ -493,7 +494,7 @@ function validate(n) {
 function enterStep(n) {
   const f = form.value
   // Only an unchosen scope gets a starting point. A chosen one is never rewritten.
-  if (n === 3 && f.service === 'storage' && !f.mode) f.mode = listPicked.value ? 'prefix' : 'key'
+  if (n === 3 && f.service === 'storage' && !f.mode) f.mode = 'prefix'
   if (n === 3 && f.service === 'schedules' && !f.mode) f.mode = 'name'
   errors.value = {}
   step.value = n
