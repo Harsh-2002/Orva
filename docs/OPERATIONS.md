@@ -121,11 +121,19 @@ managed environment that the daemon will use:
    publication; leaving it unset is simpler.
 5. Run `orva serve` again in that service layout. Before opening the listener,
    it checks and seals each installed language without a recorded selection or
-   explicit generation override. The selections are stored in the managed
-   database. Later starts use those exact sealed generations even if the
-   installed trees have moved or changed. Setup and startup do not rotate an
-   existing selection. A retry after sealing but before the database commit
-   can reuse a verified seal that exactly matches the installed tree.
+   explicit generation override. It commits each validated seal in the managed
+   database before trying the next language, so a failure in the second language
+   leaves the first recorded. A retry after sealing but before that language's
+   commit can reuse a verified seal that exactly matches the installed tree.
+   Later starts check the interpreter and adapter in each selected generation
+   (recorded default or explicit override), not in the mutable installed tree.
+
+If a selected generation is not in the bound runtime store, startup refuses
+and names its language and generation. It does not clear the record or seal a
+replacement, even if an installed tree is available. An explicit override
+must name an already-sealed, usable generation for that language and does not
+change the recorded default. Do not edit SQLite or delete sealed stores or the
+Owner to try to repair a missing generation.
 
 If neither language has a usable generation and neither tree is installed
 (for example after `setup --skip-rootfs`), managed serving exits 78. Install
@@ -133,11 +141,13 @@ the trusted runtime trees and retry `orva serve`; do not delete the Owner or
 edit the mode marker. One configured or installed runtime is sufficient for
 startup, but builds in the other language remain unavailable. A present
 untrusted, oversized, or invalid runtime tree that would need to be sealed
-causes startup to refuse rather than silently accepting it. The refusal names
-the first offending tree-relative path and the rule it broke, then the repair:
-every entry must be owned by root or the daemon user and must not be group- or
-other-writable, so `chown -R <daemon user> <data>/rootfs/<lang>` and
-`chmod -R go-w <data>/rootfs/<lang>` fixes an unpacked-as-the-wrong-user tree.
+causes startup to refuse rather than silently accepting it. A capacity refusal
+names the language being sealed. Ownership and writable-mode refusals identify
+the offending path and suggest correcting its owner or mode. Entries must be
+owned by root or the daemon user; group/other-writable entries are refused
+except for symlinks' mode bits and empty sticky `tmp` and `var/tmp` directories.
+The sealed copy preserves directory sticky bits. Problems such as extended
+attributes or unreadable metadata do not get a `chown`/`chmod` hint.
 Reinstall trees from the verified installer or image rather than unpacking a
 release tarball as another user.
 

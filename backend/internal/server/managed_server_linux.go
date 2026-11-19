@@ -120,6 +120,9 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	if assets.Domain == nil {
 		return nil, errManagedServerUnavailable
 	}
+	if err := validateManagedRuntimeSelections(assets.Runtime, in.runtimeGenerations); err != nil {
+		return nil, err
+	}
 	sm := secrets.New(db, in.dataDir)
 	evaluators, paused, factories, err := reconstructedFactories(ctx, db, in.artifacts, sm)
 	if err != nil {
@@ -157,22 +160,6 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	if err != nil {
 		return nil, err
 	}
-	generations := make(map[sandbox.Language]string, len(in.runtimeGenerations))
-	for lang, generation := range in.runtimeGenerations {
-		if lang != sandbox.Node && lang != sandbox.Python {
-			return nil, errManagedServerUnavailable
-		}
-		lease, err := assets.Runtime.Acquire(generation)
-		if err != nil {
-			return nil, err
-		}
-		id := lease.Identity()
-		lease.Release()
-		if id.Kind != artifactfs.KindRuntime || id.Owner != string(lang) {
-			return nil, errManagedServerUnavailable
-		}
-		generations[lang] = generation
-	}
 	in.output.CodeStore, in.output.ParentDomain = assets.Code, assets.Domain
 	output, err := builder.NewOutputOwner(in.output)
 	if err != nil {
@@ -184,7 +171,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 	}()
 	b := builder.New(builder.WithManagedOutput(output), builder.WithRuntimeBinding(func(_ context.Context, req builder.RuntimeRequest) (builder.RuntimeBinding, error) {
-		generation := generations[req.Language]
+		generation := in.runtimeGenerations[req.Language]
 		if generation == "" {
 			return builder.RuntimeBinding{}, errManagedServerUnavailable
 		}
