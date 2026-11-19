@@ -1029,6 +1029,14 @@ and policy together. Serving wiring remains absent until the full proof gates.
   TypeScript and host build hooks deny in this limited profile. No serving,
   durable publication, current authority or recovery activation is included.
 
+- Later managed serving, enrollment and portable restore extend that profile
+  to npm/pip installs under the compiled egress policy and network-disabled
+  TypeScript compilation. They use a pinned runtime and fence the build Domain
+  before verifying the full output. Portable rebuilds use the retained,
+  digest-bound source input, not the dependency or compiler output. Host build
+  hooks remain denied. The seal limits accepted output; they are not a live
+  aggregate disk quota during a build.
+
 - Internal builder runtime binding now captures one concrete generation at Build
   entry, retains a pipeline anchor and leases each command through cleanup.
   Syntax/install/compiler steps do not reselect mutable runtimes; full identity

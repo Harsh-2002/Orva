@@ -14,6 +14,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Added
+
+- Managed deployments build npm and pip dependencies and compile TypeScript in
+  the owned sandbox. Supported legacy deployments can enroll with their
+  dependencies; portable restore rebuilds them from the retained source and
+  needs access to their registries.
+
 ### Upgrade notes
 
 - Managed backups use portable v2. Download with `orva backup download`

@@ -126,8 +126,12 @@ No serving caller enables this path. Runtime pinning does not fence build
 descendants or seal/approve code output; see `builder/README.md`.
 Separate internal managed-output mode owns fresh staging and an exclusive build
 Domain, fencing before inspection, Seal or Abort. Failed cleanup retains bounded
-ownership for retry. Only plain no-dependency Node/Python is qualified; no
-serving caller, durable publication, current authority or recovery is enabled.
+ownership for retry. Managed builds run npm and pip against the compiled
+egress policy and run tsc without network, inside the same owned build Domain.
+The complete output is verified after fencing. The private authored archive
+is attached only after fencing and is bound by digest to the deployment for
+portable rebuilds. TypeScript records the compiler output in `run_entrypoint`
+without changing `entrypoint`. Host build hooks remain unsupported.
 Managed output can use a concrete ParentDomain instead of raw budget/path
 provisioning. Build domains then inherit ancestor entry gates; root fencing
 blocks later starts through retained child handles. This is not boot wiring
