@@ -22,6 +22,10 @@ const FN = {
 }
 const FN_B = { ...FN, id: 'fn-b', name: 'beta', code_hash: 'hb' }
 const ARTIFACT = 'a'.repeat(64)
+const NEXT_ARTIFACT = 'b'.repeat(64)
+const GENERATION = '12345678-1234-7234-8234-123456789aba'
+const NEXT_GENERATION = '12345678-1234-7234-8234-123456789abb'
+const INSTALL_CONFIGURATION = '/functions/fn-a/configuration/install'
 const BUILD = '12345678-1234-7234-8234-123456789abc'
 const ROLLBACK = '12345678-1234-7234-8234-123456789abd'
 const FN_ROLLBACK = { ...FN, id: '12345678-1234-7234-8234-123456789abe', name: 'rollback-demo', active_deployment_id: BUILD }
@@ -207,7 +211,7 @@ const configurationCalls = () => h.get.mock.calls.filter(([url]) => url.endsWith
 const settings = (revision, functionVersion = '1') => ({
   data: {
     expected: {
-      function_version: functionVersion, artifact_revision: '4', artifact_epoch: '2', generation: 'gen-1',
+      function_version: functionVersion, artifact_revision: '4', artifact_epoch: '2', generation: GENERATION,
       policy_revision: String(revision), authority_epoch: '3', approved_artifact: ARTIFACT,
     },
     current_artifact: ARTIFACT,
@@ -217,6 +221,12 @@ const settings = (revision, functionVersion = '1') => ({
   },
 })
 const settingsAck = { data: { function_version: '2' } }
+const secretExpected = {
+  function_version: '2', artifact_revision: '5', artifact_epoch: '3', generation: NEXT_GENERATION,
+  policy_revision: '7', authority_epoch: '4', approved_artifact: ARTIFACT,
+}
+const secretAck = { data: { ...secretExpected, review_required: true } }
+const installAck = { data: { current_artifact: NEXT_ARTIFACT, review_required: true } }
 
 beforeEach(() => {
   h.mode.mockReset()
@@ -242,8 +252,8 @@ beforeEach(() => {
     return { data: {} }
   })
   h.post.mockResolvedValue({ data: {} })
-  h.put.mockImplementation(async (url) => url.endsWith('/configuration/settings') ? settingsAck : { data: {} })
-  h.del.mockResolvedValue({ data: {} })
+  h.put.mockImplementation(async (url) => url.endsWith('/configuration/settings') ? settingsAck : secretAck)
+  h.del.mockResolvedValue(secretAck)
 })
 
 afterEach(() => {
@@ -266,13 +276,28 @@ describe('editor secrets in managed mode', () => {
     expect(h.put.mock.calls[0]).toEqual([
       '/functions/fn-a/configuration/secrets',
       { expected: settings(6).data.expected, current_artifact: ARTIFACT, secret: { key: 'STRIPE_KEY', value: 'sk_live_1' } },
+      { sensitive: true },
     ])
   })
 
-  it('reads fresh tokens before every write and never reuses one', async () => {
+  it('requires installation before another write, then reads fresh tokens', async () => {
     await boot({ managed: true })
     await openSecrets()
     await saveSecret('FIRST', 'v1')
+    await saveSecret('SECOND', 'v2')
+    expect(h.put).toHaveBeenCalledTimes(1)
+    expect(configurationCalls()).toHaveLength(2)
+
+    byText('Done').click()
+    h.post.mockResolvedValueOnce(installAck)
+    byText('Install configuration').click()
+    await settle()
+    await openSecrets()
+    h.configuration = () => ({ data: { expected: secretExpected, current_artifact: NEXT_ARTIFACT } })
+    h.put.mockResolvedValueOnce({ data: {
+      ...secretExpected, function_version: '3', artifact_revision: '6', artifact_epoch: '4', policy_revision: '8',
+      authority_epoch: '5', generation: '12345678-1234-7234-8234-123456789abf', review_required: true,
+    } })
     await saveSecret('SECOND', 'v2')
 
     expect(configurationCalls()).toHaveLength(3)
@@ -291,8 +316,110 @@ describe('editor secrets in managed mode', () => {
     expect(h.del).toHaveBeenCalledTimes(1)
     expect(h.del.mock.calls[0]).toEqual([
       '/functions/fn-a/configuration/secrets',
-      { data: { expected: settings(6).data.expected, current_artifact: ARTIFACT, secret: { key: 'API_TOKEN' } } },
+      { data: { expected: settings(6).data.expected, current_artifact: ARTIFACT, secret: { key: 'API_TOKEN' } }, sensitive: true },
     ])
+    expect(byText('Install configuration')).toBeDefined()
+  })
+
+  it('installs only the acknowledged successor and then offers separate permissions review', async () => {
+    const { editor } = await boot({ managed: true })
+    await openSecrets()
+    await saveSecret('NEW_TOKEN', 'never-print-this')
+    expect(body().textContent).toContain('Secrets saved. Install required.')
+    expect(body().textContent).not.toContain('never-print-this')
+    expect(h.post).not.toHaveBeenCalled()
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]')).toBeNull()
+
+    byText('Done').click()
+    h.post.mockResolvedValueOnce(installAck)
+    byText('Install configuration').click()
+    await settle()
+
+    expect(h.post.mock.calls).toEqual([[INSTALL_CONFIGURATION, { expected: secretExpected }, { sensitive: true }]])
+    expect(configurationCalls()).toHaveLength(2)
+    expect(editor.buildLogs).toEqual([])
+    expect(body().textContent).toContain('Configuration installed. Permissions review required.')
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]').textContent).toContain('Review permissions')
+  })
+
+  it('cannot write secrets over a queued build or show the build review after a secret write', async () => {
+    const { editor } = await boot({ managed: true, autoBuild: false })
+    const building = editor.runDeploy()
+    await settle()
+    editor.secretForm = { name: 'NEW_TOKEN', value: 'draft' }
+    await editor.saveSecret()
+    expect(h.put).not.toHaveBeenCalled()
+
+    buildStream.succeed('fn-a')
+    await building
+    await editor.saveSecret()
+    expect(h.put).not.toHaveBeenCalled()
+    h.post.mockResolvedValueOnce({ data: { review_required: true, artifact: ARTIFACT } })
+    await editor.installManagedBuild()
+    await settle()
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]')).not.toBeNull()
+
+    await editor.saveSecret()
+    await settle()
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]')).toBeNull()
+    expect(byText('Install configuration')).toBeDefined()
+  })
+
+  it.each([
+    { policy_revision: '8' }, { artifact_epoch: 3 }, { generation: GENERATION }, { review_required: false },
+  ])('does not install after an unverified save acknowledgement (%j)', async (fields) => {
+    await boot({ managed: true })
+    await openSecrets()
+    h.put.mockResolvedValueOnce({ data: { ...secretAck.data, ...fields } })
+    await saveSecret('NEW_TOKEN', 'draft')
+    expect(body().textContent).toContain('Reload to continue')
+    expect(byText('Install configuration')).toBeUndefined()
+    expect(h.post).not.toHaveBeenCalled()
+  })
+
+  it.each([409, 200])('stops installation with no review or retry when response is unverified (%s)', async (status) => {
+    const { editor, confirm } = await boot({ managed: true })
+    await openSecrets()
+    await saveSecret('NEW_TOKEN', 'draft')
+    byText('Done').click()
+    if (status === 409) h.post.mockRejectedValueOnce({ response: { status: 409 } })
+    else h.post.mockResolvedValueOnce({ data: { current_artifact: ARTIFACT, review_required: true } })
+
+    byText('Install configuration').click()
+    await settle()
+    await editor.installManagedConfiguration()
+
+    expect(h.post).toHaveBeenCalledTimes(1)
+    expect(configurationCalls()).toHaveLength(2)
+    expect(byText('Install configuration')).toBeUndefined()
+    expect(body().querySelector('a[href="/functions/fn-a/permissions"]')).toBeNull()
+    expect(confirm.notify.mock.calls[0][0].message).toMatch(/reload/i)
+  })
+
+  it.each(['/functions/beta?mode=edit', '/elsewhere'])('ignores an in-flight install after navigating to %s', async (path) => {
+    const install = deferred()
+    const { router, editor } = await boot({ managed: true })
+    await openSecrets()
+    await saveSecret('NEW_TOKEN', 'draft')
+    byText('Done').click()
+    h.post.mockReturnValueOnce(install.promise)
+    byText('Install configuration').click()
+    await settle()
+    await editor.runDeploy()
+    await editor.removeSecret('API_TOKEN')
+    await editor.installManagedConfiguration()
+    expect(h.post).toHaveBeenCalledTimes(1)
+    expect(h.del).not.toHaveBeenCalled()
+
+    await router.push(path)
+    await settle()
+    if (path === '/elsewhere') await router.push('/functions/alpha?mode=edit')
+    install.resolve(installAck)
+    await settle()
+
+    expect(body().textContent).not.toContain('Configuration installed.')
+    expect(byText('Install configuration')).toBeUndefined()
+    expect(body().querySelector('a[href$="/permissions"]')).toBeNull()
   })
 
   it('stops with a stale message on 409 and does not retry', async () => {
@@ -306,6 +433,18 @@ describe('editor secrets in managed mode', () => {
     expect(confirm.notify.mock.calls[0][0].message).toBe('Configuration changed elsewhere; reload to continue.')
     expect(h.put).toHaveBeenCalledTimes(1)
     expect(configurationCalls()).toHaveLength(2)
+  })
+
+  it('does not echo managed secret write errors in the UI', async () => {
+    const { confirm, editor } = await boot({ managed: true })
+    const value = 'never-show-this-secret'
+    h.put.mockRejectedValueOnce({ response: { status: 500, data: { error: { message: value } } } })
+    editor.secretForm = { name: 'NEW_TOKEN', value }
+    await editor.saveSecret()
+
+    expect(confirm.notify.mock.calls[0][0].message).toMatch(/reload/i)
+    expect(JSON.stringify(confirm.notify.mock.calls)).not.toContain(value)
+    expect(editor.buildLogs).toEqual([])
   })
 
   it('reports that an administrator must change secrets on 403', async () => {

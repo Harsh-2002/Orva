@@ -241,7 +241,7 @@
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
-          :disabled="installing || !!rollingBack"
+          :disabled="installing || blockedBySecretPublication || !!rollingBack"
           @click="deployFunction"
         >
           <Check
@@ -356,7 +356,7 @@
         <button
           :disabled="!canTest || testbench.invoking"
           class="run-btn shrink-0"
-          :title="canTest ? 'Replay the current test request' : awaitingInstall ? 'Install the build first' : 'Deploy first'"
+          :title="canTest ? 'Replay the current test request' : secretInstallRequired ? 'Install the configuration first' : awaitingInstall ? 'Install the build first' : 'Deploy first'"
           @click="runTest"
         >
           <Play
@@ -397,6 +397,10 @@
               View log
             </button>
           </template>
+          <span
+            v-else-if="secretReceipt"
+            class="text-xs text-foreground"
+          >{{ secretConfigurationHeadline }}</span>
           <span
             v-else-if="lastBuild?.managed"
             class="text-xs text-foreground"
@@ -440,14 +444,23 @@
           variant="secondary"
           size="sm"
           :loading="installing"
-          :disabled="!!rollingBack"
+          :disabled="deploying || blockedBySecretPublication || !!rollingBack"
           @click="installManagedBuild"
         >
           {{ lastBuild.rollback ? 'Install restored version' : 'Install build' }}
         </Button>
+        <Button
+          v-if="secretReceipt?.expected && !viewMode"
+          variant="secondary"
+          size="sm"
+          :loading="secretBusy"
+          @click="installManagedConfiguration"
+        >
+          Install configuration
+        </Button>
         <router-link
-          v-if="lastBuild?.managed && lastBuild.installed && iam.mode === 'managed'"
-          :to="{ name: 'function-permissions', params: { functionId: lastBuild.owner } }"
+          v-if="reviewOwner"
+          :to="{ name: 'function-permissions', params: { functionId: reviewOwner } }"
           class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
         >
           Review permissions →
@@ -464,7 +477,7 @@
           Suggest fix
         </button>
         <router-link
-          v-if="fnId && form.name && !awaitingInstall"
+          v-if="fnId && form.name && !awaitingInstall && !secretInstallRequired"
           :to="{ name: 'function-test', params: { name: form.name } }"
           class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
         >
@@ -981,6 +994,7 @@
           <button
             class="text-foreground-muted hover:text-danger-fg transition-colors"
             :aria-label="`Delete secret ${sec.name}`"
+            :disabled="managedSecretBlocked"
             @click="removeSecret(sec.id)"
           >
             <Trash2 class="w-3.5 h-3.5" />
@@ -1022,10 +1036,18 @@
           <Button
             class="w-full"
             variant="secondary"
+            :disabled="managedSecretBlocked"
             @click="saveSecret"
           >
             <ShieldCheck class="w-4 h-4" /> {{ newManagedUninstalled ? 'Keep secret locally' : fnId ? 'Save secret' : 'Queue secret for deploy' }}
           </Button>
+          <p
+            v-if="secretInstallRequired"
+            role="status"
+            class="text-xs text-foreground-muted"
+          >
+            {{ secretReceipt.expected ? 'Close Secrets to install the saved configuration.' : secretBusy ? 'Saving secret change…' : 'Reload before continuing.' }}
+          </p>
         </div>
       </div>
       <template #footer>
@@ -1078,7 +1100,7 @@
             </router-link>
             <button
               v-if="!viewMode"
-              :disabled="!!rollingBack || deploying || installing"
+              :disabled="!!rollingBack || deploying || installing || blockedBySecretPublication"
               class="touch-expand-xs inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong disabled:opacity-50"
               @click="rollbackToVersion(v)"
             >
@@ -1241,7 +1263,7 @@
 </template>
 
 <script setup>
-import { ref, shallowRef, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { ref, shallowRef, shallowReactive, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical, Eye, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
@@ -1424,6 +1446,25 @@ const rollingBack = shallowRef(null)
 const installingBuild = shallowRef(null)
 const installing = computed(() => installingBuild.value !== null && installingBuild.value === lastBuild.value)
 const awaitingInstall = computed(() => lastBuild.value?.managed && !lastBuild.value.installed)
+const secretPublication = shallowRef(null)
+const secretOperations = shallowReactive(new Set())
+const secretBusy = computed(() => secretOperations.has(fnId.value))
+const secretReceipt = computed(() => iam.mode === 'managed' && secretPublication.value?.owner === fnId.value
+  ? secretPublication.value : null)
+const secretInstallRequired = computed(() => !!secretReceipt.value && !secretReceipt.value.installed)
+const secretConfigurationHeadline = computed(() => {
+  if (secretReceipt.value?.installed) return 'Configuration installed. Permissions review required.'
+  if (secretReceipt.value?.expected) return 'Secrets saved. Install required.'
+  return secretBusy.value ? 'Saving secret change…' : 'Configuration status unverified. Reload to continue.'
+})
+const blockedBySecretPublication = computed(() => secretBusy.value || secretInstallRequired.value)
+const managedSecretBlocked = computed(() => iam.mode === 'managed' && (blockedBySecretPublication.value
+  || deploying.value || installing.value || rollingBack.value || awaitingInstall.value))
+const reviewOwner = computed(() => {
+  if (iam.mode !== 'managed' || secretBusy.value || deploying.value || rollingBack.value) return ''
+  if (secretReceipt.value) return secretReceipt.value.installed ? secretReceipt.value.owner : ''
+  return lastBuild.value?.managed && lastBuild.value.installed ? lastBuild.value.owner : ''
+})
 const newManagedUninstalled = computed(() => !isEditing.value && iam.mode === 'managed' && !deployedThisSession.value)
 const lastDeployAt = ref('')
 const urlCopied = ref(false)
@@ -1633,7 +1674,7 @@ const askDiscard = async (message) => {
 const requestMode = async (next, fromUrl = false) => {
   if (!props.name || next === editorMode.value) return
   const target = routeTarget()
-  if (next === 'view' && deploying.value) {
+  if (next === 'view' && (deploying.value || secretBusy.value)) {
     if (fromUrl) setModeQuery('edit', target)
     return
   }
@@ -1642,7 +1683,7 @@ const requestMode = async (next, fromUrl = false) => {
     // work away: stay in Edit and put the flag back.
     if (fromUrl) { setModeQuery('edit', target); return }
     const ok = await askDiscard('This function has unsaved changes. Switching to View discards them.')
-    if (!ok || !sameRoute(target) || deploying.value) return
+    if (!ok || !sameRoute(target) || deploying.value || secretBusy.value) return
     discardChanges()
   }
   editorMode.value = next
@@ -1680,7 +1721,7 @@ watch(viewMode, (on) => {
 // flight. While `deploying` is true, the warm pool may be holding stale
 // code (or none, on a first deploy) so test invocations should wait.
 const isDeployed = computed(() => isEditing.value || deployedThisSession.value)
-const canTest = computed(() => isDeployed.value && !deploying.value && !awaitingInstall.value)
+const canTest = computed(() => isDeployed.value && !deploying.value && !awaitingInstall.value && !blockedBySecretPublication.value)
 
 // Orva offers two runtimes, latest-stable only. The id is generic (node /
 // python); the version shown here is a display label that tracks latest-stable.
@@ -2046,6 +2087,7 @@ const resetEditorState = () => {
   managedCreated.value = null
   loadedFunction.value = null
   managedSettingsCAS = null
+  secretPublication.value = null
   loadedEntrypoint.value = ''
   secrets.value = []
   secretForm.value = { name: '', value: '' }
@@ -2259,6 +2301,8 @@ onActivated(() => {
 const deactivateEditor = () => {
   editorActive = false
   editorEpoch += 1
+  // A pending receipt belongs to this activation, not a cached return visit.
+  if (secretPublication.value) secretPublication.value = secretPublication.value.installed ? null : { owner: fnId.value }
   rollingBack.value = null
   invalidateBuild()
   unbindGlobals()
@@ -2410,7 +2454,8 @@ const managedCreation = (form, entrypoint) => {
 const runDeploy = async () => {
   const inScope = editorScope()
   let id = fnId.value
-  if (!inScope() || viewMode.value || deploying.value || installing.value || rollingBack.value || (isEditing.value && !id)) return
+  if (!inScope() || viewMode.value || deploying.value || installing.value || blockedBySecretPublication.value
+    || rollingBack.value || (isEditing.value && !id)) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2439,6 +2484,7 @@ const runDeploy = async () => {
   const settingsCAS = managedSettingsCAS
   deploying.value = true
   buildError.value = ''
+  secretPublication.value = null
   lastBuild.value = null
   buildLogs.value = ['Starting deployment...']
 
@@ -2698,7 +2744,7 @@ const installManagedBuild = async () => {
   const inScope = editorScope()
   const current = () => inScope() && fnId.value === build?.owner
     && lastBuild.value === build && !viewMode.value && iam.mode === 'managed'
-  if (!awaitingInstall.value || deploying.value || installing.value || rollingBack.value || !current()) return
+  if (!awaitingInstall.value || deploying.value || installing.value || blockedBySecretPublication.value || rollingBack.value || !current()) return
   installingBuild.value = build
   try {
     const res = await apiClient.post(`/deployments/${build.deploymentId}/install`)
@@ -2885,7 +2931,7 @@ const rollbackToVersion = async (v) => {
   const deploymentId = v?.deployment_id
   const inScope = editorScope()
   if (!inScope() || viewMode.value || !owner || !deploymentId || rollingBack.value
-    || deploying.value || installing.value) return
+    || deploying.value || installing.value || blockedBySecretPublication.value) return
   const operation = Symbol()
   rollingBack.value = operation
   const current = () => inScope() && !viewMode.value && fnId.value === owner && rollingBack.value === operation
@@ -2932,7 +2978,10 @@ const rollbackToVersion = async (v) => {
     if (!ok || !currentMode()) return
 
     if (managedSettingsCAS?.owner === owner) managedSettingsCAS = null
-    if (mode === 'managed') lastBuild.value = null
+    if (mode === 'managed') {
+      secretPublication.value = null
+      lastBuild.value = null
+    }
     const { data } = await rollbackFunction(owner, { deployment_id: deploymentId })
     if (!currentMode()) return
     if (mode === 'managed') {
@@ -3026,19 +3075,92 @@ const managedConfigurationError = (err, fallback, forbidden = 'An administrator 
   return err.response?.data?.error?.message || err?.message || fallback
 }
 
+const managedSecretError = (status, fallback) => {
+  if (status === 409) return 'Configuration changed elsewhere; reload to continue.'
+  if (status === 403) return 'An administrator must change secrets.'
+  return fallback
+}
+
+const artifactDigest = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+const configurationRevisions = ['function_version', 'artifact_revision', 'artifact_epoch', 'policy_revision', 'authority_epoch']
+const positiveRevision = (value) => typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value)
+
+const secretSuccessor = (data, previous) => {
+  if (data?.review_required !== true || !isCanonicalUuid(data.generation) || data.generation === previous.generation
+    || (data.approved_artifact !== '' && !artifactDigest(data.approved_artifact))
+    || data.approved_artifact !== previous.approved_artifact) return null
+  const expected = { generation: data.generation, approved_artifact: data.approved_artifact }
+  for (const key of configurationRevisions) {
+    if (!positiveRevision(data[key]) || !positiveRevision(previous[key])
+      || BigInt(data[key]) !== BigInt(previous[key]) + 1n
+      || BigInt(data[key]) > (key === 'function_version' ? 2147483647n : 9223372036854775807n)) return null
+    expected[key] = data[key]
+  }
+  return expected
+}
+
+const installManagedConfiguration = async () => {
+  const receipt = secretReceipt.value
+  const inScope = editorScope()
+  const current = () => inScope() && !viewMode.value && secretReceipt.value === receipt && fnId.value === receipt?.owner
+  if (!receipt?.expected || !current() || secretBusy.value || deploying.value || installing.value
+    || rollingBack.value || awaitingInstall.value) return
+  const { owner, expected, previousArtifact } = receipt
+  secretOperations.add(owner)
+  try {
+    const { data } = await apiClient.post(`/functions/${owner}/configuration/install`, { expected }, { sensitive: true })
+    if (!current()) return
+    if (data?.review_required !== true || !artifactDigest(data.current_artifact) || data.current_artifact === previousArtifact) {
+      secretPublication.value = { owner }
+      confirmStore.notify({ title: 'Install unverified', message: 'Reload before continuing.', danger: true })
+      return
+    }
+    secretPublication.value = { owner, installed: true }
+    lastDeployAt.value = new Date().toISOString()
+  } catch (err) {
+    if (!current()) return
+    const status = err.response?.status
+    if (status !== 403) secretPublication.value = { owner }
+    confirmStore.notify({
+      title: 'Install failed',
+      message: status === 403 ? 'An administrator must install the configuration.'
+        : status === 409 ? 'Configuration changed elsewhere; reload to continue.' : 'Reload before continuing.',
+      danger: true,
+    })
+  } finally {
+    secretOperations.delete(owner)
+  }
+}
+
 const writeManagedSecret = async (id, current, key, value, { remove = false } = {}) => {
   const config = await loadManagedConfiguration(id)
   if (!current()) return
   requireEditorMode('managed')
-  if (!config?.expected || !config?.current_artifact) {
+  if (!config?.expected || !artifactDigest(config.current_artifact)) {
     throw new Error('Configuration is unavailable; reload to continue.')
   }
   const body = { expected: config.expected, current_artifact: config.current_artifact }
   body.secret = remove ? { key } : { key, value }
-  if (remove) {
-    return apiClient.delete(`/functions/${id}/configuration/secrets`, { data: body })
+  const path = `/functions/${id}/configuration/secrets`
+  const prior = secretPublication.value
+  secretPublication.value = { owner: id }
+  let res
+  try {
+    res = remove
+      ? await apiClient.delete(path, { data: body, sensitive: true })
+      : await apiClient.put(path, body, { sensitive: true })
+  } catch (err) {
+    if (current() && iam.mode === 'managed' && [400, 401, 403].includes(err.response?.status)) secretPublication.value = prior
+    throw err
   }
-  return apiClient.put(`/functions/${id}/configuration/secrets`, body)
+  if (!current() || iam.mode !== 'managed') return
+  lastBuild.value = null
+  const expected = secretSuccessor(res?.data, body.expected)
+  if (!expected) {
+    confirmStore.notify({ title: 'Secret update unverified', message: 'Reload before continuing.', danger: true })
+    return
+  }
+  secretPublication.value = { owner: id, expected, previousArtifact: body.current_artifact }
 }
 
 // The 9 fields the managed settings publication accepts, exactly. timeout_ms is
@@ -3150,11 +3272,15 @@ const saveSecret = async () => {
   }
   // Existing function: save through the API.
   let mode
+  let locked = false
   try {
     mode = await iam.checkMode()
     if (!current()) return
     requireEditorMode(mode)
     if (mode === 'managed') {
+      if (managedSecretBlocked.value) return
+      secretOperations.add(id)
+      locked = true
       await writeManagedSecret(id, current, name, value)
     } else {
       await apiClient.post(`/functions/${id}/secrets`, { key: name, value })
@@ -3168,11 +3294,14 @@ const saveSecret = async () => {
     if (!current()) return
     confirmStore.notify({
       title: 'Save failed',
-      message: mode !== 'legacy'
-        ? managedConfigurationError(err, 'Failed to save secret')
+      message: mode === 'managed'
+        ? managedSecretError(err.response?.status, 'Could not save secret. Reload before continuing.')
+        : mode !== 'legacy' ? 'Could not determine the server mode. Try again.'
         : (err.response?.data?.error?.message || 'Failed to save secret'),
       danger: true,
     })
+  } finally {
+    if (locked) secretOperations.delete(id)
   }
 }
 
@@ -3184,7 +3313,7 @@ const removeSecret = async (key) => {
   const id = fnId.value
   const inScope = editorScope()
   const current = () => inScope() && fnId.value === id && !viewMode.value
-  if (!id || !current()) return
+  if (!id || !current() || managedSecretBlocked.value) return
   const ok = await confirmStore.ask({
     title: 'Delete secret?',
     message: `"${key}" will be removed from this function's environment.`,
@@ -3193,11 +3322,15 @@ const removeSecret = async (key) => {
   })
   if (!ok || !current()) return
   let mode
+  let locked = false
   try {
     mode = await iam.checkMode()
     if (!current()) return
     requireEditorMode(mode)
     if (mode === 'managed') {
+      if (managedSecretBlocked.value) return
+      secretOperations.add(id)
+      locked = true
       await writeManagedSecret(id, current, key, '', { remove: true })
     } else {
       await apiClient.delete(`/functions/${id}/secrets/${encodeURIComponent(key)}`)
@@ -3208,11 +3341,14 @@ const removeSecret = async (key) => {
     if (!current()) return
     confirmStore.notify({
       title: 'Delete failed',
-      message: mode !== 'legacy'
-        ? managedConfigurationError(err, 'Failed to delete secret')
+      message: mode === 'managed'
+        ? managedSecretError(err.response?.status, 'Could not delete secret. Reload before continuing.')
+        : mode !== 'legacy' ? 'Could not determine the server mode. Try again.'
         : (err.response?.data?.error?.message || 'Failed to delete secret'),
       danger: true,
     })
+  } finally {
+    if (locked) secretOperations.delete(id)
   }
 }
 

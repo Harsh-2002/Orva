@@ -136,6 +136,13 @@ which violet is correct.
 
 ## Non-obvious
 
+- Managed editor secret writes leave the function inactive. Close Secrets and
+  choose **Install configuration**, then **Review permissions**. The editor
+  installs only from the exact successor acknowledged by that write, not from
+  a fresh guess; an install conflict clears the action and asks for a reload.
+  The receipt does not survive leaving the editor. Settings and deployment
+  publication retain their separate flow.
+
 - Editor managed rollback promotes an exact deployment ID without restoring
   configuration. A verified inactive, review-required response offers explicit
   installation in the existing result strip; navigation invalidates pending
