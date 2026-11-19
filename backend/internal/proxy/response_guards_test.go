@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -112,5 +113,31 @@ func TestCopyFunctionResponseHeadersGuardsEveryEntrypoint(t *testing.T) {
 	}
 	if h.Get("Content-Type") != "text/html" || h.Get("X-Custom") != "kept" {
 		t.Fatalf("ordinary headers were dropped: %v", h)
+	}
+}
+
+// Every credential the invoke path verifies is kept out of a captured request,
+// including the signed-invocation proof.
+func TestCapturedRequestsRedactEveryCredentialHeader(t *testing.T) {
+	hdr := http.Header{}
+	for _, name := range []string{"Authorization", "Cookie", "X-Orva-API-Key", "X-Orva-Internal-Token",
+		"Proxy-Authorization", "X-Orva-Signature", "X-Orva-Timestamp"} {
+		hdr.Set(name, "secret-value")
+	}
+	hdr.Set("Content-Type", "application/json")
+	got := redactCapturedHeaders(hdr)
+	for name, value := range got {
+		if name == "content-type" {
+			if value != "application/json" {
+				t.Fatalf("ordinary header altered: %q", value)
+			}
+			continue
+		}
+		if value != "[REDACTED]" {
+			t.Fatalf("%s was persisted in clear: %q", name, value)
+		}
+	}
+	if len(got) != 8 {
+		t.Fatalf("unexpected captured headers: %v", got)
 	}
 }
