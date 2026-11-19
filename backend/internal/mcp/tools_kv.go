@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -174,11 +175,27 @@ type KVCASOutput struct {
 	Current *KVValue `json:"current,omitempty" jsonschema:"on !ok, the value currently stored so callers can retry with a fresh expectation"`
 }
 
+func regAddKVTool[In, Out any](rc *regCtx, perm string, def *mcpsdk.Tool, handler mcpsdk.ToolHandlerFor[In, Out]) {
+	if rc.deps.ManagedServer {
+		db := rc.deps.DB
+		regAddTool(rc, perm, def, func(ctx context.Context, req *mcpsdk.CallToolRequest, in In) (*mcpsdk.CallToolResult, Out, error) {
+			ref, ok := auth.OperatorFromContext(ctx)
+			if !ok || db == nil || db.CheckOperatorPermission(ctx, ref, perm) != nil {
+				var out Out
+				return nil, out, database.ErrOperatorDenied
+			}
+			return handler(ctx, req, in)
+		})
+		return
+	}
+	regAddTool(rc, perm, def, handler)
+}
+
 func registerKVTools(rc *regCtx) {
 	deps := rc.deps
 	rc.group = "kv"
 
-	regAddTool(rc, permRead,
+	regAddKVTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:        "kv_get",
 			Title:       "KV Get",
@@ -206,7 +223,7 @@ func registerKVTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddKVTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "kv_put",
 			Title:       "KV Put",
@@ -233,7 +250,7 @@ func registerKVTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddKVTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "kv_delete",
 			Title:       "KV Delete",
@@ -252,7 +269,7 @@ func registerKVTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permRead,
+	regAddKVTool(rc, permRead,
 		&mcpsdk.Tool{
 			Name:        "kv_list",
 			Title:       "KV List",
@@ -279,7 +296,7 @@ func registerKVTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddKVTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "kv_incr",
 			Title:       "KV Increment",
@@ -307,7 +324,7 @@ func registerKVTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permWrite,
+	regAddKVTool(rc, permWrite,
 		&mcpsdk.Tool{
 			Name:        "kv_cas",
 			Title:       "KV Compare-and-swap",

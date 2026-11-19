@@ -226,6 +226,7 @@ func runServeManaged(ctx context.Context, cfg *config.Config) (err error) {
 		DataDir: cfg.Data.Dir, LayoutLock: lock, Artifacts: owner, NsjailBin: cfg.Sandbox.NsjailBin,
 		Output:             managedOutputConfig(cfg.Data.Dir, managedOwnerConfig(cfg.Data.Dir).CodeLimits),
 		RuntimeGenerations: runtimes,
+		RootfsDir:          cfg.Sandbox.RootfsDir,
 	})
 	if err != nil {
 		return fmt.Errorf("start managed server: %w", err)

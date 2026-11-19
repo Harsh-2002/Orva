@@ -18,6 +18,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/config"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
+	"github.com/Harsh-2002/Orva/backend/internal/firewall"
 	"github.com/Harsh-2002/Orva/backend/internal/mcp"
 	"github.com/Harsh-2002/Orva/backend/internal/metrics"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
@@ -60,6 +61,10 @@ type managedRouteDeps struct {
 	// InvalidateSession evicts a revoked browser-session token from any cache.
 	// Managed authentication rereads sessions live; nil is a no-op.
 	InvalidateSession func(token string)
+	// Firewall is the process's egress policy manager — the same instance the
+	// managed builder and Chat guard use. nil leaves the firewall routes
+	// unmounted rather than reporting an empty, unenforced policy.
+	Firewall *firewall.Manager
 
 	// recordRoute, when set (tests), is told every tier-gated route as it is
 	// registered, so a table test can compare the whole surface to the legacy tiers.
@@ -117,6 +122,9 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
 	mountManagedAccess(mux, db, ops)
+	mountManagedOperatorKV(mux, db, reg, ops)
+	mountManagedWebhooks(mux, db, ops)
+	mountManagedFirewall(mux, db, ops.Firewall, ops)
 	var dispatch http.Handler = mux
 	var triggers *workloadtrigger.Service
 	if publication != nil {

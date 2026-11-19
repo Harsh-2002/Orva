@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"os"
@@ -120,6 +121,9 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	if assets.Domain == nil {
 		return nil, errManagedServerUnavailable
 	}
+	if err := validateManagedRuntimeSelections(assets.Runtime, in.runtimeGenerations); err != nil {
+		return nil, err
+	}
 	sm := secrets.New(db, in.dataDir)
 	evaluators, paused, factories, err := reconstructedFactories(ctx, db, in.artifacts, sm)
 	if err != nil {
@@ -138,9 +142,10 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	// Operators replay captured requests; without this the capture toggle is never read.
 	proxy.LoadCaptureConfig(db)
 	spawnReady := &atomic.Bool{}
+	fw := firewall.NewManager(db, in.dataDir)
 	runtime := newManagedRuntime(db, reg, authority, sm, pool.SandboxTemplate{
 		DataDir: in.dataDir, NsjailBin: in.nsjail, DefaultSeccomp: "default", ManagedDomain: assets.Domain,
-		ManagedSpawnReady: spawnReady.Load,
+		ManagedSpawnReady: spawnReady.Load, EgressPolicy: fw.EgressPolicy,
 	}, sandbox.NewLimiter(8))
 	defer func() {
 		if err != nil {
@@ -157,22 +162,6 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	if err != nil {
 		return nil, err
 	}
-	generations := make(map[sandbox.Language]string, len(in.runtimeGenerations))
-	for lang, generation := range in.runtimeGenerations {
-		if lang != sandbox.Node && lang != sandbox.Python {
-			return nil, errManagedServerUnavailable
-		}
-		lease, err := assets.Runtime.Acquire(generation)
-		if err != nil {
-			return nil, err
-		}
-		id := lease.Identity()
-		lease.Release()
-		if id.Kind != artifactfs.KindRuntime || id.Owner != string(lang) {
-			return nil, errManagedServerUnavailable
-		}
-		generations[lang] = generation
-	}
 	in.output.CodeStore, in.output.ParentDomain = assets.Code, assets.Domain
 	output, err := builder.NewOutputOwner(in.output)
 	if err != nil {
@@ -184,7 +173,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 	}()
 	b := builder.New(builder.WithManagedOutput(output), builder.WithRuntimeBinding(func(_ context.Context, req builder.RuntimeRequest) (builder.RuntimeBinding, error) {
-		generation := generations[req.Language]
+		generation := in.runtimeGenerations[req.Language]
 		if generation == "" {
 			return builder.RuntimeBinding{}, errManagedServerUnavailable
 		}
@@ -192,7 +181,6 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	}))
 	b.NsjailBin, b.DataDir = in.nsjail, in.dataDir
 	b.DB = db
-	fw := firewall.NewManager(db, in.dataDir)
 	b.SetEgressPolicy(fw.EgressPolicy)
 	publication, err := builder.NewPublicationQueue(b, db, reg, authority, runtime.pool, sm, assets.Code, assets.Runtime)
 	if err != nil {
@@ -220,6 +208,8 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		})
 		registerManagedChat(mux, &AIHandler{Manager: chat, DB: db})
 	}
+	routes := runtime.routeDeps(in.nsjail)
+	routes.Firewall = fw
 	handler, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, configuration, publication, in.dataDir,
 		runtime.invoke, runtime.async, mountChat, func(w http.ResponseWriter, r *http.Request) {
 			handlers.DownloadManagedBackup(w, r, db, in.dataDir, func(ctx context.Context, dst io.Writer, snapshot string) error {
@@ -230,7 +220,7 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 				defer os.RemoveAll(stage)
 				return backup.ArchiveManagedTo(ctx, dst, in.artifacts, in.dataDir, snapshot, stage)
 			})
-		}, runtime.routeDeps(in.nsjail))
+		}, routes)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +230,10 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	done := make(chan error, 1)
 	buildServicesDone := make(chan struct{})
 	ready := make(chan struct{})
+	runtime.startFirewall(runCtx, fw)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	spawnReady.Store(true)
 	go func() { done <- runtime.scheduler.RunManagedReady(runCtx, ready); close(done) }()
 	select {
@@ -250,7 +244,6 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 		}
 		return nil, err
 	case <-ready:
-		fw.Start(runCtx)
 		gc := builder.NewBuildCacheGC(in.dataDir, db)
 		gc.FnLock = runtime.pool.FunctionLock
 		go func() {
@@ -261,6 +254,19 @@ func newManagedServer(ctx context.Context, db *database.Database, in managedServ
 	}
 	return &managedServer{handler: handler, runtime: runtime, publication: publication, output: output,
 		cancel: cancel, done: done, spawnReady: spawnReady, chat: chat, firewall: fw, buildServicesDone: buildServicesDone}, nil
+}
+
+func (r *managedRuntime) startFirewall(ctx context.Context, fw *firewall.Manager) {
+	// No workers can start yet, so the first compile needs no rotation.
+	fw.Start(ctx)
+	fw.SetOnPolicyChange(func(gen string) {
+		retired := r.pool.RetireEgressPools()
+		slog.Info("egress policy applied", "generation", gen, "retired_pools", retired)
+		r.hub.Publish("firewall.policy_applied", map[string]any{
+			"generation":    gen,
+			"retired_pools": retired,
+		})
+	})
 }
 
 func (s *managedServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {

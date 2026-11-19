@@ -6,6 +6,13 @@ recovery, managed SQLite and shutdown. It starts the managed scheduler before
 the listener and drains HTTP, stops the instance, then fences/closes the Owner.
 Legacy serve still follows directory aliases and requires an absent mode file
 and no root SQLite tombstone. The default installer doesn't enable managed mode.
+After layout publication, managed serve seals bounded, trusted installed trees
+for languages without a recorded generation or override. It commits each
+validated seal to `workload_enrollment_runtimes` before trying the next language.
+An unrecorded seal can be reused only on an exact match. Before the listener
+opens, the server checks the sealed worker endpoints for each selected
+generation, including overrides. Missing or invalid selections are not reset
+or replaced at boot; overrides do not rewrite the recorded defaults.
 The server-only `managed enroll` command plans from an offline SQLite scratch
 copy, checks exact DB/source identity, and writes a fail-closed outer intent.
 It rebuilds only current compatible deployments under the bound Owner, commits
@@ -62,9 +69,11 @@ version (`409 NOT_ACTIVE`) and takes the timeout from the Factory; the MCP
 set, and registers the ordinary invoke-only channel catalog, whose `invokeFunction`
 goes through `Proxy.Forward` and therefore the managed pool; managed never serves a
 non-`active` function from a prior code directory. `registerManagedOperationTools`
-shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools` and
-`registerKeyTools` with the normal catalog (73/28 unchanged; managed 69/23) and adds
-`list_activity`, `list_channels`, `get_channel` and `replay_execution`.
+shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools`,
+`registerKeyTools` and `registerKVTools` with the normal catalog (73/28 unchanged;
+managed 75/25) and adds `list_activity`, `list_channels`, `get_channel` and
+`replay_execution`. Managed KV tools recheck the live operator credential's
+read/write tier at tool entry and never dispatch to a worker.
 Managed MCP and Chat share the DB-only `registerFixtureTools` with legacy mode,
 rechecking the live operator tier per call without registering fixture execution.
 Restore clears publications before admission.

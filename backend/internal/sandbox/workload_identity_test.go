@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -100,7 +101,7 @@ func TestWorkloadChannelLessObservationIsNotAuthority(t *testing.T) {
 	w := &Worker{identity: &WorkloadIdentity{FunctionID: ids.New(), WorkerID: ids.New(), ArtifactRevision: "reviewed"}}
 	for _, ready := range []bool{false, true} {
 		w.ready.Store(ready)
-		if frame := w.beginLease(WithExecution(context.Background(), ExecInfo{ExecutionID: ids.New(), Lease: "not-issued"})); frame != nil {
+		if frame, err := w.beginLease(WithExecution(context.Background(), ExecInfo{ExecutionID: ids.New(), Lease: "not-issued"})); frame != nil || err != nil {
 			t.Fatal("channel-less worker received a lease frame")
 		}
 		s, ok := w.WorkloadState()
@@ -112,6 +113,42 @@ func TestWorkloadChannelLessObservationIsNotAuthority(t *testing.T) {
 	}
 	w.markDead()
 	workloadState(t, workloadCaller(w, nil, ""), WorkloadInactive)
+}
+
+func TestWorkloadPoolRetirementPreservesOnlyAdmittedDispatch(t *testing.T) {
+	for _, sdk := range []bool{false, true} {
+		t.Run(fmt.Sprint(sdk), func(t *testing.T) {
+			admissionOpen, underGate := true, false
+			w := &Worker{
+				sdkEnabled: sdk,
+				dispatchAllowed: func() bool {
+					if !underGate {
+						t.Error("dispatch did not check retirement under the transition gate")
+					}
+					return admissionOpen
+				},
+				workloadTransition: func(change func()) {
+					underGate = true
+					defer func() { underGate = false }()
+					change()
+				},
+			}
+			defer w.revokeLease()
+			frame, err := w.beginLease(t.Context())
+			if err != nil || (frame != nil) != sdk {
+				t.Fatalf("open pool dispatch: frame=%t, err=%v", frame != nil, err)
+			}
+			admitted := w.disp.Load()
+			admissionOpen = false
+			frame, err = w.beginLease(t.Context())
+			if frame != nil || !errors.Is(err, ErrWorkerExited) {
+				t.Fatalf("retired pool dispatch: frame=%t, err=%v", frame != nil, err)
+			}
+			if w.disp.Load() != admitted || (admitted != nil && admitted.info.Ctx.Err() != nil) {
+				t.Fatal("pool retirement replaced or cancelled an admitted lease")
+			}
+		})
+	}
 }
 
 func TestWorkloadConcurrentObservation(t *testing.T) {

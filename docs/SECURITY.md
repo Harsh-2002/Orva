@@ -795,8 +795,10 @@ to nsjail (exit 255), so a corrupt policy also fails closed.
 **Policy is fixed at worker start.** NSTUN reads its rules once, at spawn.
 Editing a rule publishes a new generation and retires the warm egress
 pools so the next spawn picks it up; an in-flight worker keeps the exact
-generation it started with. Recycles are rate-limited to one per 60 s, so
-a flapping DNS answer behind a hostname rule cannot turn into a cold-start
+generation it started with. In managed mode, rotation leaves the installed
+Factory and IAM approval unchanged. Managed startup attempts the first compile
+before starting workers or dispatching scheduled work. Recycles are
+rate-limited to one per 60 s, so a flapping DNS answer cannot turn into a cold-start
 storm. Expect a few seconds — and a cold start — between saving a rule and
 seeing it applied.
 

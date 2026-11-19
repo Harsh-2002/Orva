@@ -25,13 +25,20 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 69 on this
-> composition; read-only keys see 28 and 23 respectively. This composition also
+> An all-permissions key sees 73 tools on the normal server and 75 on this
+> composition; read-only keys see 28 and 25 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
 > as an invoke-only catalog dispatched through the managed pool. See
 > `docs/API.md` "Managed operator surfaces".
+> Managed REST, MCP and Chat keep the legacy operator KV tiers: `read` for
+> `kv_get` and `kv_list`; `write` for `kv_put`, `kv_delete`, `kv_incr` and
+> `kv_cas`. Tools recheck the operator's current credential and required tier
+> at tool entry. They access stored values by function name or UUID, including
+> for inactive functions, without running code or granting SDK permissions.
+> Managed outbound webhook REST routes under `/api/v1/webhooks` require `read`
+> for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
@@ -836,9 +843,13 @@ curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e0
 ## Webhooks
 
 Operator-managed subscriptions for system events. Configure URLs from
-the Webhooks page; Orva delivers signed POSTs to them when matching
+the Webhooks page; the legacy server delivers signed POSTs when matching
 events fire (deployments, function lifecycle, cron failures, job
 outcomes). Subscriptions are global, not per-function.
+
+In managed mode, the REST routes manage subscriptions and delivery records.
+Test and retry queue deliveries only; managed mode does not run outbound event
+fanout or the delivery worker.
 
 **Headers:** `X-Orva-Event`, `X-Orva-Delivery-Id`,
 `X-Orva-Timestamp`, `X-Orva-Signature`.
@@ -1568,7 +1579,7 @@ Failed deliveries (non-2xx, timeout, network) retry up to 5× with exponential b
 - NO raw sockets. NO listening ports — the platform owns the HTTP server. Subprocesses are permitted by the default seccomp policy, but the sandbox ships no shell and no package manager, so treat them as unavailable.
 - Network is OFF by default — sandbox has only loopback (no DNS, no outbound TCP). The user must flip "Allow outbound network" in the editor's Settings modal to call external HTTPS APIs (Stripe, OpenAI, a remote DB). Tell the user to do this whenever your code makes outbound calls.
 - With explicit `sdk: true`, current adapters route KV, invoke/invokeStream, jobs, crons, and trace.span over the inherited per-worker SDK socket channel, so these operations work with `network_mode: "none"`. New functions default to `sdk: false`; egress does not grant SDK permission. The SDK requires the inherited channel and has no HTTP fallback; do not infer that an external HTTP request is available in none mode. `network_mode: "egress"` remains necessary for outbound network calls by function code. SDK function identity is derived per channel, while dispatch-scoped operations require the active per-dispatch lease; up to 8 streams may be open per channel, with chunks no larger than 256 KiB, frames at 4 MiB, and at most 32 calls are in flight, with bounded pending replies.
-- When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
+- When egress IS enabled, the operator can still block specific destinations with the egress policy, and can pin resolvers / host overrides with the sandbox DNS settings (both on the dashboard's Egress controls page, which manages the same policy in managed serving). A destination blocked by policy fails with ECONNREFUSED — distinct from the ENETUNREACH you get with `network_mode: "none"`. Handle both.
 - Concurrency: each warm worker handles one request at a time; simultaneous requests use separate workers in the same function's pool. A worker becomes available only after its adapter has loaded the handler and signalled readiness. Pool Controller v2 sizes workers from arrival rate, queue pressure, service time, and cold-start time, bounded by effective host CPU/memory and function concurrency. With no override, the pool maximum is automatic; `max_warm=0` restores that behavior and a positive value can only lower it. Pending admission count scales with detected host memory and file descriptors, with a share reserved for other functions. Public HTTP requests reserve daemon memory before body read; unknown-length bodies use the configured body cap for this estimate. A saturated pool waits at most two seconds for a worker; a pool that can still grow or has workers starting may wait up to twelve seconds (adapter-readiness budget plus one scaler tick). Expired worker admission returns `429 INVOCATION_QUEUE_FULL`; a full execution-record writer returns `429 STORAGE_BACKPRESSURE` after a five-second wait. Both carry `Retry-After: 1` and occur before user code starts. A function's configured execution timeout starts when a ready worker is acquired, not while waiting in the admission queue or while the adapter loads. Rejected requests are not replay-captured. Don't rely on in-process module-level state surviving across requests beyond best-effort caching.
 </sandbox_limits>
 
