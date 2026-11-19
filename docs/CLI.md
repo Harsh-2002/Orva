@@ -808,6 +808,9 @@ orva dns set --server "" --search ""                   # reset to defaults
 
 Per-function warm-sandbox tuning. Always pass `--fn`. Only the fields you
 specify change; the rest keep their current values.
+`get` requires `read`; `set` requires `admin`. On managed servers, tuning
+recycles active workers without changing the installed deployment or its
+permissions. It does not make an inactive function invokable.
 
 ```bash
 orva pool get --fn greeter

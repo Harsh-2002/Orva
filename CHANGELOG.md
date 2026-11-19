@@ -80,7 +80,10 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST now supports outbound webhook subscription and delivery
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
-- Not yet on the managed composition: pool configuration, secrets,
+- `orva pool get/set` and the corresponding REST routes work in managed
+  mode. Admin writes rotate active workers without reinstalling the function,
+  changing its permissions, or giving running requests extra concurrency.
+- Not yet on the managed composition: secrets,
   fixture execution, outbound webhook delivery, account password change, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.

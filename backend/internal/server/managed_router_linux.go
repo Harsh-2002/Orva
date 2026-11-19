@@ -121,6 +121,10 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	mountManagedExecutions(mux, db, reg, manager, invoke, ops)
 	mountManagedFixtures(mux, db, reg, ops)
 	mountManagedObservability(mux, db, reg, manager, dataDir, ops)
+	poolConfig := &handlers.PoolConfigHandler{DB: db, Registry: reg, ManagedRefresh: manager.RefreshManagedPool}
+	gateRoute(mux, db, ops, "GET /api/v1/pool/config", managedRead, poolConfig.Get)
+	gateRoute(mux, db, ops, "PUT /api/v1/pool/config", managedAdmin, poolConfig.Upsert)
+	gateRoute(mux, db, ops, "POST /api/v1/pool/config", managedAdmin, poolConfig.Upsert)
 	mountManagedAccess(mux, db, ops)
 	mountManagedOperatorKV(mux, db, reg, ops)
 	mountManagedWebhooks(mux, db, ops)

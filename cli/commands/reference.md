@@ -38,6 +38,10 @@
 > for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
+> Managed `/api/v1/pool/config` requires `read` for GET and live `admin`
+> for PUT or POST. The same `orva pool get/set` commands work in both modes.
+> Tuning rotates active managed workers without changing the installed
+> Factory or permissions. It does not activate an inactive function.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
