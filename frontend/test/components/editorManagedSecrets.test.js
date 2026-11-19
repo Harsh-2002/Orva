@@ -19,10 +19,11 @@ const FN = {
   max_concurrency: 0, concurrency_policy: 'queue', auth_mode: 'none', rate_limit_per_min: 0,
   env_vars: { EXISTING: 'keep' },
 }
+const FN_B = { ...FN, id: 'fn-b', name: 'beta', code_hash: 'hb' }
 const ARTIFACT = 'a'.repeat(64)
 
 const h = vi.hoisted(() => ({
-  managed: false,
+  mode: vi.fn(),
   get: vi.fn(),
   post: vi.fn(),
   put: vi.fn(),
@@ -30,7 +31,7 @@ const h = vi.hoisted(() => ({
   configuration: null,
 }))
 vi.mock('@/api/managedPolicies.js', () => ({
-  readManagedIAMMode: async () => h.managed ? 'managed' : 'legacy',
+  readManagedIAMMode: h.mode,
 }))
 vi.mock('@/api/client', () => ({
   default: { get: h.get, post: h.post, put: h.put, delete: h.del },
@@ -38,7 +39,7 @@ vi.mock('@/api/client', () => ({
 }))
 vi.mock('@/api/endpoints', () => ({
   __esModule: true,
-  listFunctions: vi.fn(async () => ({ data: { functions: [FN], total: 1 } })),
+  listFunctions: vi.fn(async () => ({ data: { functions: [FN, FN_B], total: 2 } })),
   listDeployments: vi.fn(async () => ({ data: { deployments: [] } })),
   rollbackFunction: vi.fn(async () => ({ data: {} })),
   listFixtures: vi.fn(async () => ({ data: { fixtures: [] } })),
@@ -72,8 +73,9 @@ const body = () => document.body
 const byText = (text) => [...body().querySelectorAll('button')].find((b) => b.textContent.includes(text))
 
 const mounted = []
-const boot = async ({ managed }) => {
-  h.managed = managed
+const boot = async ({ managed, capability } = {}) => {
+  if (capability) h.mode.mockImplementation(capability)
+  else h.mode.mockResolvedValue(managed ? 'managed' : 'legacy')
   const Editor = (await import('@/views/Editor.vue')).default
   const editorProps = (r) => ({ ...r.params, mode: r.query.mode === 'edit' ? 'edit' : '' })
   const router = createRouter({
@@ -91,14 +93,20 @@ const boot = async ({ managed }) => {
   setActivePinia(pinia)
   const { useAuthStore } = await import('@/stores/auth')
   useAuthStore(pinia).isAuthenticated = true
-  const wrapper = mount({ template: '<router-view />' }, { global: { plugins: [router, pinia] }, attachTo: document.body })
+  const wrapper = mount({
+    template: '<router-view v-slot="{ Component }"><keep-alive><component :is="Component" /></keep-alive></router-view>',
+  }, { global: { plugins: [router, pinia] }, attachTo: document.body })
   mounted.push(wrapper)
   await settle()
+  if (!capability) {
+    const { useManagedIAMStore } = await import('@/stores/managedIAM.js')
+    expect(useManagedIAMStore(pinia).mode).toBe(managed ? 'managed' : 'legacy')
+  }
   const { useConfirmStore } = await import('@/stores/confirm')
   const confirm = useConfirmStore(pinia)
   confirm.ask = vi.fn(async () => true)
   confirm.notify = vi.fn()
-  return { wrapper, confirm }
+  return { wrapper, confirm, router, editor: wrapper.findComponent(Editor).vm }
 }
 
 const openSecrets = async () => {
@@ -144,6 +152,19 @@ const setEnvironment = async (key, value) => {
   await settle()
 }
 
+const deferred = () => {
+  let resolve
+  let reject
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+const noMutations = () => {
+  expect(h.post).not.toHaveBeenCalled()
+  expect(h.put).not.toHaveBeenCalled()
+  expect(h.del).not.toHaveBeenCalled()
+}
+
 const configurationCalls = () => h.get.mock.calls.filter(([url]) => url.endsWith('/configuration'))
 const settings = (revision) => ({
   data: {
@@ -159,7 +180,7 @@ const settings = (revision) => ({
 })
 
 beforeEach(() => {
-  h.managed = false
+  h.mode.mockReset()
   h.get.mockReset()
   h.post.mockReset()
   h.put.mockReset()
@@ -167,10 +188,10 @@ beforeEach(() => {
   let revision = 5
   h.configuration = () => settings(revision++)
   h.get.mockImplementation(async (url) => {
-    if (url === '/functions') return { data: { functions: [FN] } }
-    if (url.endsWith('/source')) return { data: { code: 'print(1)', dependencies: '' } }
+    if (url === '/functions') return { data: { functions: [FN, FN_B] } }
+    if (url.endsWith('/source')) return { data: { code: url.includes('fn-b') ? 'print(2)' : 'print(1)', dependencies: '' } }
     if (url.includes('/deployments')) return { data: { deployments: [] } }
-    if (url.endsWith('/secrets')) return { data: { secrets: ['API_TOKEN'] } }
+    if (url.endsWith('/secrets')) return { data: { secrets: [url.includes('fn-b') ? 'BETA_TOKEN' : 'API_TOKEN'] } }
     if (url.endsWith('/configuration')) return h.configuration()
     return { data: {} }
   })
@@ -341,5 +362,128 @@ describe('editor deploy in legacy mode', () => {
       rate_limit_per_min: 0,
     })
     expect(deployInlineCalls()).toHaveLength(1)
+  })
+})
+
+describe('editor mutation ownership', () => {
+  it('waits for capability and never falls through to legacy writes on error', async () => {
+    const capability = deferred()
+    const { confirm, editor } = await boot({ capability: () => capability.promise })
+    const building = editor.runDeploy()
+    editor.secretForm = { name: 'TOKEN', value: 'draft' }
+    const saving = editor.saveSecret()
+    const deleting = editor.removeSecret('API_TOKEN')
+    await settle()
+
+    expect(h.mode).toHaveBeenCalledTimes(1)
+    noMutations()
+    capability.reject(new Error('no capability response'))
+    await Promise.all([building, saving, deleting])
+    await settle()
+
+    noMutations()
+    expect(configurationCalls()).toHaveLength(0)
+    expect(body().textContent).toContain('Could not determine the server mode')
+    expect(confirm.notify.mock.calls.map(([notice]) => notice.title)).toEqual(['Save failed', 'Delete failed'])
+    expect(editor.secretForm).toEqual({ name: 'TOKEN', value: 'draft' })
+  })
+
+  it.each(['route change', 'KeepAlive departure and return'])('does not continue an in-flight settings PUT after %s', async (transition) => {
+    const put = deferred()
+    const { editor, router, wrapper } = await boot({ managed: true })
+    h.put.mockReturnValueOnce(put.promise)
+    editor.envVars = [{ key: 'EXISTING', value: 'changed' }]
+    const building = editor.runDeploy()
+    await settle()
+    expect(putCalls('/functions/fn-a/configuration/settings')).toHaveLength(1)
+
+    if (transition === 'route change') {
+      await router.push('/functions/beta?mode=edit')
+    } else {
+      await router.push('/elsewhere')
+      await settle()
+      await router.push('/functions/alpha?mode=edit')
+    }
+    await settle()
+    put.resolve({ data: {} })
+    await building
+    await settle()
+
+    expect(deployInlineCalls()).toHaveLength(0)
+    expect(wrapper.find('[data-code]').text()).toBe(transition === 'route change' ? 'print(2)' : 'print(1)')
+    expect(editor.deploying).toBe(false)
+    expect(editor.buildLogs).not.toContain('Updated function configuration')
+    expect(editor.buildModalOpen).toBe(false)
+  })
+
+  it('deploys the original draft even when code and settings change while the PUT waits', async () => {
+    const put = deferred()
+    const { editor } = await boot({ managed: true })
+    h.put.mockReturnValueOnce(put.promise)
+    editor.envVars = [{ key: 'EXISTING', value: 'original' }]
+    const building = editor.runDeploy()
+    await settle()
+    editor.envVars[0].value = 'later'
+    editor.code = 'print("later")'
+    editor.dependencyText = 'later'
+    editor.templateEntrypoint = 'later.py'
+    editor.templateExtras = { 'later.txt': 'later' }
+    put.resolve({ data: {} })
+    await building
+
+    expect(h.put.mock.calls[0][1].environment).toEqual({ EXISTING: 'original' })
+    expect(deployInlineCalls()).toEqual([
+      ['/functions/fn-a/deploy-inline', { code: 'print(1)', filename: 'handler.py', dependencies: '' }],
+    ])
+    expect(editor.code).toBe('print("later")')
+    expect(editor.isDirty).toBe(true)
+  })
+
+  it.each([true, false])('does not delete after navigating during confirmation (managed=%s)', async (managed) => {
+    const answer = deferred()
+    const { confirm, router, editor } = await boot({ managed })
+    confirm.ask.mockReturnValueOnce(answer.promise)
+    const deleting = editor.removeSecret('API_TOKEN')
+    expect(confirm.ask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete secret?' }))
+    await router.push('/functions/beta?mode=edit')
+    await settle()
+    answer.resolve(true)
+    await deleting
+
+    noMutations()
+    expect(configurationCalls()).toHaveLength(0)
+    expect(confirm.notify).not.toHaveBeenCalled()
+  })
+
+  it('ignores a stale secret list after opening another function', async () => {
+    const first = deferred()
+    const get = h.get.getMockImplementation()
+    h.get.mockImplementation((url) => url === '/functions/fn-a/secrets' ? first.promise : get(url))
+    const { router, editor } = await boot({ managed: true })
+    expect(h.get).toHaveBeenCalledWith('/functions/fn-a/secrets')
+    await router.push('/functions/beta?mode=edit')
+    await settle()
+    first.resolve({ data: { secrets: ['ALPHA_TOKEN'] } })
+    await settle()
+
+    expect(editor.secrets).toEqual([{ id: 'BETA_TOKEN', name: 'BETA_TOKEN' }])
+  })
+
+  it('does not send a managed secret write after leaving while its CAS read waits', async () => {
+    const read = deferred()
+    const { editor, router } = await boot({ managed: true })
+    h.configuration = () => read.promise
+    editor.secretForm = { name: 'A_SECRET', value: 'a draft' }
+    const saving = editor.saveSecret()
+    await settle()
+    expect(configurationCalls().map(([url]) => url)).toEqual(['/functions/fn-a/configuration'])
+    await router.push('/functions/beta?mode=edit')
+    await settle()
+    editor.secretForm = { name: 'B_SECRET', value: 'b draft' }
+    read.resolve(settings(5))
+    await saving
+
+    noMutations()
+    expect(editor.secretForm).toEqual({ name: 'B_SECRET', value: 'b draft' })
   })
 })

@@ -1408,6 +1408,8 @@ let abortActiveStream = null
 // Bumped by every deploy and by every re-scope, so a build that outlives the
 // editor that started it can tell it is no longer the one on screen.
 let buildEpoch = 0
+let editorEpoch = 0
+let editorActive = true
 
 const buildState = computed(() => {
   if (deploying.value) return 'running'
@@ -1549,6 +1551,18 @@ const adoptDeployBaseline = () => {
 // in either mode. replace, not push: flipping the switch is not a destination.
 const routeTarget = () => ({ name: route.name, params: { ...route.params } })
 const sameRoute = (t) => route.name === t.name && JSON.stringify(route.params) === JSON.stringify(t.params)
+const editorScope = () => {
+  const epoch = editorEpoch
+  const target = routeTarget()
+  return () => editorActive && epoch === editorEpoch && sameRoute(target)
+    && target.name === (props.name ? 'function-detail' : 'function-new')
+    && (target.params.name || '') === props.name
+}
+const requireEditorMode = (mode) => {
+  if ((mode !== 'managed' && mode !== 'legacy') || iam.mode !== mode) {
+    throw new Error('Could not determine the server mode. Try again.')
+  }
+}
 const setModeQuery = (next, target = routeTarget()) => {
   // The confirm can outlive the page: never write ?mode onto a route the
   // operator has since moved to.
@@ -1977,14 +1991,27 @@ watch(
 // wrong hook: a user who landed on /functions/new first and then clicked an
 // existing function would carry the boilerplate into edit mode. The watcher
 // below fires `immediate: true`, so it covers the initial mount too.
-const resetEditorState = () => {
+const invalidateBuild = () => {
   // A build outlives the editor that started it: the router reuses this
   // instance, so without this the previous function's failure re-opened the
   // build modal over the next one and blamed it for the error.
   buildEpoch += 1
   if (abortActiveStream) abortActiveStream()
   deploying.value = false
+  deployBaseline = null
+}
+
+const resetEditorState = () => {
+  editorEpoch += 1
+  invalidateBuild()
   fnId.value = ''
+  loadedFunction.value = null
+  loadedEntrypoint.value = ''
+  secrets.value = []
+  secretForm.value = { name: '', value: '' }
+  pendingSecrets.value = []
+  modals.value.secrets = false
+  modals.value.firstDeploy = false
   form.value = {
     name: '',
     description: '',
@@ -2021,18 +2048,21 @@ const resetEditorState = () => {
 
 const loadRouteData = async () => {
   resetEditorState()
+  const current = editorScope()
+  const name = props.name
   // A different function (or /functions/new) starts from its own URL, never
   // from the mode the previous one was left in.
   editorMode.value = initialMode()
   modeAnnouncement.value = ''
   baseline.value = emptyBaseline()
-  deployBaseline = null
+  if (!current()) return
 
-  if (props.name) {
+  if (name) {
     // Edit mode — load function metadata + actual deployed source code.
     try {
       const listRes = await apiClient.get('/functions')
-      const fn = (listRes.data.functions || []).find(f => f.name === props.name)
+      if (!current()) return
+      const fn = (listRes.data.functions || []).find(f => f.name === name)
       if (!fn) throw new Error('Function not found')
 
       fnId.value = fn.id
@@ -2061,16 +2091,16 @@ const loadRouteData = async () => {
       // a helper so any state-change action (rollback, manual refresh,
       // window-refocus) can re-pull without duplicating the fallback
       // logic.
-      await reloadSource(fn)
+      await reloadSource(fn, { current })
+      if (!current()) return
       markFormClean()
 
-      // Load existing secrets into the sidebar panel. Managed mode settles the
-      // capability first: it has no legacy secrets CRUD to write through.
-      await iam.check()
-      await loadSecrets()
+      void iam.checkMode()
+      void loadSecrets()
       // Load deployment history so the Versions card can render.
-      await loadVersions(fn)
+      await loadVersions(fn, current)
     } catch (e) {
+      if (!current()) return
       console.error('Failed to load function', e)
       confirmStore.notify({
         title: 'Could not open function',
@@ -2113,10 +2143,10 @@ watch(() => props.mode, (m) => {
 //     re-fetched metadata but not the source)
 //   - Window refocus (catches the "I deployed via CLI in another
 //     terminal, came back to the open browser tab" case)
-const reloadSource = async (fn, { skipIfDirty = false } = {}) => {
+const reloadSource = async (fn, { skipIfDirty = false, current = editorScope() } = {}) => {
   if (!fn) return
   // Judged after the fetch, not before: typing while it was in flight is work too.
-  const stale = () => skipIfDirty && !viewMode.value && isDirty.value
+  const stale = () => !current() || (skipIfDirty && !viewMode.value && isDirty.value)
   try {
     const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
     if (stale()) return
@@ -2142,16 +2172,20 @@ const reloadSource = async (fn, { skipIfDirty = false } = {}) => {
 // is swallowed so a transient network blip doesn't disrupt the
 // editing session.
 const onWindowFocus = async () => {
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id
+  if (!id || !current()) return
   // A dirty Edit session is the only copy of that work; refreshing would
   // replace it and re-base the dirty check on the server's version.
   if (!viewMode.value && isDirty.value) return
   try {
     const listRes = await apiClient.get('/functions')
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (!current()) return
+    const fn = (listRes.data.functions || []).find((f) => f.id === id)
     if (!fn) return
-    await reloadSource(fn, { skipIfDirty: true })
-    await loadVersions(fn)
+    await reloadSource(fn, { skipIfDirty: true, current })
+    await loadVersions(fn, current)
   } catch {
     /* ignore; user can hit Reload manually */
   }
@@ -2182,10 +2216,22 @@ const unbindGlobals = () => {
   document.removeEventListener('keydown', onDocKey)
   window.removeEventListener('orva:deploy', onDeployShortcut)
 }
-onActivated(bindGlobals)
-onDeactivated(unbindGlobals)
+onActivated(() => {
+  bindGlobals()
+  if (editorActive) return
+  editorActive = true
+  if (!baseline.value.loaded) void loadRouteData()
+  else void loadSecrets()
+})
+const deactivateEditor = () => {
+  editorActive = false
+  editorEpoch += 1
+  invalidateBuild()
+  unbindGlobals()
+}
+onDeactivated(deactivateEditor)
 // onDeactivated does not fire when keep-alive evicts this instance at :max.
-onBeforeUnmount(() => { unbindGlobals(); clearTimeout(deployedTimer) })
+onBeforeUnmount(() => { deactivateEditor(); clearTimeout(deployedTimer) })
 
 // The `prefill` deep link ("Save as fixture" in InvocationsLog) carries a
 // captured production request, headers and all: that belongs in the workbench,
@@ -2245,9 +2291,11 @@ const activeVersionDeploymentId = computed(() => {
 // for each unique hash) so a redeploy of identical content doesn't pad
 // the list. The rollback button uses deployment_id, which disambiguates
 // when the same hash was deployed twice via different code archives.
-const loadVersions = async (fn) => {
+const loadVersions = async (fn, current = editorScope()) => {
+  if (!current()) return
   try {
     const res = await apiClient.get(`/functions/${fn.id}/deployments?limit=50`)
+    if (!current()) return
     const deps = res.data.deployments || []
     const seen = new Set()
     versions.value = deps
@@ -2266,29 +2314,25 @@ const loadVersions = async (fn) => {
         is_active: d.code_hash === fn.code_hash,
       }))
   } catch (e) {
-    console.warn('failed to load versions', e)
+    if (current()) console.warn('failed to load versions', e)
   }
 }
 
 // loadVersions ran on mount, on window focus and after a rollback, but not
 // after a deploy, which is why Config -> Versions lagged the thing you just did.
 const refreshVersions = async () => {
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id
+  if (!id || !current()) return
   try {
     const res = await apiClient.get('/functions')
-    const fn = (res.data.functions || []).find((f) => f.id === fnId.value)
-    if (fn) await loadVersions(fn)
+    const fn = (res.data.functions || []).find((f) => f.id === id)
+    if (fn) await loadVersions(fn, current)
   } catch {
     /* the badge can lag; the deployment itself already landed */
   }
 }
-
-// Close any in-flight SSE stream when the user leaves the page so we don't
-// keep a phantom connection open (and so the next page-load gets a fresh
-// view of build state).
-onBeforeUnmount(() => {
-  if (abortActiveStream) abortActiveStream()
-})
 
 // Top-level deploy entry. For brand-new functions we open the
 // "Name & deploy" modal first so the user gets a focused prompt for the
@@ -2317,7 +2361,9 @@ const confirmFirstDeploy = async () => {
 }
 
 const runDeploy = async () => {
-  if (viewMode.value) return
+  const inScope = editorScope()
+  let id = fnId.value
+  if (!inScope() || viewMode.value || deploying.value || (isEditing.value && !id)) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2327,7 +2373,22 @@ const runDeploy = async () => {
   // that opens and closes inside that window is a flash, not information --
   // so Deploy carries its own progress and only a failure raises the log.
   const epoch = ++buildEpoch
+  const current = () => inScope() && epoch === buildEpoch && fnId.value === id && !viewMode.value
   deployBaseline = captureBaseline()
+  const draft = deployBaseline
+  const formDraft = draft.formState.form
+  const extras = { ...deployExtras.value }
+  const build = {
+    code: draft.code,
+    filename: fileName.value,
+    dependencies: draft.deps || '',
+    ...(Object.keys(extras).length ? { extras } : {}),
+  }
+  const pending = pendingSecrets.value.slice()
+  const settings = managedSettings()
+  const expectedSettings = loadedManagedSettings()
+  const loadedEnvironment = loadedFunction.value?.env_vars
+  const loadedDescription = loadedFunction.value?.description || ''
   deploying.value = true
   buildError.value = ''
   lastBuild.value = null
@@ -2336,37 +2397,43 @@ const runDeploy = async () => {
   try {
     // Build env_vars map from the envVars array.
     const envVarsMap = {}
-    for (const { key, value } of envVars.value) {
+    for (const { key, value } of draft.formState.env) {
       if (key.trim()) envVarsMap[key.trim()] = value
     }
+    const mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
 
     // Step 1: Create or update function config.
-    if (!fnId.value) {
+    if (!id) {
       // New function — create it.
       try {
         const createRes = await apiClient.post('/functions', {
-          name: form.value.name,
-          description: form.value.description || '',
-          runtime: form.value.runtime,
-          memory_mb: form.value.memory_mb,
-          cpus: form.value.cpus,
+          name: formDraft.name,
+          description: formDraft.description || '',
+          runtime: formDraft.runtime,
+          memory_mb: formDraft.memory_mb,
+          cpus: formDraft.cpus,
           env_vars: envVarsMap,
-          network_mode: form.value.network_mode,
-          sdk: form.value.sdk,
-          max_concurrency: form.value.max_concurrency || 0,
-          concurrency_policy: form.value.concurrency_policy || 'queue',
-          auth_mode: form.value.auth_mode || 'none',
-          rate_limit_per_min: form.value.rate_limit_per_min || 0,
+          network_mode: formDraft.network_mode,
+          sdk: formDraft.sdk,
+          max_concurrency: formDraft.max_concurrency || 0,
+          concurrency_policy: formDraft.concurrency_policy || 'queue',
+          auth_mode: formDraft.auth_mode || 'none',
+          rate_limit_per_min: formDraft.rate_limit_per_min || 0,
         })
-        fnId.value = createRes.data.id
-        buildLogs.value.push(`Created function: ${fnId.value}`)
+        if (!current()) return
+        fnId.value = id = createRes.data.id
+        buildLogs.value.push(`Created function: ${id}`)
       } catch (err) {
+        if (!current()) return
         if (err.response?.status === 409) {
           const listRes = await apiClient.get('/functions')
-          const fn = (listRes.data.functions || []).find(f => f.name === form.value.name)
+          if (!current()) return
+          const fn = (listRes.data.functions || []).find(f => f.name === formDraft.name)
           if (fn) {
-            fnId.value = fn.id
-            buildLogs.value.push(`Function already exists: ${fnId.value}`)
+            fnId.value = id = fn.id
+            buildLogs.value.push(`Function already exists: ${id}`)
           } else {
             throw new Error('Function name conflict but not found in list', { cause: err })
           }
@@ -2374,18 +2441,18 @@ const runDeploy = async () => {
           throw err
         }
       }
-    } else if (iam.available) {
+    } else if (mode === 'managed') {
       // Managed mode publishes configuration; its router does not mount the
       // legacy PUT /functions/{id}, and an unchanged redeploy must not
       // publish a new configuration.
-      const settings = managedSettings()
-      const changed = JSON.stringify(settings) !== JSON.stringify(loadedManagedSettings())
-        || !sameEnvironment(envVarsMap, loadedFunction.value?.env_vars)
+      const changed = JSON.stringify(settings) !== JSON.stringify(expectedSettings)
+        || !sameEnvironment(envVarsMap, loadedEnvironment)
       if (changed) {
-        await publishManagedSettings(settings, envVarsMap)
+        await publishManagedSettings(id, current, settings, envVarsMap)
+        if (!current()) return
         buildLogs.value.push('Updated function configuration')
       }
-      if (form.value.description !== (loadedFunction.value?.description || '')) {
+      if (formDraft.description !== loadedDescription) {
         buildLogs.value.push('Description is not saved in managed mode')
       }
     } else {
@@ -2393,39 +2460,35 @@ const runDeploy = async () => {
       // network_mode) so changes take effect. The backend drains the warm
       // pool when any of these change so the next invoke respawns with
       // the new config.
-      await apiClient.put(`/functions/${fnId.value}`, {
-        description: form.value.description || '',
-        memory_mb: form.value.memory_mb,
-        cpus: form.value.cpus,
+      await apiClient.put(`/functions/${id}`, {
+        description: formDraft.description || '',
+        memory_mb: formDraft.memory_mb,
+        cpus: formDraft.cpus,
         env_vars: envVarsMap,
-        network_mode: form.value.network_mode,
-        sdk: form.value.sdk,
-        max_concurrency: form.value.max_concurrency || 0,
-        concurrency_policy: form.value.concurrency_policy || 'queue',
-        auth_mode: form.value.auth_mode || 'none',
-        rate_limit_per_min: form.value.rate_limit_per_min || 0,
+        network_mode: formDraft.network_mode,
+        sdk: formDraft.sdk,
+        max_concurrency: formDraft.max_concurrency || 0,
+        concurrency_policy: formDraft.concurrency_policy || 'queue',
+        auth_mode: formDraft.auth_mode || 'none',
+        rate_limit_per_min: formDraft.rate_limit_per_min || 0,
       })
+      if (!current()) return
       buildLogs.value.push('Updated function config')
     }
 
     // Step 1.5: Flush any secrets queued before the function existed.
     // For first-time deploys this is the moment they actually persist.
-    await flushPendingSecrets()
+    await flushPendingSecrets(id, current, mode, pending)
+    if (!current()) return
+    requireEditorMode(mode)
 
     // Step 2: Submit code (async build pipeline returns 202 + deployment_id).
     buildLogs.value.push('Submitting build...')
-    const deployRes = await apiClient.post(`/functions/${fnId.value}/deploy-inline`, {
-      code: code.value,
-      filename: fileName.value,
-      dependencies: dependencyText.value || '',
-      ...(Object.keys(deployExtras.value).length
-        ? { extras: deployExtras.value }
-        : {}),
-    })
+    const deployRes = await apiClient.post(`/functions/${id}/deploy-inline`, build)
 
     const depId = deployRes.data.deployment_id
     // The editor may have been re-scoped while the upload was in flight.
-    if (epoch !== buildEpoch) return
+    if (!current()) return
     if (!depId) {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
@@ -2440,9 +2503,9 @@ const runDeploy = async () => {
     // the stream emits `succeeded`. Deploying flag stays true so the
     // Deploy button keeps its loading state.
     buildLogs.value.push(`Build queued (${depId})`)
-    await streamBuild(depId, epoch)
+    await streamBuild(depId, current)
   } catch (err) {
-    if (epoch !== buildEpoch) return
+    if (!current()) return
     buildError.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
     buildLogs.value.push(`Error: ${buildError.value}`)
     buildModalOpen.value = true
@@ -2457,10 +2520,9 @@ const runDeploy = async () => {
 //   event: succeeded     — final deployment row
 //   event: failed        — final deployment row (with error_message)
 //   event: error         — transport/server error; we fall back to polling
-const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
+const streamBuild = (depId, current) => new Promise((resolve) => {
   if (abortActiveStream) abortActiveStream()
   const es = new EventSource(`/api/v1/deployments/${depId}/stream`)
-  const mine = () => epoch === buildEpoch
 
   // settled becomes true once we've seen a terminal `succeeded`/`failed`
   // event. After that the server closes the stream — which fires `onerror`
@@ -2481,7 +2543,7 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
   const finish = (ok, payload) => {
     if (settled) return
     release()
-    if (!mine()) { resolve(); return }
+    if (!current()) { resolve(); return }
     deploying.value = false
     if (ok) {
       deployedThisSession.value = true
@@ -2513,7 +2575,7 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
   }
 
   es.addEventListener('log', (e) => {
-    if (!mine()) return
+    if (!current()) return
     try {
       const line = JSON.parse(e.data)
       const text = `[${line.stream || 'log'}] ${line.line}`
@@ -2794,8 +2856,8 @@ const rollbackToVersion = async (v) => {
 // Managed mode replaces the legacy secrets CRUD with a CAS-checked
 // configuration publication: read the tokens fresh for every write and never
 // reuse them, because they move after each publication.
-const loadManagedConfiguration = async () => {
-  const res = await apiClient.get(`/functions/${fnId.value}/configuration`, { quietStatuses: [404] })
+const loadManagedConfiguration = async (id) => {
+  const res = await apiClient.get(`/functions/${id}/configuration`, { quietStatuses: [404] })
   return res.data
 }
 
@@ -2806,17 +2868,19 @@ const managedConfigurationError = (err, fallback, forbidden = 'An administrator 
   return err.response?.data?.error?.message || err?.message || fallback
 }
 
-const writeManagedSecret = async (key, value, { remove = false } = {}) => {
-  const config = await loadManagedConfiguration()
+const writeManagedSecret = async (id, current, key, value, { remove = false } = {}) => {
+  const config = await loadManagedConfiguration(id)
+  if (!current()) return
+  requireEditorMode('managed')
   if (!config?.expected || !config?.current_artifact) {
     throw new Error('Configuration is unavailable; reload to continue.')
   }
   const body = { expected: config.expected, current_artifact: config.current_artifact }
   body.secret = remove ? { key } : { key, value }
   if (remove) {
-    return apiClient.delete(`/functions/${fnId.value}/configuration/secrets`, { data: body })
+    return apiClient.delete(`/functions/${id}/configuration/secrets`, { data: body })
   }
-  return apiClient.put(`/functions/${fnId.value}/configuration/secrets`, body)
+  return apiClient.put(`/functions/${id}/configuration/secrets`, body)
 }
 
 // The 9 fields the managed settings publication accepts, exactly. timeout_ms is
@@ -2850,16 +2914,18 @@ const sameEnvironment = (current, loaded) => JSON.stringify(Object.entries(curre
 
 // Managed mode publishes configuration through the CAS-checked service; the
 // legacy PUT /functions/{id} is not mounted there.
-const publishManagedSettings = async (settings, environment) => {
+const publishManagedSettings = async (id, current, settings, environment) => {
   try {
     if (!Number.isInteger(settings.timeout_ms) || settings.timeout_ms < 1) {
       throw new Error('Configuration is unavailable; reload to continue.')
     }
-    const config = await loadManagedConfiguration()
+    const config = await loadManagedConfiguration(id)
+    if (!current()) return
+    requireEditorMode('managed')
     if (!config?.expected || !config?.current_artifact) {
       throw new Error('Configuration is unavailable; reload to continue.')
     }
-    await apiClient.put(`/functions/${fnId.value}/configuration/settings`, {
+    await apiClient.put(`/functions/${id}/configuration/settings`, {
       expected: config.expected,
       current_artifact: config.current_artifact,
       environment,
@@ -2870,46 +2936,60 @@ const publishManagedSettings = async (settings, environment) => {
   }
 }
 
+let secretListRequest = 0
 const loadSecrets = async () => {
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  if (!id || !inScope()) return
+  const request = ++secretListRequest
+  const current = () => inScope() && fnId.value === id && request === secretListRequest
   try {
-    const res = await apiClient.get(`/functions/${fnId.value}/secrets`)
+    const res = await apiClient.get(`/functions/${id}/secrets`)
+    if (!current()) return
     secrets.value = (res.data.secrets || []).map((name) => ({ id: name, name }))
   } catch (err) {
-    console.error('Failed to load secrets', err)
+    if (current()) console.error('Failed to load secrets', err)
   }
 }
 
 const saveSecret = async () => {
-  if (viewMode.value) return
-  const name = secretForm.value.name.trim()
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id && !viewMode.value
+  if (!current() || (isEditing.value && !id)) return
+  const { name: inputName, value } = secretForm.value
+  const name = inputName.trim()
   if (!name) return
   // Pre-deploy: queue locally; flush during deployFunction.
-  if (!fnId.value) {
+  if (!id) {
     // Replace any prior pending entry with the same name.
     pendingSecrets.value = pendingSecrets.value.filter((s) => s.name !== name)
-    pendingSecrets.value.push({ name, value: secretForm.value.value })
+    pendingSecrets.value.push({ name, value })
     secretForm.value.name = ''
     secretForm.value.value = ''
     return
   }
   // Existing function: save through the API.
+  let mode
   try {
-    if (iam.available) {
-      await writeManagedSecret(name, secretForm.value.value)
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+    if (mode === 'managed') {
+      await writeManagedSecret(id, current, name, value)
     } else {
-      await apiClient.post(`/functions/${fnId.value}/secrets`, {
-        key: name,
-        value: secretForm.value.value,
-      })
+      await apiClient.post(`/functions/${id}/secrets`, { key: name, value })
     }
-    secretForm.value.name = ''
-    secretForm.value.value = ''
+    if (!current()) return
+    if (secretForm.value.name === inputName && secretForm.value.value === value) {
+      secretForm.value = { name: '', value: '' }
+    }
     await loadSecrets()
   } catch (err) {
+    if (!current()) return
     confirmStore.notify({
       title: 'Save failed',
-      message: iam.available
+      message: mode !== 'legacy'
         ? managedConfigurationError(err, 'Failed to save secret')
         : (err.response?.data?.error?.message || 'Failed to save secret'),
       danger: true,
@@ -2922,26 +3002,34 @@ const removePendingSecret = (idx) => {
 }
 
 const removeSecret = async (key) => {
-  if (viewMode.value) return
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id && !viewMode.value
+  if (!id || !current()) return
   const ok = await confirmStore.ask({
     title: 'Delete secret?',
     message: `"${key}" will be removed from this function's environment.`,
     confirmLabel: 'Delete',
     danger: true,
   })
-  if (!ok) return
+  if (!ok || !current()) return
+  let mode
   try {
-    if (iam.available) {
-      await writeManagedSecret(key, '', { remove: true })
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+    if (mode === 'managed') {
+      await writeManagedSecret(id, current, key, '', { remove: true })
     } else {
-      await apiClient.delete(`/functions/${fnId.value}/secrets/${encodeURIComponent(key)}`)
+      await apiClient.delete(`/functions/${id}/secrets/${encodeURIComponent(key)}`)
     }
+    if (!current()) return
     await loadSecrets()
   } catch (err) {
+    if (!current()) return
     confirmStore.notify({
       title: 'Delete failed',
-      message: iam.available
+      message: mode !== 'legacy'
         ? managedConfigurationError(err, 'Failed to delete secret')
         : (err.response?.data?.error?.message || 'Failed to delete secret'),
       danger: true,
@@ -2951,26 +3039,32 @@ const removeSecret = async (key) => {
 
 // flushPendingSecrets POSTs queued secrets after the function row exists.
 // Called from runDeploy between the create step and deploy-inline.
-const flushPendingSecrets = async () => {
-  if (!fnId.value || !pendingSecrets.value.length) return
-  for (const sec of pendingSecrets.value) {
+const flushPendingSecrets = async (id, current, mode, pending) => {
+  if (!id || !pending.length) return
+  for (const sec of pending) {
+    if (!current()) return
+    requireEditorMode(mode)
     try {
-      if (iam.available) {
-        await writeManagedSecret(sec.name, sec.value)
+      if (mode === 'managed') {
+        await writeManagedSecret(id, current, sec.name, sec.value)
       } else {
-        await apiClient.post(`/functions/${fnId.value}/secrets`, {
+        await apiClient.post(`/functions/${id}/secrets`, {
           key: sec.name, value: sec.value,
         })
       }
+      if (!current()) return
+      requireEditorMode(mode)
       buildLogs.value.push(`Saved secret: ${sec.name}`)
     } catch (err) {
-      const msg = iam.available
+      if (!current()) return
+      requireEditorMode(mode)
+      const msg = mode === 'managed'
         ? managedConfigurationError(err, err.message)
         : (err.response?.data?.error?.message || err.message)
       buildLogs.value.push(`Failed to save secret ${sec.name}: ${msg}`)
     }
   }
-  pendingSecrets.value = []
+  pendingSecrets.value = pendingSecrets.value.filter((sec) => !pending.includes(sec))
   await loadSecrets()
 }
 

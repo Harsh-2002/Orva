@@ -48,5 +48,5 @@ export const useManagedIAMStore = defineStore('managed-iam', () => {
     return request
   }
 
-  return { available, checked, check, checkMode }
+  return { available, checked, mode, check, checkMode }
 })
