@@ -21,7 +21,7 @@
          Mobile (<sm): name + runtime label take a full first row; the
          dropdowns + actions take a second row. Above sm, the original
          single-row flex-wrap returns. -->
-    <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 pb-3 border-b border-border">
+    <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-2 gap-y-3 pb-3 border-b border-border">
       <div class="flex items-center gap-2 sm:mr-auto min-w-0 w-full sm:w-auto">
         <FileCode class="w-4 h-4 text-foreground-muted shrink-0" />
         <label
@@ -38,7 +38,7 @@
         <button
           v-if="!isEditing && !fnId"
           type="button"
-          class="p-1 rounded text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
+          class="p-1 rounded-md text-foreground-muted hover:text-foreground-strong hover:bg-surface-hover transition-colors shrink-0 touch-expand-iconbtn"
           title="Re-roll a fresh name"
           aria-label="Re-roll a fresh name"
           @click="rerollName"
@@ -65,7 +65,7 @@
       <!-- Wrapper for the dropdowns + actions on mobile so they sit on
            one row (or wrap among themselves). On sm+ they merge back
            into the parent flex-wrap. -->
-      <div class="flex flex-wrap items-center gap-2 sm:contents">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-3 sm:contents">
         <!-- Config menu — Settings / Env / Deps / Secrets / Versions.
            Versions is hidden until isEditing && versions.length so the
            menu stays small for new-function flows. -->
@@ -241,6 +241,7 @@
           size="sm"
           class="min-w-[7.25rem]"
           :loading="deploying"
+          :disabled="installing || deployBlockedByConfiguration || !!rollingBack"
           @click="deployFunction"
         >
           <Check
@@ -251,7 +252,7 @@
             v-else-if="!deploying"
             class="w-4 h-4"
           />
-          {{ deploying ? 'Building' : justDeployed ? 'Deployed' : 'Deploy' }}
+          {{ deploying ? 'Building' : justDeployed && !lastBuild?.managed ? 'Deployed' : 'Deploy' }}
         </Button>
       </div><!-- /mobile-row wrapper for dropdowns + actions -->
     </div>
@@ -319,12 +320,10 @@
             <span class="run-spinner" />
             Building
           </span>
-          <!-- Which version is live is a fact about the function, not an event,
-               so it stays here rather than being announced and taken away. -->
           <span
             v-else-if="lastBuild?.version"
             class="text-[10px] text-success-fg font-medium"
-          >v{{ lastBuild.version }} live</span>
+          >v{{ lastBuild.version }} {{ lastBuild.rollback ? 'restored' : lastBuild.managed ? 'built' : 'live' }}</span>
           <span
             v-if="viewMode"
             class="text-[10px] text-foreground-muted font-medium"
@@ -357,7 +356,7 @@
         <button
           :disabled="!canTest || testbench.invoking"
           class="run-btn shrink-0"
-          :title="canTest ? 'Replay the current test request' : 'Deploy first'"
+          :title="canTest ? 'Replay the current test request' : configurationInstallRequired ? 'Resolve the pending configuration first' : awaitingInstall ? 'Install the build first' : 'Deploy first'"
           @click="runTest"
         >
           <Play
@@ -398,6 +397,14 @@
               View log
             </button>
           </template>
+          <span
+            v-else-if="configurationReceipt"
+            class="text-xs text-foreground"
+          >{{ configurationHeadline }}</span>
+          <span
+            v-else-if="lastBuild?.managed"
+            class="text-xs text-foreground"
+          >{{ managedBuildHeadline(lastBuild) }}</span>
           <template v-else>
             <!-- No status chip. "Idle" reported nothing, and "Response" next to
                  a 200 said it twice; the status code carries the tone itself. -->
@@ -432,6 +439,32 @@
             >{{ runLines.length }} log lines</span>
           </template>
         </div>
+        <Button
+          v-if="awaitingInstall && !viewMode && iam.mode === 'managed'"
+          variant="secondary"
+          size="sm"
+          :loading="installing"
+          :disabled="deploying || blockedByConfiguration || !!rollingBack"
+          @click="installManagedBuild"
+        >
+          {{ lastBuild.rollback ? 'Install restored version' : 'Install build' }}
+        </Button>
+        <Button
+          v-if="canOfferConfigurationInstall"
+          variant="secondary"
+          size="sm"
+          :loading="secretBusy"
+          @click="installManagedConfiguration"
+        >
+          Install configuration
+        </Button>
+        <router-link
+          v-if="reviewOwner"
+          :to="{ name: 'function-permissions', params: { functionId: reviewOwner } }"
+          class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
+        >
+          Review permissions →
+        </router-link>
         <button
           v-if="lastRun?.failed"
           type="button"
@@ -444,7 +477,7 @@
           Suggest fix
         </button>
         <router-link
-          v-if="fnId && form.name"
+          v-if="fnId && form.name && !awaitingInstall && !configurationInstallRequired"
           :to="{ name: 'function-test', params: { name: form.name } }"
           class="touch-expand-sm inline-flex h-7 items-center rounded-md px-2.5 text-xs text-link hover:text-foreground-strong transition-colors shrink-0"
         >
@@ -534,7 +567,7 @@
           Suggest fix
         </Button>
         <Button
-          v-if="buildState === 'ok' && fnId && form.name"
+          v-if="buildState === 'ok' && fnId && form.name && !lastBuild?.managed"
           @click="openWorkbench"
         >
           Open workbench →
@@ -947,7 +980,8 @@
           v-if="!totalSecretsCount"
           class="text-xs text-foreground-muted"
         >
-          No secrets yet. Add a key-value pair below.<span v-if="!fnId"> They'll be saved when you deploy.</span>
+          No secrets yet. Add a key-value pair below.<span v-if="!fnId && iam.mode === 'legacy'"> They'll be saved when you deploy.</span>
+          <span v-else-if="newManagedUninstalled"> Install a build before saving secrets.</span>
         </div>
 
         <!-- Persisted secrets (only relevant once the fn exists). -->
@@ -960,14 +994,13 @@
           <button
             class="text-foreground-muted hover:text-danger-fg transition-colors"
             :aria-label="`Delete secret ${sec.name}`"
+            :disabled="managedSecretBlocked"
             @click="removeSecret(sec.id)"
           >
             <Trash2 class="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <!-- Pending secrets — exist only on the new-function flow. They
-             flush to the API as part of the first deploy. -->
         <div
           v-for="(sec, idx) in pendingSecrets"
           :key="'pending-' + idx"
@@ -1003,10 +1036,18 @@
           <Button
             class="w-full"
             variant="secondary"
+            :disabled="managedSecretBlocked"
             @click="saveSecret"
           >
-            <ShieldCheck class="w-4 h-4" /> {{ fnId ? 'Save secret' : 'Queue secret for deploy' }}
+            <ShieldCheck class="w-4 h-4" /> {{ newManagedUninstalled ? 'Keep secret locally' : fnId ? 'Save secret' : 'Queue secret for deploy' }}
           </Button>
+          <p
+            v-if="configurationInstallRequired && !configurationReceipt.settings"
+            role="status"
+            class="text-xs text-foreground-muted"
+          >
+            {{ configurationReceipt.expected ? 'Close Secrets to install the saved configuration.' : secretBusy ? 'Saving secret change…' : 'Reload before continuing.' }}
+          </p>
         </div>
       </div>
       <template #footer>
@@ -1036,7 +1077,7 @@
             <span
               v-if="v.is_active"
               class="px-1.5 py-0.5 rounded text-[10px] bg-success-tint text-success-fg border border-success-ring shrink-0"
-            >Active</span>
+            >{{ iam.mode === 'managed' ? 'Current' : 'Active' }}</span>
             <span
               class="font-mono text-foreground-muted truncate"
               :title="v.code_hash"
@@ -1059,7 +1100,7 @@
             </router-link>
             <button
               v-if="!viewMode"
-              :disabled="rollingBack"
+              :disabled="!!rollingBack || deploying || installing || blockedByConfiguration"
               class="touch-expand-xs inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-foreground-muted hover:bg-surface-hover hover:text-foreground-strong disabled:opacity-50"
               @click="rollbackToVersion(v)"
             >
@@ -1222,7 +1263,7 @@
 </template>
 
 <script setup>
-import { ref, shallowRef, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { ref, shallowRef, shallowReactive, computed, defineAsyncComponent, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { FileCode, UploadCloud, Play, Layers, KeyRound, ShieldCheck, RotateCcw, Copy, Check, BookOpen, ChevronDown, Settings2, Variable, Package, X, Trash2, Terminal, Globe, Lock, Shuffle, Database, Sparkles, Webhook, Plug, GitCompare, FlaskConical, Eye, Pencil } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
@@ -1277,6 +1318,7 @@ import { useConfirmStore } from '@/stores/confirm'
 import { useManagedIAMStore } from '@/stores/managedIAM.js'
 import { useTestbenchStore } from '@/stores/testbench'
 import { describeSnapshotDiff } from '@/utils/rollbackDiff'
+import { isCanonicalUuid } from '@/utils/permissionsModel'
 
 // The function this Editor is scoped to; empty on /functions/new. A route prop,
 // not useRoute(): Vue does not patch a keep-alived view's props, and an Editor
@@ -1363,10 +1405,7 @@ let deployedTimer = null
 const envVarCount = computed(() => envVars.value.filter((p) => p.key.trim()).length)
 
 const code = ref('')
-const form = ref({
-  name: '',
-  description: '',                // surfaces in list_functions, get_function, the channel picker, and as the MCP tool description
-  runtime: 'python',
+const initialExecutionSettings = {
   memory_mb: 64,
   cpus: 0.5,
   network_mode: 'none',          // 'none' | 'egress'
@@ -1375,8 +1414,15 @@ const form = ref({
   concurrency_policy: 'queue',    // 'queue' | 'reject'
   auth_mode: 'none',              // 'none' | 'platform_key' | 'signed'
   rate_limit_per_min: 0,          // 0 = unlimited
+}
+const form = ref({
+  name: '',
+  description: '',
+  runtime: 'python',
+  ...initialExecutionSettings,
 })
 const fnId = ref('')  // backend function ID
+const managedCreated = shallowRef(null)
 
 const concurrencyPolicyOptions = [
   { value: 'queue', label: 'Queue requests' },
@@ -1396,6 +1442,40 @@ const buildError = ref('')
 // What the last build produced, so the modal can name the version it made
 // rather than making the operator read it back out of the log.
 const lastBuild = ref(null)
+const rollingBack = shallowRef(null)
+const installingBuild = shallowRef(null)
+const installing = computed(() => installingBuild.value !== null && installingBuild.value === lastBuild.value)
+const awaitingInstall = computed(() => lastBuild.value?.managed && !lastBuild.value.installed)
+const configurationPublication = shallowRef(null)
+const secretOperations = shallowReactive(new Set())
+const secretBusy = computed(() => secretOperations.has(fnId.value))
+const configurationReceipt = computed(() => iam.mode === 'managed' && configurationPublication.value?.owner === fnId.value
+  ? configurationPublication.value : null)
+const configurationInstallRequired = computed(() => !!configurationReceipt.value && !configurationReceipt.value.installed)
+const canOfferConfigurationInstall = computed(() => configurationReceipt.value?.expected
+  && !configurationReceipt.value.buildUnverified && !deploying.value && !awaitingInstall.value && !viewMode.value)
+const configurationHeadline = computed(() => {
+  const receipt = configurationReceipt.value
+  if (receipt?.installed) return 'Configuration installed. Permissions review required.'
+  if (receipt?.settings) {
+    if (receipt.buildUnverified) return 'Settings saved. Check deployment history; build status is unverified.'
+    return receipt.expected ? 'Settings saved. Install configuration or retry the build.'
+      : 'Configuration status unverified. Inspect the current configuration before continuing.'
+  }
+  if (receipt?.expected) return 'Secrets saved. Install required.'
+  return secretBusy.value ? 'Saving secret change…' : 'Configuration status unverified. Reload to continue.'
+})
+const blockedByConfiguration = computed(() => secretBusy.value || configurationInstallRequired.value)
+const deployBlockedByConfiguration = computed(() => secretBusy.value || (configurationInstallRequired.value
+  && !(configurationReceipt.value.settings && configurationReceipt.value.expected)))
+const managedSecretBlocked = computed(() => iam.mode === 'managed' && (blockedByConfiguration.value
+  || deploying.value || installing.value || rollingBack.value || awaitingInstall.value))
+const reviewOwner = computed(() => {
+  if (iam.mode !== 'managed' || secretBusy.value || deploying.value || rollingBack.value) return ''
+  if (configurationReceipt.value) return configurationReceipt.value.installed ? configurationReceipt.value.owner : ''
+  return lastBuild.value?.managed && lastBuild.value.installed ? lastBuild.value.owner : ''
+})
+const newManagedUninstalled = computed(() => !isEditing.value && iam.mode === 'managed' && !deployedThisSession.value)
 const lastDeployAt = ref('')
 const urlCopied = ref(false)
 const suggestingFix = ref(false)
@@ -1408,18 +1488,26 @@ let abortActiveStream = null
 // Bumped by every deploy and by every re-scope, so a build that outlives the
 // editor that started it can tell it is no longer the one on screen.
 let buildEpoch = 0
+let editorEpoch = 0
+let editorActive = true
 
 const buildState = computed(() => {
   if (deploying.value) return 'running'
   if (buildError.value) return 'failed'
   return lastBuild.value ? 'ok' : 'idle'
 })
+const managedBuildHeadline = (build, duration = '') => {
+  if (build.installed) return 'Installed. Permissions review required.'
+  if (build.rollback) return 'Version restored. Install required.'
+  return `Build succeeded${duration}. Install required.`
+}
 const buildHeadline = computed(() => {
   if (buildState.value === 'running') return 'Building'
   if (buildState.value === 'failed') return buildError.value
   const b = lastBuild.value
   if (!b) return 'No build has run in this session.'
   const ms = b.durationMs == null ? '' : ` in ${b.durationMs}ms`
+  if (b.managed) return managedBuildHeadline(b, ms)
   return b.version ? `v${b.version} live${ms}` : `Build succeeded${ms}`
 })
 
@@ -1549,6 +1637,18 @@ const adoptDeployBaseline = () => {
 // in either mode. replace, not push: flipping the switch is not a destination.
 const routeTarget = () => ({ name: route.name, params: { ...route.params } })
 const sameRoute = (t) => route.name === t.name && JSON.stringify(route.params) === JSON.stringify(t.params)
+const editorScope = () => {
+  const epoch = editorEpoch
+  const target = routeTarget()
+  return () => editorActive && epoch === editorEpoch && sameRoute(target)
+    && target.name === (props.name ? 'function-detail' : 'function-new')
+    && (target.params.name || '') === props.name
+}
+const requireEditorMode = (mode) => {
+  if ((mode !== 'managed' && mode !== 'legacy') || iam.mode !== mode) {
+    throw new Error('Could not determine the server mode. Try again.')
+  }
+}
 const setModeQuery = (next, target = routeTarget()) => {
   // The confirm can outlive the page: never write ?mode onto a route the
   // operator has since moved to.
@@ -1584,7 +1684,7 @@ const askDiscard = async (message) => {
 const requestMode = async (next, fromUrl = false) => {
   if (!props.name || next === editorMode.value) return
   const target = routeTarget()
-  if (next === 'view' && deploying.value) {
+  if (next === 'view' && (deploying.value || secretBusy.value)) {
     if (fromUrl) setModeQuery('edit', target)
     return
   }
@@ -1593,7 +1693,7 @@ const requestMode = async (next, fromUrl = false) => {
     // work away: stay in Edit and put the flag back.
     if (fromUrl) { setModeQuery('edit', target); return }
     const ok = await askDiscard('This function has unsaved changes. Switching to View discards them.')
-    if (!ok || !sameRoute(target) || deploying.value) return
+    if (!ok || !sameRoute(target) || deploying.value || secretBusy.value) return
     discardChanges()
   }
   editorMode.value = next
@@ -1622,6 +1722,7 @@ onBeforeUnmount(removeFunctionGuard)
 // A mode that turns to View (switch or URL) must not leave an editable panel up.
 watch(viewMode, (on) => {
   if (!on) return
+  rollingBack.value = null
   closeMenus()
   for (const k of ['settings', 'envVars', 'deps', 'secrets']) modals.value[k] = false
 })
@@ -1630,7 +1731,7 @@ watch(viewMode, (on) => {
 // flight. While `deploying` is true, the warm pool may be holding stale
 // code (or none, on a first deploy) so test invocations should wait.
 const isDeployed = computed(() => isEditing.value || deployedThisSession.value)
-const canTest = computed(() => isDeployed.value && !deploying.value)
+const canTest = computed(() => isDeployed.value && !deploying.value && !awaitingInstall.value && !blockedByConfiguration.value)
 
 // Orva offers two runtimes, latest-stable only. The id is generic (node /
 // python); the version shown here is a display label that tracks latest-stable.
@@ -1659,6 +1760,10 @@ const templateEntrypoint = ref('')
 // posted handler.js, so tsc never ran and the build died looking for output it
 // had not been asked to produce.
 const loadedEntrypoint = ref('')
+// The record the editor loaded, so a managed redeploy can publish settings with
+// the fields the form does not edit (timeout) and detect a real change.
+const loadedFunction = ref(null)
+let managedSettingsCAS = null
 
 const fileName = computed(() => {
   if (templateEntrypoint.value) return templateEntrypoint.value
@@ -1974,26 +2079,36 @@ watch(
 // wrong hook: a user who landed on /functions/new first and then clicked an
 // existing function would carry the boilerplate into edit mode. The watcher
 // below fires `immediate: true`, so it covers the initial mount too.
-const resetEditorState = () => {
+const invalidateBuild = () => {
   // A build outlives the editor that started it: the router reuses this
   // instance, so without this the previous function's failure re-opened the
   // build modal over the next one and blamed it for the error.
   buildEpoch += 1
   if (abortActiveStream) abortActiveStream()
   deploying.value = false
+  deployBaseline = null
+}
+
+const resetEditorState = () => {
+  editorEpoch += 1
+  rollingBack.value = null
+  invalidateBuild()
   fnId.value = ''
+  managedCreated.value = null
+  loadedFunction.value = null
+  managedSettingsCAS = null
+  configurationPublication.value = null
+  loadedEntrypoint.value = ''
+  secrets.value = []
+  secretForm.value = { name: '', value: '' }
+  pendingSecrets.value = []
+  modals.value.secrets = false
+  modals.value.firstDeploy = false
   form.value = {
     name: '',
     description: '',
     runtime: 'python',
-    memory_mb: 64,
-    cpus: 0.5,
-    network_mode: 'none',
-    sdk: false,
-    max_concurrency: 0,
-    concurrency_policy: 'queue',
-    auth_mode: 'none',
-    rate_limit_per_min: 0,
+    ...initialExecutionSettings,
   }
   envVars.value = []
   code.value = ''
@@ -2018,21 +2133,26 @@ const resetEditorState = () => {
 
 const loadRouteData = async () => {
   resetEditorState()
+  const current = editorScope()
+  const name = props.name
   // A different function (or /functions/new) starts from its own URL, never
   // from the mode the previous one was left in.
   editorMode.value = initialMode()
   modeAnnouncement.value = ''
   baseline.value = emptyBaseline()
-  deployBaseline = null
+  if (!current()) return
 
-  if (props.name) {
+  if (name) {
     // Edit mode — load function metadata + actual deployed source code.
     try {
       const listRes = await apiClient.get('/functions')
-      const fn = (listRes.data.functions || []).find(f => f.name === props.name)
+      if (!current()) return
+      const fn = (listRes.data.functions || []).find(f => f.name === name)
       if (!fn) throw new Error('Function not found')
 
       fnId.value = fn.id
+      loadedFunction.value = fn
+      managedSettingsCAS = { owner: fn.id, read: readManagedSettingsCAS(fn, current), used: false }
       form.value.name = fn.name
       form.value.description = fn.description || ''
       form.value.runtime = fn.runtime
@@ -2057,14 +2177,15 @@ const loadRouteData = async () => {
       // a helper so any state-change action (rollback, manual refresh,
       // window-refocus) can re-pull without duplicating the fallback
       // logic.
-      await reloadSource(fn)
+      await reloadSource(fn, { current })
+      if (!current()) return
       markFormClean()
 
-      // Load existing secrets into the sidebar panel.
-      await loadSecrets()
+      void loadSecrets()
       // Load deployment history so the Versions card can render.
-      await loadVersions(fn)
+      await loadVersions(fn, current)
     } catch (e) {
+      if (!current()) return
       console.error('Failed to load function', e)
       confirmStore.notify({
         title: 'Could not open function',
@@ -2107,10 +2228,10 @@ watch(() => props.mode, (m) => {
 //     re-fetched metadata but not the source)
 //   - Window refocus (catches the "I deployed via CLI in another
 //     terminal, came back to the open browser tab" case)
-const reloadSource = async (fn, { skipIfDirty = false } = {}) => {
+const reloadSource = async (fn, { skipIfDirty = false, current = editorScope() } = {}) => {
   if (!fn) return
   // Judged after the fetch, not before: typing while it was in flight is work too.
-  const stale = () => skipIfDirty && !viewMode.value && isDirty.value
+  const stale = () => !current() || (skipIfDirty && !viewMode.value && isDirty.value)
   try {
     const srcRes = await apiClient.get(`/functions/${fn.id}/source`)
     if (stale()) return
@@ -2136,16 +2257,20 @@ const reloadSource = async (fn, { skipIfDirty = false } = {}) => {
 // is swallowed so a transient network blip doesn't disrupt the
 // editing session.
 const onWindowFocus = async () => {
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id
+  if (!id || !current()) return
   // A dirty Edit session is the only copy of that work; refreshing would
   // replace it and re-base the dirty check on the server's version.
   if (!viewMode.value && isDirty.value) return
   try {
     const listRes = await apiClient.get('/functions')
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (!current()) return
+    const fn = (listRes.data.functions || []).find((f) => f.id === id)
     if (!fn) return
-    await reloadSource(fn, { skipIfDirty: true })
-    await loadVersions(fn)
+    await reloadSource(fn, { skipIfDirty: true, current })
+    await loadVersions(fn, current)
   } catch {
     /* ignore; user can hit Reload manually */
   }
@@ -2176,10 +2301,26 @@ const unbindGlobals = () => {
   document.removeEventListener('keydown', onDocKey)
   window.removeEventListener('orva:deploy', onDeployShortcut)
 }
-onActivated(bindGlobals)
-onDeactivated(unbindGlobals)
+onActivated(() => {
+  bindGlobals()
+  if (editorActive) return
+  editorActive = true
+  if (!baseline.value.loaded) void loadRouteData()
+  else void loadSecrets()
+})
+const deactivateEditor = () => {
+  editorActive = false
+  editorEpoch += 1
+  // A pending receipt belongs to this activation, not a cached return visit.
+  const receipt = configurationPublication.value
+  if (receipt) configurationPublication.value = receipt.installed ? null : { owner: receipt.owner, settings: receipt.settings }
+  rollingBack.value = null
+  invalidateBuild()
+  unbindGlobals()
+}
+onDeactivated(deactivateEditor)
 // onDeactivated does not fire when keep-alive evicts this instance at :max.
-onBeforeUnmount(() => { unbindGlobals(); clearTimeout(deployedTimer) })
+onBeforeUnmount(() => { deactivateEditor(); clearTimeout(deployedTimer) })
 
 // The `prefill` deep link ("Save as fixture" in InvocationsLog) carries a
 // captured production request, headers and all: that belongs in the workbench,
@@ -2235,18 +2376,20 @@ const activeVersionDeploymentId = computed(() => {
 })
 
 // loadVersions builds the Versions card data from the deployments table.
-// We deduplicate by code_hash (keep the most recent succeeded deployment
-// for each unique hash) so a redeploy of identical content doesn't pad
-// the list. The rollback button uses deployment_id, which disambiguates
-// when the same hash was deployed twice via different code archives.
-const loadVersions = async (fn) => {
+// Legacy history collapses identical hashes. Managed history keeps the exact
+// deployment rows, since equal content does not imply equal sealed provenance.
+const loadVersions = async (fn, current = editorScope()) => {
+  if (!current()) return
   try {
     const res = await apiClient.get(`/functions/${fn.id}/deployments?limit=50`)
+    if (!current()) return
     const deps = res.data.deployments || []
+    const managed = iam.mode === 'managed'
     const seen = new Set()
     versions.value = deps
       .filter((d) => d.status === 'succeeded' && d.code_hash)
       .filter((d) => {
+        if (managed) return true
         if (seen.has(d.code_hash)) return false
         seen.add(d.code_hash)
         return true
@@ -2257,32 +2400,28 @@ const loadVersions = async (fn) => {
         code_hash: d.code_hash,
         short_hash: d.code_hash.slice(0, 12),
         created_at: d.finished_at || d.submitted_at,
-        is_active: d.code_hash === fn.code_hash,
+        is_active: managed ? d.id === fn.active_deployment_id : d.code_hash === fn.code_hash,
       }))
   } catch (e) {
-    console.warn('failed to load versions', e)
+    if (current()) console.warn('failed to load versions', e)
   }
 }
 
 // loadVersions ran on mount, on window focus and after a rollback, but not
 // after a deploy, which is why Config -> Versions lagged the thing you just did.
 const refreshVersions = async () => {
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id
+  if (!id || !current()) return
   try {
     const res = await apiClient.get('/functions')
-    const fn = (res.data.functions || []).find((f) => f.id === fnId.value)
-    if (fn) await loadVersions(fn)
+    const fn = (res.data.functions || []).find((f) => f.id === id)
+    if (fn) await loadVersions(fn, current)
   } catch {
     /* the badge can lag; the deployment itself already landed */
   }
 }
-
-// Close any in-flight SSE stream when the user leaves the page so we don't
-// keep a phantom connection open (and so the next page-load gets a fresh
-// view of build state).
-onBeforeUnmount(() => {
-  if (abortActiveStream) abortActiveStream()
-})
 
 // Top-level deploy entry. For brand-new functions we open the
 // "Name & deploy" modal first so the user gets a focused prompt for the
@@ -2310,8 +2449,24 @@ const confirmFirstDeploy = async () => {
   await runDeploy()
 }
 
+const managedCreation = (form, entrypoint) => {
+  const { name, runtime } = form
+  if (name.length > 128 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.trim() !== name) {
+    throw new Error('Use a lowercase function name with letters, numbers and single dashes.')
+  }
+  if (!runtimes.some(({ id }) => id === runtime) || !entrypoint
+    || new TextEncoder().encode(entrypoint).length > 4096 || /[:\\\uFFFD]/u.test(entrypoint) || entrypoint.includes('\0')
+    || entrypoint.split('/').some((part) => !part.trim() || part === '.' || part === '..')) {
+    throw new Error('Choose a supported runtime and a relative entrypoint file.')
+  }
+  return { name, runtime, entrypoint }
+}
+
 const runDeploy = async () => {
-  if (viewMode.value) return
+  const inScope = editorScope()
+  let id = fnId.value
+  if (!inScope() || viewMode.value || deploying.value || installing.value || deployBlockedByConfiguration.value
+    || rollingBack.value || (isEditing.value && !id)) return
   if (!form.value.name || !code.value) {
     confirmStore.notify({ title: 'Missing fields', message: 'Please provide a function name and code.' })
     return
@@ -2321,46 +2476,88 @@ const runDeploy = async () => {
   // that opens and closes inside that window is a flash, not information --
   // so Deploy carries its own progress and only a failure raises the log.
   const epoch = ++buildEpoch
+  const current = () => inScope() && epoch === buildEpoch && fnId.value === id && !viewMode.value
   deployBaseline = captureBaseline()
+  const draft = deployBaseline
+  const formDraft = draft.formState.form
+  const extras = { ...deployExtras.value }
+  const build = {
+    code: draft.code,
+    filename: fileName.value,
+    dependencies: draft.deps || '',
+    ...(Object.keys(extras).length ? { extras } : {}),
+  }
+  const pending = pendingSecrets.value.slice()
+  const settings = managedSettings()
+  const expectedSettings = loadedManagedSettings()
+  const loadedEnvironment = loadedFunction.value?.env_vars
+  const loadedDescription = loadedFunction.value?.description || ''
+  const settingsCAS = managedSettingsCAS
   deploying.value = true
   buildError.value = ''
+  if (!configurationInstallRequired.value) configurationPublication.value = null
   lastBuild.value = null
   buildLogs.value = ['Starting deployment...']
+  let submitted = false
 
   try {
     // Build env_vars map from the envVars array.
     const envVarsMap = {}
-    for (const { key, value } of envVars.value) {
+    for (const { key, value } of draft.formState.env) {
       if (key.trim()) envVarsMap[key.trim()] = value
     }
+    const mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
 
     // Step 1: Create or update function config.
-    if (!fnId.value) {
+    if (mode === 'managed' && !isEditing.value) {
+      if (pending.length || formDraft.description || draft.formState.env.length
+        || Object.entries(initialExecutionSettings).some(([key, value]) => formDraft[key] !== value)) {
+        throw new Error('Drafts were kept. Clear custom settings, environment and secrets to build; install before configuring.')
+      }
+      const creation = managedCreation(formDraft, build.filename)
+      if (id) {
+        if (!managedCreated.value || Object.keys(creation).some((key) => creation[key] !== managedCreated.value[key])) {
+          throw new Error('The function was already created. Open it from Functions to build again.')
+        }
+      } else {
+        const res = await apiClient.post('/functions', creation)
+        if (!current()) return
+        if (!res.data?.id) throw new Error('Function creation could not be verified. Check Functions before retrying.')
+        fnId.value = id = res.data.id
+        managedCreated.value = creation
+        buildLogs.value.push(`Created function: ${id}`)
+      }
+    } else if (!id) {
       // New function — create it.
       try {
         const createRes = await apiClient.post('/functions', {
-          name: form.value.name,
-          description: form.value.description || '',
-          runtime: form.value.runtime,
-          memory_mb: form.value.memory_mb,
-          cpus: form.value.cpus,
+          name: formDraft.name,
+          description: formDraft.description || '',
+          runtime: formDraft.runtime,
+          memory_mb: formDraft.memory_mb,
+          cpus: formDraft.cpus,
           env_vars: envVarsMap,
-          network_mode: form.value.network_mode,
-          sdk: form.value.sdk,
-          max_concurrency: form.value.max_concurrency || 0,
-          concurrency_policy: form.value.concurrency_policy || 'queue',
-          auth_mode: form.value.auth_mode || 'none',
-          rate_limit_per_min: form.value.rate_limit_per_min || 0,
+          network_mode: formDraft.network_mode,
+          sdk: formDraft.sdk,
+          max_concurrency: formDraft.max_concurrency || 0,
+          concurrency_policy: formDraft.concurrency_policy || 'queue',
+          auth_mode: formDraft.auth_mode || 'none',
+          rate_limit_per_min: formDraft.rate_limit_per_min || 0,
         })
-        fnId.value = createRes.data.id
-        buildLogs.value.push(`Created function: ${fnId.value}`)
+        if (!current()) return
+        fnId.value = id = createRes.data.id
+        buildLogs.value.push(`Created function: ${id}`)
       } catch (err) {
+        if (!current()) return
         if (err.response?.status === 409) {
           const listRes = await apiClient.get('/functions')
-          const fn = (listRes.data.functions || []).find(f => f.name === form.value.name)
+          if (!current()) return
+          const fn = (listRes.data.functions || []).find(f => f.name === formDraft.name)
           if (fn) {
-            fnId.value = fn.id
-            buildLogs.value.push(`Function already exists: ${fnId.value}`)
+            fnId.value = id = fn.id
+            buildLogs.value.push(`Function already exists: ${id}`)
           } else {
             throw new Error('Function name conflict but not found in list', { cause: err })
           }
@@ -2368,44 +2565,57 @@ const runDeploy = async () => {
           throw err
         }
       }
+    } else if (mode === 'managed') {
+      // Managed mode publishes configuration; its router does not mount the
+      // legacy PUT /functions/{id}, and an unchanged redeploy must not
+      // publish a new configuration.
+      const changed = JSON.stringify(settings) !== JSON.stringify(expectedSettings)
+        || !sameEnvironment(envVarsMap, loadedEnvironment)
+      if (changed) {
+        await publishManagedSettings(id, current, settings, envVarsMap, settingsCAS)
+        if (!current()) return
+        buildLogs.value.push('Updated function configuration')
+      }
+      if (formDraft.description !== loadedDescription) {
+        buildLogs.value.push('Description is not saved in managed mode')
+      }
     } else {
       // Existing function — update config (memory, cpus, env_vars,
       // network_mode) so changes take effect. The backend drains the warm
       // pool when any of these change so the next invoke respawns with
       // the new config.
-      await apiClient.put(`/functions/${fnId.value}`, {
-        description: form.value.description || '',
-        memory_mb: form.value.memory_mb,
-        cpus: form.value.cpus,
+      await apiClient.put(`/functions/${id}`, {
+        description: formDraft.description || '',
+        memory_mb: formDraft.memory_mb,
+        cpus: formDraft.cpus,
         env_vars: envVarsMap,
-        network_mode: form.value.network_mode,
-        sdk: form.value.sdk,
-        max_concurrency: form.value.max_concurrency || 0,
-        concurrency_policy: form.value.concurrency_policy || 'queue',
-        auth_mode: form.value.auth_mode || 'none',
-        rate_limit_per_min: form.value.rate_limit_per_min || 0,
+        network_mode: formDraft.network_mode,
+        sdk: formDraft.sdk,
+        max_concurrency: formDraft.max_concurrency || 0,
+        concurrency_policy: formDraft.concurrency_policy || 'queue',
+        auth_mode: formDraft.auth_mode || 'none',
+        rate_limit_per_min: formDraft.rate_limit_per_min || 0,
       })
+      if (!current()) return
       buildLogs.value.push('Updated function config')
     }
 
-    // Step 1.5: Flush any secrets queued before the function existed.
-    // For first-time deploys this is the moment they actually persist.
-    await flushPendingSecrets()
+    // The managed configuration service needs an installed artifact.
+    if (mode === 'legacy') await flushPendingSecrets(id, current, mode, pending)
+    if (!current()) return
+    requireEditorMode(mode)
 
     // Step 2: Submit code (async build pipeline returns 202 + deployment_id).
     buildLogs.value.push('Submitting build...')
-    const deployRes = await apiClient.post(`/functions/${fnId.value}/deploy-inline`, {
-      code: code.value,
-      filename: fileName.value,
-      dependencies: dependencyText.value || '',
-      ...(Object.keys(deployExtras.value).length
-        ? { extras: deployExtras.value }
-        : {}),
-    })
+    submitted = true
+    const deployRes = await apiClient.post(`/functions/${id}/deploy-inline`, build)
 
     const depId = deployRes.data.deployment_id
     // The editor may have been re-scoped while the upload was in flight.
-    if (epoch !== buildEpoch) return
+    if (!current()) return
+    if (mode === 'managed' && !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(depId)) {
+      throw new Error('No exact deployment ID returned. Check deployment history before retrying.')
+    }
     if (!depId) {
       // Legacy synchronous response — older backend without async pipeline.
       buildLogs.value.push(`Deployed! Hash: ${deployRes.data.code_hash || 'unknown'}`)
@@ -2420,14 +2630,20 @@ const runDeploy = async () => {
     // the stream emits `succeeded`. Deploying flag stays true so the
     // Deploy button keeps its loading state.
     buildLogs.value.push(`Build queued (${depId})`)
-    await streamBuild(depId, epoch)
+    await streamBuild(depId, current, mode, id)
   } catch (err) {
-    if (epoch !== buildEpoch) return
+    if (!current()) return
+    if (submitted && ![400, 401, 403, 413].includes(err.response?.status)) markConfigurationBuildUnverified()
     buildError.value = err.response?.data?.error?.message || err.message || 'Deployment failed'
     buildLogs.value.push(`Error: ${buildError.value}`)
     buildModalOpen.value = true
     deploying.value = false
   }
+}
+
+const markConfigurationBuildUnverified = () => {
+  const receipt = configurationReceipt.value
+  if (receipt?.settings && receipt.expected) configurationPublication.value = { ...receipt, buildUnverified: true }
 }
 
 // streamBuild opens an SSE connection to /deployments/{id}/stream and
@@ -2437,10 +2653,9 @@ const runDeploy = async () => {
 //   event: succeeded     — final deployment row
 //   event: failed        — final deployment row (with error_message)
 //   event: error         — transport/server error; we fall back to polling
-const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
+const streamBuild = (depId, current, mode, owner) => new Promise((resolve) => {
   if (abortActiveStream) abortActiveStream()
   const es = new EventSource(`/api/v1/deployments/${depId}/stream`)
-  const mine = () => epoch === buildEpoch
 
   // settled becomes true once we've seen a terminal `succeeded`/`failed`
   // event. After that the server closes the stream — which fires `onerror`
@@ -2461,9 +2676,25 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
   const finish = (ok, payload) => {
     if (settled) return
     release()
-    if (!mine()) { resolve(); return }
+    if (!current()) { resolve(); return }
     deploying.value = false
-    if (ok) {
+    if (ok && mode === 'managed') {
+      if (payload?.id !== depId || payload?.function_id !== owner || payload?.status !== 'succeeded') {
+        markConfigurationBuildUnverified()
+        buildError.value = 'Build result could not be verified. Check deployment history.'
+        buildModalOpen.value = true
+      } else {
+        configurationPublication.value = null
+        adoptDeployBaseline()
+        lastBuild.value = {
+          managed: true, owner, deploymentId: depId, installed: false,
+          version: payload.version || null, durationMs: payload.duration_ms ?? null,
+        }
+        buildLogs.value.push('Build succeeded. Install required.')
+        refreshVersions()
+        buildModalOpen.value = false
+      }
+    } else if (ok) {
       deployedThisSession.value = true
       adoptDeployBaseline()
       lastDeployAt.value = new Date().toISOString()
@@ -2482,6 +2713,9 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
       clearTimeout(deployedTimer)
       deployedTimer = setTimeout(() => { justDeployed.value = false }, 2500)
     } else {
+      if (mode === 'managed' && (payload?.id !== depId || payload?.function_id !== owner || payload?.status !== 'failed')) {
+        markConfigurationBuildUnverified()
+      }
       const msg = payload?.error_message || 'build failed (see logs)'
       buildError.value = msg
       buildLogs.value.push(`✗ Build failed: ${msg}`)
@@ -2493,7 +2727,7 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
   }
 
   es.addEventListener('log', (e) => {
-    if (!mine()) return
+    if (!current()) return
     try {
       const line = JSON.parse(e.data)
       const text = `[${line.stream || 'log'}] ${line.line}`
@@ -2528,6 +2762,36 @@ const streamBuild = (depId, epoch = buildEpoch) => new Promise((resolve) => {
     }
   }
 })
+
+const installManagedBuild = async () => {
+  const build = lastBuild.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === build?.owner
+    && lastBuild.value === build && !viewMode.value && iam.mode === 'managed'
+  if (!awaitingInstall.value || deploying.value || installing.value || blockedByConfiguration.value || rollingBack.value || !current()) return
+  installingBuild.value = build
+  try {
+    const res = await apiClient.post(`/deployments/${build.deploymentId}/install`)
+    if (!current()) return
+    if (res.data?.review_required !== true || !res.data.artifact) {
+      throw new Error('Installation could not be verified. Check deployment history.')
+    }
+    build.installed = true
+    deployedThisSession.value = true
+    lastDeployAt.value = new Date().toISOString()
+    buildLogs.value.push('Installed. Permissions review required.')
+    refreshVersions()
+  } catch (err) {
+    if (!current()) return
+    confirmStore.notify({
+      title: 'Install failed',
+      message: err.response?.data?.error?.message || err.message,
+      danger: true,
+    })
+  } finally {
+    if (installingBuild.value === build) installingBuild.value = null
+  }
+}
 
 // The strip reads one run object, so its dot, status and duration cannot
 // disagree the way three independently-cleared refs could.
@@ -2686,52 +2950,99 @@ const suggestBuildFix = async () => {
   }
 }
 
-const rollingBack = ref(false)
 const rollbackToVersion = async (v) => {
-  if (viewMode.value) return
-  if (!fnId.value || !v?.deployment_id || rollingBack.value) return
-
-  // Pull the target deployment's snapshot + the current function record
-  // so we can show the operator exactly what will change before they
-  // confirm. Best-effort: if either fetch fails, fall through to a plain
-  // confirm — the rollback itself still works.
-  let diffMessage = `Code hash ${v.short_hash}. Your current version stays in the history.`
+  const owner = fnId.value
+  const deploymentId = v?.deployment_id
+  const inScope = editorScope()
+  if (!inScope() || viewMode.value || !owner || !deploymentId || rollingBack.value
+    || deploying.value || installing.value || blockedByConfiguration.value) return
+  const operation = Symbol()
+  rollingBack.value = operation
+  const current = () => inScope() && !viewMode.value && fnId.value === owner && rollingBack.value === operation
+  let mode
+  const currentMode = () => current() && iam.mode === mode
   try {
-    const [depRes, listRes] = await Promise.all([
-      apiClient.get(`/deployments/${v.deployment_id}`),
-      apiClient.get('/functions'),
-    ])
-    const snap = depRes.data?.snapshot
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
-    if (snap && fn) {
-      const lines = describeSnapshotDiff(fn, snap)
-      if (lines.length) {
-        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
-      } else {
-        diffMessage = `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+
+    let message
+    if (mode === 'managed') {
+      if (!isCanonicalUuid(owner) || !isCanonicalUuid(deploymentId)) {
+        throw new Error('Managed rollback requires exact function and deployment IDs.')
+      }
+      message = `Restore v${v.version} (code ${v.short_hash})? Install the restored version before invoking it. Review permissions separately. Settings, environment and secrets stay unchanged.`
+    } else {
+      message = `Code hash ${v.short_hash}. Your current version stays in the history.`
+      try {
+        const [depRes, listRes] = await Promise.all([
+          apiClient.get(`/deployments/${deploymentId}`),
+          apiClient.get('/functions'),
+        ])
+        if (!currentMode()) return
+        const snap = depRes.data?.snapshot
+        const fn = (listRes.data.functions || []).find((f) => f.id === owner)
+        if (snap && fn) {
+          const lines = describeSnapshotDiff(fn, snap)
+          message = lines.length
+            ? `Rolling back to v${v.version} (code ${v.short_hash}) will also change:\n\n${lines.join('\n')}\n\nSecrets keep their current values; they aren't part of the rollback.`
+            : `Rolling back to v${v.version} (code ${v.short_hash}). Settings and env are already identical, so only the code changes.`
+        }
+      } catch {
+        // The legacy diff is best-effort.
       }
     }
-  } catch {
-    // fall through to default message
-  }
 
-  const ok = await confirmStore.ask({
-    title: `Restore v${v.version}?`,
-    message: diffMessage,
-    confirmLabel: 'Rollback',
-  })
-  if (!ok) return
-  rollingBack.value = true
-  try {
-    await rollbackFunction(fnId.value, { deployment_id: v.deployment_id })
-    // Re-pull function metadata, source, AND versions so the Active
-    // pill moves AND the editor buffer reflects the rolled-back code.
-    // Without the reloadSource() call, CodeMirror keeps showing the
-    // pre-rollback content and the operator has to hard-refresh —
-    // that was the original bug report ("I rolled back, navigated
-    // back to the function, still saw the new code").
+    if (!currentMode() || confirmStore.visible) return
+    const ok = await confirmStore.ask({
+      title: `Restore v${v.version}?`,
+      message,
+      confirmLabel: 'Rollback',
+    })
+    if (!ok || !currentMode()) return
+
+    if (managedSettingsCAS?.owner === owner) managedSettingsCAS = null
+    if (mode === 'managed') {
+      configurationPublication.value = null
+      lastBuild.value = null
+    }
+    const { data } = await rollbackFunction(owner, { deployment_id: deploymentId })
+    if (!currentMode()) return
+    if (mode === 'managed') {
+      if (data?.id !== deploymentId || data.deployment_id !== deploymentId || data.function_id !== owner
+        || !Number.isSafeInteger(data.version) || data.version < 1 || data.version !== v.version
+        || !data.code_hash || data.code_hash !== v.code_hash || data.status !== 'succeeded'
+        || data.phase !== 'review_required' || data.function_status !== 'inactive') {
+        throw new Error('Rollback result could not be verified. Check deployment history before retrying.')
+      }
+      lastBuild.value = { managed: true, rollback: true, owner, deploymentId, installed: false, version: data.version }
+      buildError.value = ''
+      buildLogs.value = ['Version restored. Install required.']
+      modals.value.versions = false
+      versions.value = versions.value.map((row) => ({ ...row, is_active: row.deployment_id === deploymentId }))
+      if (!isDirty.value) {
+        try {
+          const source = await apiClient.get(`/functions/${owner}/source`)
+          if (!currentMode() || isDirty.value) return
+          if (typeof source.data?.code !== 'string' || typeof source.data?.dependencies !== 'string') throw new Error()
+          code.value = source.data.code
+          dependencyText.value = source.data.dependencies
+          markSourceClean()
+        } catch {
+          if (!currentMode()) return
+          confirmStore.notify({
+            title: 'Source refresh failed',
+            message: 'The version was restored. Reopen the editor to load its source before editing.',
+            danger: true,
+          })
+        }
+      }
+      return
+    }
+
     const listRes = await apiClient.get('/functions')
-    const fn = (listRes.data.functions || []).find((f) => f.id === fnId.value)
+    if (!currentMode()) return
+    const fn = (listRes.data.functions || []).find((f) => f.id === owner)
     if (fn) {
       // Re-hydrate the form too — rollback restores env_vars,
       // memory, network_mode, etc. from the deployment snapshot.
@@ -2754,11 +3065,13 @@ const rollbackToVersion = async (v) => {
       } else {
         envVars.value = []
       }
-      await reloadSource(fn)
+      await reloadSource(fn, { current: currentMode })
+      if (!currentMode()) return
       markFormClean()
-      await loadVersions(fn)
+      await loadVersions(fn, currentMode)
     }
   } catch (e) {
+    if (!current() || (mode && mode !== 'unknown' && !currentMode())) return
     const code = e.response?.data?.error?.code || ''
     const msg = e.response?.data?.error?.message || e.message || 'Rollback failed'
     if (code === 'VERSION_GCD') {
@@ -2767,48 +3080,266 @@ const rollbackToVersion = async (v) => {
       confirmStore.notify({ title: 'Rollback failed', message: msg, danger: true })
     }
   } finally {
-    rollingBack.value = false
+    if (rollingBack.value === operation) rollingBack.value = null
   }
 }
 
-const loadSecrets = async () => {
-  if (!fnId.value) return
+// Managed mode replaces the legacy secrets CRUD with a CAS-checked
+// configuration publication: read the tokens fresh for every write and never
+// reuse them, because they move after each publication.
+const loadManagedConfiguration = async (id) => {
+  const res = await apiClient.get(`/functions/${id}/configuration`, { quietStatuses: [404] })
+  return res.data
+}
+
+const managedConfigurationError = (err, fallback, forbidden = 'An administrator must change secrets.') => {
+  const status = err.response?.status
+  if (status === 409) return 'Configuration changed elsewhere; reload to continue.'
+  if (status === 403) return forbidden
+  return err.response?.data?.error?.message || err?.message || fallback
+}
+
+const managedSecretError = (status, fallback) => {
+  if (status === 409) return 'Configuration changed elsewhere; reload to continue.'
+  if (status === 403) return 'An administrator must change secrets.'
+  return fallback
+}
+
+const artifactDigest = (value) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+const configurationRevisions = ['function_version', 'artifact_revision', 'artifact_epoch', 'policy_revision', 'authority_epoch']
+const positiveRevision = (value) => typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value)
+
+const configurationSuccessor = (data, previous) => {
+  if (data?.review_required !== true || !isCanonicalUuid(data.generation) || data.generation === previous.generation
+    || (!['', 'iam:unbound'].includes(data.approved_artifact) && !artifactDigest(data.approved_artifact))
+    || data.approved_artifact !== previous.approved_artifact) return null
+  const expected = { generation: data.generation, approved_artifact: data.approved_artifact }
+  for (const key of configurationRevisions) {
+    if (!positiveRevision(data[key]) || !positiveRevision(previous[key])
+      || BigInt(data[key]) !== BigInt(previous[key]) + 1n
+      || BigInt(data[key]) > (key === 'function_version' ? 2147483647n : 9223372036854775807n)) return null
+    expected[key] = data[key]
+  }
+  return expected
+}
+
+const installManagedConfiguration = async () => {
+  const receipt = configurationReceipt.value
+  const inScope = editorScope()
+  const current = () => inScope() && !viewMode.value && configurationReceipt.value === receipt && fnId.value === receipt?.owner
+  if (!canOfferConfigurationInstall.value || !current() || secretBusy.value || installing.value || rollingBack.value) return
+  const { owner, expected, previousArtifact } = receipt
+  const unverified = { owner, settings: receipt.settings }
+  const inspect = receipt.settings ? 'Inspect the current configuration before continuing.' : 'Reload before continuing.'
+  const conflict = receipt.settings ? `Configuration changed elsewhere. ${inspect}` : 'Configuration changed elsewhere; reload to continue.'
+  secretOperations.add(owner)
   try {
-    const res = await apiClient.get(`/functions/${fnId.value}/secrets`)
+    const { data } = await apiClient.post(`/functions/${owner}/configuration/install`, { expected }, { sensitive: true })
+    if (!current()) return
+    if (data?.review_required !== true || !artifactDigest(data.current_artifact) || data.current_artifact === previousArtifact) {
+      configurationPublication.value = unverified
+      confirmStore.notify({ title: 'Install unverified', message: inspect, danger: true })
+      return
+    }
+    configurationPublication.value = { owner, installed: true }
+    lastDeployAt.value = new Date().toISOString()
+  } catch (err) {
+    if (!current()) return
+    const status = err.response?.status
+    if (status !== 403) configurationPublication.value = unverified
+    confirmStore.notify({
+      title: 'Install failed',
+      message: status === 403 ? 'An administrator must install the configuration.'
+        : status === 409 ? conflict
+        : inspect,
+      danger: true,
+    })
+  } finally {
+    secretOperations.delete(owner)
+  }
+}
+
+const writeManagedSecret = async (id, current, key, value, { remove = false } = {}) => {
+  const config = await loadManagedConfiguration(id)
+  if (!current()) return
+  requireEditorMode('managed')
+  if (!config?.expected || !artifactDigest(config.current_artifact)) {
+    throw new Error('Configuration is unavailable; reload to continue.')
+  }
+  const body = { expected: config.expected, current_artifact: config.current_artifact }
+  body.secret = remove ? { key } : { key, value }
+  const path = `/functions/${id}/configuration/secrets`
+  const prior = configurationPublication.value
+  configurationPublication.value = { owner: id }
+  let res
+  try {
+    res = remove
+      ? await apiClient.delete(path, { data: body, sensitive: true })
+      : await apiClient.put(path, body, { sensitive: true })
+  } catch (err) {
+    if (current() && iam.mode === 'managed' && [400, 401, 403].includes(err.response?.status)) configurationPublication.value = prior
+    throw err
+  }
+  if (!current() || iam.mode !== 'managed') return
+  lastBuild.value = null
+  const expected = configurationSuccessor(res?.data, body.expected)
+  if (!expected) {
+    confirmStore.notify({ title: 'Secret update unverified', message: 'Reload before continuing.', danger: true })
+    return
+  }
+  configurationPublication.value = { owner: id, expected, previousArtifact: body.current_artifact }
+}
+
+// The 9 fields the managed settings publication accepts, exactly. timeout_ms is
+// not in the form, so it comes from the record the editor loaded.
+const managedSettings = () => ({
+  timeout_ms: Number(loadedFunction.value?.timeout_ms),
+  memory_mb: form.value.memory_mb,
+  cpus: form.value.cpus,
+  network_mode: form.value.network_mode,
+  sdk: form.value.sdk === true,
+  max_concurrency: form.value.max_concurrency || 0,
+  concurrency_policy: form.value.concurrency_policy || 'queue',
+  auth_mode: form.value.auth_mode || 'none',
+  rate_limit_per_min: form.value.rate_limit_per_min || 0,
+})
+
+const loadedManagedSettings = () => ({
+  timeout_ms: Number(loadedFunction.value?.timeout_ms),
+  memory_mb: loadedFunction.value?.memory_mb,
+  cpus: loadedFunction.value?.cpus,
+  network_mode: loadedFunction.value?.network_mode || 'none',
+  sdk: loadedFunction.value?.sdk === true,
+  max_concurrency: loadedFunction.value?.max_concurrency || 0,
+  concurrency_policy: loadedFunction.value?.concurrency_policy || 'queue',
+  auth_mode: loadedFunction.value?.auth_mode || 'none',
+  rate_limit_per_min: loadedFunction.value?.rate_limit_per_min || 0,
+})
+
+const sameEnvironment = (current, loaded) => JSON.stringify(Object.entries(current || {}).sort())
+  === JSON.stringify(Object.entries(loaded || {}).sort())
+
+const readManagedSettingsCAS = async (fn, current) => {
+  const mode = await iam.checkMode()
+  const ownsLoad = () => current() && fnId.value === fn.id && iam.mode === 'managed'
+  if (mode !== 'managed' || !ownsLoad()) return
+  if (!Number.isSafeInteger(fn.version) || fn.version < 1) return
+  const config = await loadManagedConfiguration(fn.id).catch(() => null)
+  if (!ownsLoad()) return
+  // Settings and environment advance the function version in the same DB transaction.
+  if (config?.expected?.function_version !== String(fn.version)
+    || !artifactDigest(config.current_artifact)) return
+  return {
+    expected: { ...config.expected },
+    current_artifact: config.current_artifact,
+  }
+}
+
+const publishManagedSettings = async (id, current, settings, environment, captured) => {
+  try {
+    const config = await captured?.read
+    if (!current()) return
+    requireEditorMode('managed')
+    if (!config || captured !== managedSettingsCAS || captured.owner !== id || captured.used
+      || !Number.isInteger(settings.timeout_ms) || settings.timeout_ms < 1) {
+      throw new Error('Configuration is unavailable; reload after installing the current artifact if needed.')
+    }
+    captured.used = true
+    const pending = { owner: id, settings: true }
+    configurationPublication.value = pending
+    let res
+    try {
+      res = await apiClient.put(`/functions/${id}/configuration/settings`, {
+        expected: config.expected,
+        current_artifact: config.current_artifact,
+        environment,
+        settings,
+      })
+    } catch (err) {
+      if (current() && configurationPublication.value === pending && [400, 401, 403, 409].includes(err.response?.status)) {
+        configurationPublication.value = null
+      }
+      throw err
+    }
+    if (!current()) return
+    requireEditorMode('managed')
+    const expected = configurationSuccessor(res?.data, config.expected)
+    if (captured !== managedSettingsCAS || configurationPublication.value !== pending || !expected) {
+      throw new Error('Configuration update could not be verified. Inspect the current configuration before continuing.')
+    }
+    managedSettingsCAS = null
+    loadedFunction.value = { ...loadedFunction.value, ...settings, env_vars: environment, version: Number(expected.function_version) }
+    configurationPublication.value = { ...pending, expected, previousArtifact: config.current_artifact }
+  } catch (err) {
+    throw new Error(managedConfigurationError(err, 'Failed to update configuration', 'An administrator must change the configuration.'), { cause: err })
+  }
+}
+
+let secretListRequest = 0
+const loadSecrets = async () => {
+  const id = fnId.value
+  const inScope = editorScope()
+  if (!id || !inScope()) return
+  const request = ++secretListRequest
+  const current = () => inScope() && fnId.value === id && request === secretListRequest
+  try {
+    const res = await apiClient.get(`/functions/${id}/secrets`)
+    if (!current()) return
     secrets.value = (res.data.secrets || []).map((name) => ({ id: name, name }))
   } catch (err) {
-    console.error('Failed to load secrets', err)
+    if (current()) console.error('Failed to load secrets', err)
   }
 }
 
 const saveSecret = async () => {
-  if (viewMode.value) return
-  const name = secretForm.value.name.trim()
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id && !viewMode.value
+  if (!current() || (isEditing.value && !id)) return
+  const { name: inputName, value } = secretForm.value
+  const name = inputName.trim()
   if (!name) return
-  // Pre-deploy: queue locally; flush during deployFunction.
-  if (!fnId.value) {
+  // A new managed owner has no configuration target until installation.
+  if (!id || newManagedUninstalled.value) {
     // Replace any prior pending entry with the same name.
     pendingSecrets.value = pendingSecrets.value.filter((s) => s.name !== name)
-    pendingSecrets.value.push({ name, value: secretForm.value.value })
+    pendingSecrets.value.push({ name, value })
     secretForm.value.name = ''
     secretForm.value.value = ''
     return
   }
   // Existing function: save through the API.
+  let mode
+  let locked = false
   try {
-    await apiClient.post(`/functions/${fnId.value}/secrets`, {
-      key: name,
-      value: secretForm.value.value,
-    })
-    secretForm.value.name = ''
-    secretForm.value.value = ''
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+    if (mode === 'managed') {
+      if (managedSecretBlocked.value) return
+      secretOperations.add(id)
+      locked = true
+      await writeManagedSecret(id, current, name, value)
+    } else {
+      await apiClient.post(`/functions/${id}/secrets`, { key: name, value })
+    }
+    if (!current()) return
+    if (secretForm.value.name === inputName && secretForm.value.value === value) {
+      secretForm.value = { name: '', value: '' }
+    }
     await loadSecrets()
   } catch (err) {
+    if (!current()) return
     confirmStore.notify({
       title: 'Save failed',
-      message: err.response?.data?.error?.message || 'Failed to save secret',
+      message: mode === 'managed'
+        ? managedSecretError(err.response?.status, 'Could not save secret. Reload before continuing.')
+        : mode !== 'legacy' ? 'Could not determine the server mode. Try again.'
+        : (err.response?.data?.error?.message || 'Failed to save secret'),
       danger: true,
     })
+  } finally {
+    if (locked) secretOperations.delete(id)
   }
 }
 
@@ -2817,43 +3348,69 @@ const removePendingSecret = (idx) => {
 }
 
 const removeSecret = async (key) => {
-  if (viewMode.value) return
-  if (!fnId.value) return
+  const id = fnId.value
+  const inScope = editorScope()
+  const current = () => inScope() && fnId.value === id && !viewMode.value
+  if (!id || !current() || managedSecretBlocked.value) return
   const ok = await confirmStore.ask({
     title: 'Delete secret?',
     message: `"${key}" will be removed from this function's environment.`,
     confirmLabel: 'Delete',
     danger: true,
   })
-  if (!ok) return
+  if (!ok || !current()) return
+  let mode
+  let locked = false
   try {
-    await apiClient.delete(`/functions/${fnId.value}/secrets/${encodeURIComponent(key)}`)
+    mode = await iam.checkMode()
+    if (!current()) return
+    requireEditorMode(mode)
+    if (mode === 'managed') {
+      if (managedSecretBlocked.value) return
+      secretOperations.add(id)
+      locked = true
+      await writeManagedSecret(id, current, key, '', { remove: true })
+    } else {
+      await apiClient.delete(`/functions/${id}/secrets/${encodeURIComponent(key)}`)
+    }
+    if (!current()) return
     await loadSecrets()
   } catch (err) {
+    if (!current()) return
     confirmStore.notify({
       title: 'Delete failed',
-      message: err.response?.data?.error?.message || 'Failed to delete secret',
+      message: mode === 'managed'
+        ? managedSecretError(err.response?.status, 'Could not delete secret. Reload before continuing.')
+        : mode !== 'legacy' ? 'Could not determine the server mode. Try again.'
+        : (err.response?.data?.error?.message || 'Failed to delete secret'),
       danger: true,
     })
+  } finally {
+    if (locked) secretOperations.delete(id)
   }
 }
 
-// flushPendingSecrets POSTs queued secrets after the function row exists.
-// Called from runDeploy between the create step and deploy-inline.
-const flushPendingSecrets = async () => {
-  if (!fnId.value || !pendingSecrets.value.length) return
-  for (const sec of pendingSecrets.value) {
+// Legacy creation can persist queued secrets before the first build.
+const flushPendingSecrets = async (id, current, mode, pending) => {
+  if (!id || !pending.length) return
+  for (const sec of pending) {
+    if (!current()) return
+    requireEditorMode(mode)
     try {
-      await apiClient.post(`/functions/${fnId.value}/secrets`, {
+      await apiClient.post(`/functions/${id}/secrets`, {
         key: sec.name, value: sec.value,
       })
+      if (!current()) return
+      requireEditorMode(mode)
       buildLogs.value.push(`Saved secret: ${sec.name}`)
     } catch (err) {
+      if (!current()) return
+      requireEditorMode(mode)
       const msg = err.response?.data?.error?.message || err.message
       buildLogs.value.push(`Failed to save secret ${sec.name}: ${msg}`)
     }
   }
-  pendingSecrets.value = []
+  pendingSecrets.value = pendingSecrets.value.filter((sec) => !pending.includes(sec))
   await loadSecrets()
 }
 
@@ -2872,6 +3429,7 @@ const resetForm = async () => {
   }
   form.value.name = ''
   fnId.value = ''
+  managedCreated.value = null
   code.value = ''
   form.value.sdk = false
   deployedThisSession.value = false
@@ -2882,17 +3440,7 @@ const resetForm = async () => {
 </script>
 
 <style scoped>
-/* Compact panel-trigger button used in the editor's top action bar.
-   Visible height ~28 px keeps the toolbar dense for desktop operators; on
-   coarse pointers the real box grows to the WCAG 2.5.5 floor (see the
-   media query at the bottom of this block).
-
-   This used to be a ::before overlay inset -8px vertically. That is the
-   exact pattern style.css removed: the toolbar is flex-wrap, so once the
-   row passes a phone's width the buttons wrap onto two rows separated by
-   gap-2 (7.6 px) and each row-2 overlay covered the row-1 buttons above
-   it — winning the hit test on paint order and swallowing taps meant for
-   Config. Grow the box, never the shadow of it. */
+/* Match the shared sm toolbar controls without changing the menu styling. */
 .panel-btn {
   display: inline-flex;
   align-items: center;
@@ -2981,42 +3529,20 @@ const resetForm = async () => {
   cursor: not-allowed;
 }
 
-/* Coarse-pointer floors for the controls this view styles itself. The
-   touch-expand-* helpers cover everything that goes through Button /
-   IconButton; these two are scoped-CSS controls that never see them.
-   Desktop (fine pointers) is untouched. */
 @media (pointer: coarse) {
-  /* The sm rung, then buy the target: a 44px BOX made Config and Bindings
-     visibly taller than the Test / Reset / Deploy trio beside them, which is
-     the "floor is not the size" mistake DESIGN.md names. */
-  .panel-btn {
-    height: auto;
-    min-height: 36px;
-    position: relative;
-  }
-  .panel-btn::after {
-    content: '';
-    position: absolute;
-    top: -4px;
-    bottom: -4px;
-    left: 0;
-    right: 0;
-  }
-
-  /* Run sat at 44px inside a 44px bar: a bordered control exactly as tall as
-     the strip containing it, touching both edges, which is what made it read
-     as a slab rather than a button. It takes the sm rung (36px) and buys the
-     rest of its target the same bounded way the shared helpers do. */
+  .panel-btn,
   .run-btn {
     height: auto;
     min-height: 36px;
     position: relative;
   }
+  /* Fixed target height avoids losing the two border pixels to the padding box. */
+  .panel-btn::after,
   .run-btn::after {
     content: '';
     position: absolute;
-    top: -4px;
-    bottom: -4px;
+    top: calc(50% - 22px);
+    height: 44px;
     left: 0;
     right: 0;
   }

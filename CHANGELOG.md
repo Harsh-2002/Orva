@@ -43,6 +43,12 @@ unreleased range, and the sections below as the record for everything before it.
   storage and vacuum, API keys, OAuth connected apps, browser sessions and
   channels, and dashboard Chat. Health and `/metrics` stay unauthenticated,
   as before.
+- The managed dashboard Editor lists secret names and saves secret changes
+  through the managed configuration routes. Deploy uses the draft's original
+  configuration revision and stops on a conflict. Builds require a separate
+  **Install build** action; permissions review is separate from installation.
+  Configure settings, environment, and secrets after installing the first build.
+  Managed deployment does not save the description.
 - Managed routes require exactly the permission the normal server requires:
   `read` for GET, `write` for other methods, `admin` for keys, channels, the AI
   assistant, backup, storage and vacuum. Deployment publication, creation,
