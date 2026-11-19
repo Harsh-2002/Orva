@@ -46,7 +46,7 @@ The managed composition is intended to become the only serving mode, so it
 mounts the operator surfaces of the normal server. Every route requires exactly
 the permission the normal server's `requiredPermission` assigns it: `read` for
 GET, `write` for other methods, `admin` for keys, channels, firewall, `/ai/*`,
-backup, storage and vacuum. A key holding a different permission gets `403`; no
+backup, storage, vacuum and pool tuning writes. A key holding a different permission gets `403`; no
 credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
@@ -64,6 +64,8 @@ and replaces the complete settings together.
 | Operator KV | `GET /api/v1/functions/{fn_id}/kv`, `GET .../kv/{key}` | read |
 | | `PUT/DELETE .../kv/{key}`, `POST .../kv/{key}/incr`, `POST .../kv/{key}/cas` | write |
 | Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
+| Pool tuning | `GET /api/v1/pool/config` | read |
+| | `PUT/POST /api/v1/pool/config` | admin, rechecked at commit |
 | Dependency cache | `DELETE /api/v1/functions/{fn_id}/build-cache` | write, rechecked after waiting for the build lock |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
@@ -878,7 +880,7 @@ Per-function autoscaler tuning.
 ### `GET /api/v1/pool/config?function_id=...`
 Read the row.
 
-### `PUT /api/v1/pool/config`
+### `PUT /api/v1/pool/config` (`POST` is an alias)
 ```json
 {
   "function_id": "019df200-7b00-7e00-9c00-aab1cd2e3f40",
@@ -896,6 +898,11 @@ operator upper bound, never permission to exceed host CPU/memory or function
 concurrency; `0` removes that operator cap. Existing positive overrides remain
 unchanged on upgrade. Pool Controller v2 derives desired capacity from demand;
 the removed `target_concurrency` field returns `400 VALIDATION`.
+
+On a managed server, changes rotate the active worker pool without replacing
+the installed Factory or changing its permissions. Running requests retain
+their concurrency slots. Tuning an inactive function stores settings for its
+next installation; it does not activate the function.
 
 ## API keys
 

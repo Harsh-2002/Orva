@@ -1,20 +1,25 @@
 package handlers
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/Harsh-2002/Orva/backend/internal/auth"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/server/handlers/respond"
 )
 
-// PoolConfigHandler exposes per-function autoscaler tuning. The endpoint is
-// admin-gated by middleware_auth.go (PUT/POST require "admin").
+// PoolConfigHandler exposes per-function autoscaler tuning; only writes require admin.
 type PoolConfigHandler struct {
 	DB          *database.Database
 	Registry    *registry.Registry
 	PoolRefresh func(functionID string) // optional: tears down running pool so next acquire reads new config
+	// ManagedRefresh rotates only workers. The returned cleanup runs after unlocking the owner.
+	ManagedRefresh func(*database.PoolConfig) func()
 }
 
 type poolConfigBody struct {
@@ -39,6 +44,10 @@ func (h *PoolConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := h.DB.GetPoolConfig(fnID)
 	if err != nil {
+		if h.ManagedRefresh != nil && !errors.Is(err, sql.ErrNoRows) {
+			respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to read pool config", reqID)
+			return
+		}
 		respond.JSON(w, http.StatusOK, map[string]any{
 			"function_id": fnID,
 			"configured":  false,
@@ -71,13 +80,52 @@ func (h *PoolConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, http.StatusBadRequest, "VALIDATION", "function_id is required", reqID)
 		return
 	}
-	if _, err := h.Registry.Get(body.FunctionID); err != nil {
+	cfg, err := h.save(r.Context(), body)
+	var invalid poolConfigValidation
+	switch {
+	case err == nil:
+		respond.JSON(w, http.StatusOK, cfg)
+	case errors.As(err, &invalid):
+		respond.Error(w, http.StatusBadRequest, "VALIDATION", invalid.Error(), reqID)
+	case errors.Is(err, database.ErrOperatorDenied):
+		respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Current operator authority required", reqID)
+	case errors.Is(err, errPoolFunctionNotFound):
 		respond.Error(w, http.StatusNotFound, "NOT_FOUND", "function not found", reqID)
-		return
+	default:
+		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to upsert pool config", reqID)
 	}
+}
 
+type poolConfigValidation string
+
+func (e poolConfigValidation) Error() string { return string(e) }
+
+var errPoolFunctionNotFound = errors.New("function not found")
+
+func (h *PoolConfigHandler) save(ctx context.Context, body poolConfigBody) (*database.PoolConfig, error) {
+	if _, err := h.Registry.Get(body.FunctionID); err != nil {
+		return nil, errPoolFunctionNotFound
+	}
+	var cleanup func()
+	if h.ManagedRefresh != nil {
+		lock := h.Registry.MutationLock(body.FunctionID)
+		lock.Lock()
+		defer func() {
+			lock.Unlock()
+			if cleanup != nil {
+				cleanup()
+			}
+		}()
+		fn, err := h.Registry.Get(body.FunctionID)
+		if err != nil || fn.Status == database.FunctionStatusDeleting {
+			return nil, errPoolFunctionNotFound
+		}
+	}
 	// Start from any existing row so PUT can act as a partial update.
 	cfg, err := h.DB.GetPoolConfig(body.FunctionID)
+	if h.ManagedRefresh != nil && err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	if err != nil || cfg == nil {
 		cfg = &database.PoolConfig{
 			FunctionID: body.FunctionID,
@@ -99,12 +147,10 @@ func (h *PoolConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.MinWarm != nil {
 		if cfg.ScaleToZero && cfg.MinWarm != 0 {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION", "scale_to_zero=true requires min_warm=0", reqID)
-			return
+			return nil, poolConfigValidation("scale_to_zero=true requires min_warm=0")
 		}
 		if !cfg.ScaleToZero && cfg.MinWarm < 1 {
-			respond.Error(w, http.StatusBadRequest, "VALIDATION", "scale_to_zero=false requires min_warm>=1", reqID)
-			return
+			return nil, poolConfigValidation("scale_to_zero=false requires min_warm>=1")
 		}
 	}
 	if body.ScaleToZero != nil && body.MinWarm == nil {
@@ -116,21 +162,27 @@ func (h *PoolConfigHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cfg.MinWarm < 0 || cfg.MaxWarm < 0 || (cfg.MaxWarm > 0 && cfg.MinWarm > cfg.MaxWarm) {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "require min_warm >= 0 and max_warm >= min_warm, or max_warm=0 for automatic capacity", reqID)
-		return
+		return nil, poolConfigValidation("require min_warm >= 0 and max_warm >= min_warm, or max_warm=0 for automatic capacity")
 	}
 	if cfg.IdleTTLS < 0 {
-		respond.Error(w, http.StatusBadRequest, "VALIDATION", "idle_ttl_seconds must be >= 0", reqID)
-		return
+		return nil, poolConfigValidation("idle_ttl_seconds must be >= 0")
+	}
+	if h.ManagedRefresh != nil {
+		ref, ok := auth.OperatorFromContext(ctx)
+		if !ok {
+			return nil, database.ErrOperatorDenied
+		}
+		if err := h.DB.UpsertPoolConfigAsOperator(ctx, ref, cfg); err != nil {
+			return nil, err
+		}
+		cleanup = h.ManagedRefresh(cfg)
+		return cfg, nil
 	}
 	if err := h.DB.UpsertPoolConfig(cfg); err != nil {
-		respond.Error(w, http.StatusInternalServerError, "INTERNAL", "failed to upsert pool config", reqID)
-		return
+		return nil, err
 	}
-
 	if h.PoolRefresh != nil {
 		h.PoolRefresh(body.FunctionID)
 	}
-
-	respond.JSON(w, http.StatusOK, cfg)
+	return cfg, nil
 }

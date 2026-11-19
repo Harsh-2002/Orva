@@ -240,6 +240,9 @@ Internal `ManagedAuthority` mode installs concrete frozen Factories, derives
 resources from the same generation used for spawn, and denies missing owners
 without legacy fallback. Current caller/target observers share the IAM gate;
 retirement and generation-bound Release reject late or obsolete workers.
+Managed pool tuning holds the owner mutation lock through commit and worker
+rotation. Tuning and egress rotations preserve the installed Factory and its
+concurrency semaphore; egress uses the last published tuning.
 Public Proxy timeout/header facts come from the acquired generation. The live
 scratch fixture exercises pooled KV and two-sided buffered calls; normal
 serving construction, boot schemas and production policy routes remain off.

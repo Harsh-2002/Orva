@@ -829,25 +829,25 @@ func (m *Manager) getOrCreatePool(fnID string) (*functionPool, error) {
 	if err != nil {
 		return nil, ErrNoFunction
 	}
-	p := m.makePool(fn, nil)
+	tuning, _ := m.db.GetPoolConfig(fnID)
+	p := m.makePool(fn, nil, tuning)
 	m.pools.Store(fnID, p)
 	m.wg.Add(1)
 	go m.reap(p)
 	return p, nil
 }
 
-// Managed callers construct candidates before taking lifecycle/admission locks.
-func (m *Manager) makePool(fn *database.Function, generation *managedGeneration) *functionPool {
+func (m *Manager) makePool(fn *database.Function, generation *managedGeneration, tuning *database.PoolConfig) *functionPool {
 	fnID := fn.ID
 	minWarm := m.cfg.DefaultMin
 	maxWarm := m.cfg.DefaultMax
 	idleTTL := m.cfg.DefaultIdleTTL
 	scaleToZero := false
-	if cfg, err := m.db.GetPoolConfig(fnID); err == nil && cfg != nil {
-		minWarm = cfg.MinWarm
-		maxWarm = cfg.MaxWarm
-		idleTTL = time.Duration(cfg.IdleTTLS) * time.Second
-		scaleToZero = cfg.ScaleToZero
+	if tuning != nil {
+		minWarm = tuning.MinWarm
+		maxWarm = tuning.MaxWarm
+		idleTTL = time.Duration(tuning.IdleTTLS) * time.Second
+		scaleToZero = tuning.ScaleToZero
 	}
 
 	tmpl := m.tmpl

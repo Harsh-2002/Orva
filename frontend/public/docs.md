@@ -41,6 +41,10 @@
 > for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
+> Managed `/api/v1/pool/config` requires `read` for GET and live `admin`
+> for PUT or POST. The same `orva pool get/set` commands work in both modes.
+> Tuning rotates active managed workers without changing the installed
+> Factory or permissions. It does not activate an inactive function.
 > Managed `DELETE /api/v1/functions/{fn_id}/build-cache` requires live `write`.
 > `orva functions purge-cache` drops only that function's npm/pip cache, not
 > its installed deployment or permissions. It waits for any current build.

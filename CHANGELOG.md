@@ -94,8 +94,11 @@ unreleased range, and the sections below as the record for everything before it.
   dependency cache without touching its installed deployment.
 - The managed dashboard can change the current account password with a
   same-origin session. The calling session stays signed in.
-- Not yet on the managed composition: pool configuration, secrets,
-  outbound webhook delivery, and
+- `orva pool get/set` and the corresponding REST routes work in managed
+  mode. Admin writes rotate active workers without reinstalling the function,
+  changing its permissions, or giving running requests extra concurrency.
+- Not yet on the managed composition: legacy secret routes, outbound webhook
+  delivery, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 
