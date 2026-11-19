@@ -55,21 +55,13 @@
 
     <section class="space-y-3">
       <h2 class="text-lg font-semibold text-foreground-strong">
-        Staged named permissions
+        Function permissions
       </h2>
       <p class="measure text-sm text-foreground-muted">
-        Named-policy management is available only in explicit scratch hosts, not
-        normal production routing. Versions are immutable, attachments stay pinned,
-        and effective access is read-only. Inline edits never replace attached
-        sources. Detach or revoke can leave overlapping grants from other sources.
-        Consult the source repository's IAM_MANAGEMENT contract before using the
-        staged CLI or optional MCP tools.
-        Optional configuration publication also remains scratch-only: environment,
-        settings and secret changes first publish review-required deny. Explicit
-        new Factory installation and review are separate. Configuration uses the
-        installed code and runtime pair, including after queued deployment
-        installation. Old injected secrets cannot be recalled. No normal routes
-        or tools are activated.
+        On a managed server, each function can only use what its permissions
+        allow. Grant access inline on the function's Permissions page, or attach
+        a reusable policy from Policies. Editing a policy creates a new version;
+        attached functions keep theirs until you roll it out.
       </p>
     </section>
 
