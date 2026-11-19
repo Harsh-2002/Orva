@@ -140,6 +140,9 @@ roots (`[]string{}` if none). The witness must be outside them and the three
 owner/store roots. Do not include the witness or a reachable alias in any backup,
 clone, VM snapshot, migration or restore. There is no automatic witness creation,
 rotation, replacement, adoption or version-1 upgrade.
+Use `orva setup --managed-witness /absolute/private-directory/witness` as
+the daemon user to create it without running the ordinary setup steps.
+The flag refuses an existing file, including a symlink; it never rotates it.
 
 The witness is held under an exclusive nonblocking lock for the owner's entire
 lifetime. Version 2 pins its device/inode and authenticates the canonical whole

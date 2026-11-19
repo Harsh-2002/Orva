@@ -4,6 +4,7 @@ package artifactfs
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"unicode/utf8"
+
+	"golang.org/x/sys/unix"
 )
 
 // OwnerHostConfig opts into host binding at creation. The witness is
@@ -38,18 +41,16 @@ func ownerHostPath(path string) bool {
 		len(path) <= 4096 && utf8.ValidString(path) && !strings.ContainsRune(path, 0)
 }
 
-func openOwnerWitness(cfg OwnerConfig) (*ownerWitness, error) {
-	host := cfg.Host
-	if host == nil || !ownerHostPath(host.WitnessPath) || host.BackupRoots == nil || len(host.BackupRoots) > 64 {
-		return nil, ErrInvalid
+func validateWitnessPlacement(path string, roots []string) error {
+	if !ownerHostPath(path) || roots == nil {
+		return ErrInvalid
 	}
-	path := host.WitnessPath
 	parent := filepath.Dir(path)
 	ancestors := make(map[ownerObject]bool)
 	for dir := parent; ; dir = filepath.Dir(dir) {
 		info, err := os.Lstat(dir)
 		if err != nil || !info.IsDir() {
-			return nil, ErrIntegrity
+			return ErrIntegrity
 		}
 		st := info.Sys().(*syscall.Stat_t)
 		ancestors[ownerObject{uint64(st.Dev), st.Ino}] = true
@@ -57,23 +58,107 @@ func openOwnerWitness(cfg OwnerConfig) (*ownerWitness, error) {
 			break
 		}
 	}
-	roots := append([]string{cfg.MetadataRoot, cfg.CodeRoot, cfg.RuntimeRoot}, host.BackupRoots...)
 	for _, root := range roots {
 		if !ownerHostPath(root) || root == path {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		resolved, err := filepath.EvalSymlinks(root)
 		if err != nil || resolved != root {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		info, err := os.Stat(root)
 		if err != nil || !info.IsDir() {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		st := info.Sys().(*syscall.Stat_t)
 		if ancestors[ownerObject{uint64(st.Dev), st.Ino}] {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
+	}
+	return nil
+}
+
+// ProvisionOwnerWitness creates a private, non-replaceable witness. Parent
+// directories above the dedicated witness directory must already exist.
+func ProvisionOwnerWitness(path string, roots []string) error {
+	if !ownerHostPath(path) || roots == nil || len(roots) > 64 {
+		return ErrInvalid
+	}
+	parent := filepath.Dir(path)
+	// Check the existing ancestry before creating anything.
+	if err := validateWitnessPlacement(parent, roots); err != nil {
+		return err
+	}
+	created := false
+	if err := os.Mkdir(parent, 0700); err == nil {
+		created = true
+	} else if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if err := validateWitnessPlacement(path, roots); err != nil {
+		return err
+	}
+	dir, err := openNoFollow(parent, true)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if created {
+		if err := dir.Chmod(0700); err != nil {
+			return err
+		}
+	}
+	if _, err := readPrivateMetadata(dir, true, 0); err != nil {
+		return err
+	}
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		return err
+	}
+	defer clear(key[:])
+	var raw [65]byte
+	hex.Encode(raw[:64], key[:])
+	raw[64] = '\n'
+	defer clear(raw[:])
+	name := filepath.Base(path)
+	fd, err := unix.Openat(int(dir.Fd()), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	if err != nil {
+		return &os.PathError{Op: "create witness", Path: path, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), name)
+	err = f.Chmod(0600)
+	if err == nil {
+		_, err = f.Write(raw[:])
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if err := errors.Join(err, f.Close()); err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		return err
+	}
+	if created {
+		up, err := openNoFollow(filepath.Dir(parent), true)
+		if err != nil {
+			return err
+		}
+		return errors.Join(up.Sync(), up.Close())
+	}
+	return nil
+}
+
+func openOwnerWitness(cfg OwnerConfig) (*ownerWitness, error) {
+	host := cfg.Host
+	if host == nil || host.BackupRoots == nil || len(host.BackupRoots) > 64 {
+		return nil, ErrInvalid
+	}
+	path := host.WitnessPath
+	parent := filepath.Dir(path)
+	roots := append([]string{cfg.MetadataRoot, cfg.CodeRoot, cfg.RuntimeRoot}, host.BackupRoots...)
+	if err := validateWitnessPlacement(path, roots); err != nil {
+		return nil, err
 	}
 	if _, err := privateMetadata(parent, true, 0); err != nil {
 		return nil, err
