@@ -94,7 +94,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 	}
 	mux := http.NewServeMux()
 	if downloadBackup != nil {
-		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, true, downloadBackup))
+		mux.HandleFunc("GET /api/v1/backup", requireManagedOperator(db, managedAdmin, downloadBackup))
 	}
 	authenticate := managedActivityOperator(db)
 	(&workloadpolicy.ManagedHTTPAdapter{Service: policy, Authenticate: authenticate}).Register(mux)
@@ -129,31 +129,31 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
 		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
 		mux.Handle("GET /web/", uiHandler())
-		mux.HandleFunc("GET /api/v1/iam/capabilities", requireManagedOperator(db, false, func(w http.ResponseWriter, _ *http.Request) {
+		mux.HandleFunc("GET /api/v1/iam/capabilities", requireManagedOperator(db, managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})
 		}))
 		(&workloadconfig.HTTPAdapter{Service: configuration, Authenticate: authenticate}).Register(mux)
 		(&handlers.WorkloadLifecycleHandler{Publication: publication, Authenticate: authenticate}).Register(mux)
 		deploy := &handlers.FunctionHandler{Registry: reg, DB: db, DataDir: dataDir, DeployIAM: publication, RequireDeployIAM: true}
 		deployments := &handlers.DeploymentHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/functions", requireManagedOperator(db, false, deploy.List))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}", requireManagedOperator(db, false, deploy.Get))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", requireManagedOperator(db, false, readManagedSource(db, publication)))
-		mux.HandleFunc("POST /api/v1/functions", requireManagedOperator(db, false, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/iam/functions", requireManagedOperator(db, false, createManagedFunction(publication)))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy", requireManagedOperator(db, false, deploy.Deploy))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy-inline", requireManagedOperator(db, false, deploy.DeployInline))
-		mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", requireManagedOperator(db, false, deploy.Rollback))
+		mux.HandleFunc("GET /api/v1/functions", requireManagedOperator(db, managedRead, deploy.List))
+		mux.HandleFunc("GET /api/v1/functions/{fn_id}", requireManagedOperator(db, managedRead, deploy.Get))
+		mux.HandleFunc("GET /api/v1/functions/{fn_id}/source", requireManagedOperator(db, managedRead, readManagedSource(db, publication)))
+		mux.HandleFunc("POST /api/v1/functions", requireManagedOperator(db, managedRead, createManagedFunction(publication)))
+		mux.HandleFunc("POST /api/v1/iam/functions", requireManagedOperator(db, managedRead, createManagedFunction(publication)))
+		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy", requireManagedOperator(db, managedRead, deploy.Deploy))
+		mux.HandleFunc("POST /api/v1/functions/{fn_id}/deploy-inline", requireManagedOperator(db, managedRead, deploy.DeployInline))
+		mux.HandleFunc("POST /api/v1/functions/{fn_id}/rollback", requireManagedOperator(db, managedRead, deploy.Rollback))
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}
 		reg.DeletionHook = history
 		(&workloadhistory.HTTPAdapter{Service: history, Authenticate: authenticate}).Register(mux)
-		mux.HandleFunc("DELETE /api/v1/functions/{fn_id}", requireManagedOperator(db, true, deleteManagedFunction(reg, manager)))
-		mux.HandleFunc("GET /api/v1/deployments/{id}", requireManagedOperator(db, false, deployments.Get))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/logs", requireManagedOperator(db, false, deployments.GetLogs))
-		mux.HandleFunc("GET /api/v1/deployments/{id}/stream", requireManagedOperator(db, false, deployments.Stream))
-		mux.HandleFunc("GET /api/v1/functions/{fn_id}/deployments", requireManagedOperator(db, false, deployments.ListForFunction))
-		mux.HandleFunc("POST /api/v1/deployments/{id}/install", requireManagedOperator(db, true, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("DELETE /api/v1/functions/{fn_id}", requireManagedOperator(db, managedWrite, deleteManagedFunction(reg, manager)))
+		mux.HandleFunc("GET /api/v1/deployments/{id}", requireManagedOperator(db, managedRead, deployments.Get))
+		mux.HandleFunc("GET /api/v1/deployments/{id}/logs", requireManagedOperator(db, managedRead, deployments.GetLogs))
+		mux.HandleFunc("GET /api/v1/deployments/{id}/stream", requireManagedOperator(db, managedRead, deployments.Stream))
+		mux.HandleFunc("GET /api/v1/functions/{fn_id}/deployments", requireManagedOperator(db, managedRead, deployments.ListForFunction))
+		mux.HandleFunc("POST /api/v1/deployments/{id}/install", requireManagedOperator(db, managedAdmin, func(w http.ResponseWriter, r *http.Request) {
 			artifact, err := publication.Install(r.Context(), r.PathValue("id"))
 			if err != nil {
 				respond.Error(w, http.StatusConflict, "CONFLICT", "Managed deployment cannot be installed; inspect current state", "")
@@ -171,19 +171,19 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		}
 		if async != nil {
 			jobs := &handlers.JobsHandler{DB: db, Registry: reg, AsyncEnabled: true, AsyncIAM: async}
-			mux.HandleFunc("POST /api/v1/jobs", requireManagedOperator(db, true, jobs.Enqueue))
-			mux.HandleFunc("GET /api/v1/jobs", requireManagedOperator(db, false, jobs.List))
-			mux.HandleFunc("GET /api/v1/jobs/{id}", requireManagedOperator(db, false, jobs.Get))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/retry", requireManagedOperator(db, true, jobs.Retry))
-			mux.HandleFunc("POST /api/v1/jobs/{id}/resume", requireManagedOperator(db, true, jobs.Resume))
-			mux.HandleFunc("DELETE /api/v1/jobs/{id}", requireManagedOperator(db, true, jobs.Delete))
+			mux.HandleFunc("POST /api/v1/jobs", requireManagedOperator(db, managedWrite, jobs.Enqueue))
+			mux.HandleFunc("GET /api/v1/jobs", requireManagedOperator(db, managedRead, jobs.List))
+			mux.HandleFunc("GET /api/v1/jobs/{id}", requireManagedOperator(db, managedRead, jobs.Get))
+			mux.HandleFunc("POST /api/v1/jobs/{id}/retry", requireManagedOperator(db, managedWrite, jobs.Retry))
+			mux.HandleFunc("POST /api/v1/jobs/{id}/resume", requireManagedOperator(db, managedWrite, jobs.Resume))
+			mux.HandleFunc("DELETE /api/v1/jobs/{id}", requireManagedOperator(db, managedWrite, jobs.Delete))
 			cron := &handlers.CronHandler{DB: db, Registry: reg, CronEnabled: true, CronIAM: async}
-			mux.HandleFunc("GET /api/v1/cron", requireManagedOperator(db, false, cron.ListAll))
-			mux.HandleFunc("GET /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, false, cron.List))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, true, cron.Create))
-			mux.HandleFunc("PUT /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, true, cron.Update))
-			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron/{id}/resume", requireManagedOperator(db, true, cron.Resume))
-			mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, true, cron.Delete))
+			mux.HandleFunc("GET /api/v1/cron", requireManagedOperator(db, managedRead, cron.ListAll))
+			mux.HandleFunc("GET /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, managedRead, cron.List))
+			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron", requireManagedOperator(db, managedWrite, cron.Create))
+			mux.HandleFunc("PUT /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, managedWrite, cron.Update))
+			mux.HandleFunc("POST /api/v1/functions/{fn_id}/cron/{id}/resume", requireManagedOperator(db, managedWrite, cron.Resume))
+			mux.HandleFunc("DELETE /api/v1/functions/{fn_id}/cron/{id}", requireManagedOperator(db, managedWrite, cron.Delete))
 		}
 	}
 	return requestIDMiddleware(bodySizeMiddleware(managedMaxBodyBytes, managedActivityMiddleware(db, ops.Hub, dispatch))), nil
@@ -196,12 +196,12 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 	invoke *handlers.InvokeHandler, ops *managedRouteDeps,
 ) {
 	exec := &handlers.ExecutionHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/executions", requireManagedOperator(db, false, exec.List))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}", requireManagedOperator(db, false, exec.Get))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", requireManagedOperator(db, false, exec.GetLogs))
-	mux.HandleFunc("GET /api/v1/executions/{exec_id}/request", requireManagedOperator(db, false, exec.GetRequest))
-	mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", requireManagedOperator(db, true, exec.Delete))
-	mux.HandleFunc("POST /api/v1/executions/bulk-delete", requireManagedOperator(db, true, exec.BulkDelete))
+	mux.HandleFunc("GET /api/v1/executions", requireManagedOperator(db, managedRead, exec.List))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}", requireManagedOperator(db, managedRead, exec.Get))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}/logs", requireManagedOperator(db, managedRead, exec.GetLogs))
+	mux.HandleFunc("GET /api/v1/executions/{exec_id}/request", requireManagedOperator(db, managedRead, exec.GetRequest))
+	mux.HandleFunc("DELETE /api/v1/executions/{exec_id}", requireManagedOperator(db, managedWrite, exec.Delete))
+	mux.HandleFunc("POST /api/v1/executions/bulk-delete", requireManagedOperator(db, managedWrite, exec.BulkDelete))
 	if invoke == nil {
 		return
 	}
@@ -210,7 +210,7 @@ func mountManagedExecutions(mux *http.ServeMux, db *database.Database, reg *regi
 	if ops.Hub != nil {
 		replay.PublishEvent = ops.Hub.Publish
 	}
-	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, true, replay.Replay))
+	mux.HandleFunc("POST /api/v1/executions/{exec_id}/replay", requireManagedOperator(db, managedWrite, replay.Replay))
 }
 
 // mountManagedObservability mounts traces, the activity feed, the SSE event
@@ -225,13 +225,13 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		met = metrics.New()
 	}
 	traces := &handlers.TracesHandler{DB: db, Registry: reg, Metrics: met}
-	mux.HandleFunc("GET /api/v1/traces", requireManagedOperator(db, false, traces.ListTraces))
-	mux.HandleFunc("GET /api/v1/traces/{trace_id}", requireManagedOperator(db, false, traces.GetTrace))
-	mux.HandleFunc("GET /api/v1/functions/{id}/baseline", requireManagedOperator(db, false, traces.GetFunctionBaseline))
+	mux.HandleFunc("GET /api/v1/traces", requireManagedOperator(db, managedRead, traces.ListTraces))
+	mux.HandleFunc("GET /api/v1/traces/{trace_id}", requireManagedOperator(db, managedRead, traces.GetTrace))
+	mux.HandleFunc("GET /api/v1/functions/{id}/baseline", requireManagedOperator(db, managedRead, traces.GetFunctionBaseline))
 	activity := &handlers.ActivityHandler{DB: db}
-	mux.HandleFunc("GET /api/v1/activity", requireManagedOperator(db, false, activity.List))
+	mux.HandleFunc("GET /api/v1/activity", requireManagedOperator(db, managedRead, activity.List))
 	if ops.Hub != nil {
-		mux.HandleFunc("GET /api/v1/events", requireManagedOperator(db, false, ops.Hub.Handler()))
+		mux.HandleFunc("GET /api/v1/events", requireManagedOperator(db, managedRead, ops.Hub.Handler()))
 	}
 	started := ops.StartTime
 	if started.IsZero() {
@@ -241,12 +241,12 @@ func mountManagedObservability(mux *http.ServeMux, db *database.Database, reg *r
 		StartTime: started, NsjailBin: ops.NsjailBin}
 	mux.HandleFunc("GET /api/v1/system/health", system.Health)
 	mux.HandleFunc("GET /metrics", system.GetMetrics)
-	mux.HandleFunc("GET /api/v1/system/metrics", requireManagedOperator(db, false, system.GetMetrics))
-	mux.HandleFunc("GET /api/v1/system/metrics.json", requireManagedOperator(db, false, system.GetMetricsJSON))
+	mux.HandleFunc("GET /api/v1/system/metrics", requireManagedOperator(db, managedRead, system.GetMetrics))
+	mux.HandleFunc("GET /api/v1/system/metrics.json", requireManagedOperator(db, managedRead, system.GetMetricsJSON))
 	if dataDir != "" {
 		storage := &handlers.SystemStorageHandler{DB: db, Cfg: &config.Config{Data: config.DataConfig{Dir: dataDir}}}
-		mux.HandleFunc("GET /api/v1/system/storage", requireManagedOperator(db, true, storage.GetStorage))
-		mux.HandleFunc("POST /api/v1/system/vacuum", requireManagedOperator(db, true, storage.Vacuum))
+		mux.HandleFunc("GET /api/v1/system/storage", requireManagedOperator(db, managedAdmin, storage.GetStorage))
+		mux.HandleFunc("POST /api/v1/system/vacuum", requireManagedOperator(db, managedAdmin, storage.Vacuum))
 	}
 }
 
@@ -446,7 +446,20 @@ func managedSessionOrigin(r *http.Request) bool {
 	return err == nil && origin == urlhint.BaseURL(r) && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-func requireManagedOperator(db *database.Database, mutation bool, next http.HandlerFunc) http.HandlerFunc {
+// managedTier is the permission a route requires, exactly as the legacy
+// router's requiredPermission defines it: GET needs read, other routes write,
+// and keys, channels, the AI assistant, backup, storage and vacuum admin.
+// Services that enforce stricter authority internally (deploy, deletion, jobs,
+// cron, IAM, history) keep doing so at commit; the tier is only the front gate.
+type managedTier string
+
+const (
+	managedRead  managedTier = "read"
+	managedWrite managedTier = "write"
+	managedAdmin managedTier = "admin"
+)
+
+func requireManagedOperator(db *database.Database, tier managedTier, next http.HandlerFunc) http.HandlerFunc {
 	authenticate := managedOperator(db)
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -457,7 +470,7 @@ func requireManagedOperator(db *database.Database, mutation bool, next http.Hand
 		}
 		ctx := auth.WithOperator(WithActor(r.Context(), managedActor(principal)), principal)
 		ref, ok := auth.OperatorFromContext(ctx)
-		if !ok || db.CheckIAMOperator(ctx, ref, mutation) != nil {
+		if !ok || db.CheckOperatorPermission(ctx, ref, string(tier)) != nil {
 			respond.Error(w, http.StatusForbidden, "FORBIDDEN", "Current operator authority required", "")
 			return
 		}

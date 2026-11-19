@@ -27,6 +27,6 @@ func registerManagedChat(mux *http.ServeMux, h *AIHandler) {
 		"PUT /api/v1/ai/settings":                                h.PutSettings,
 		"PUT /api/v1/ai/selection":                               h.PutSelection,
 	} {
-		mux.HandleFunc(path, requireManagedOperator(h.DB, true, handle))
+		mux.HandleFunc(path, requireManagedOperator(h.DB, managedAdmin, handle))
 	}
 }

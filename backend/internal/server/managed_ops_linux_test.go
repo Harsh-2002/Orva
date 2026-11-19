@@ -313,3 +313,42 @@ func TestManagedEventStreamRequiresOperatorAndDeliversEvents(t *testing.T) {
 		}
 	}
 }
+
+// Every managed operator route requires exactly the permission the legacy
+// router's requiredPermission assigns it, no more and no less.
+func TestManagedRoutesRequireTheLegacyTier(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	keys := map[managedTier]string{}
+	for _, tier := range []managedTier{managedRead, managedWrite, managedAdmin} {
+		keys[tier], _ = f.key(string(tier)+"-only", `["`+string(tier)+`"]`)
+	}
+	routes := []struct {
+		method, path string
+		tier         managedTier
+	}{
+		{http.MethodGet, "/api/v1/executions", managedRead},
+		{http.MethodGet, "/api/v1/traces", managedRead},
+		{http.MethodGet, "/api/v1/activity", managedRead},
+		{http.MethodGet, "/api/v1/system/metrics.json", managedRead},
+		{http.MethodDelete, "/api/v1/executions/" + ids.New(), managedWrite},
+		{http.MethodPost, "/api/v1/executions/bulk-delete", managedWrite},
+		{http.MethodPost, "/api/v1/executions/" + ids.New() + "/replay", managedWrite},
+		{http.MethodGet, "/api/v1/system/storage", managedAdmin},
+		{http.MethodPost, "/api/v1/system/vacuum", managedAdmin},
+	}
+	for _, route := range routes {
+		if got := requiredPermission(route.method, route.path); got != string(route.tier) {
+			t.Fatalf("%s %s: legacy tier is %q, test table says %q", route.method, route.path, got, route.tier)
+		}
+		for tier, bearer := range keys {
+			rec := f.call(route.method, route.path, bearer, `{}`)
+			denied := rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized
+			if tier == route.tier && denied {
+				t.Fatalf("%s %s refused a key holding exactly %q: %d", route.method, route.path, tier, rec.Code)
+			}
+			if tier != route.tier && rec.Code != http.StatusForbidden {
+				t.Fatalf("%s %s admitted a %q-only key: %d", route.method, route.path, tier, rec.Code)
+			}
+		}
+	}
+}
