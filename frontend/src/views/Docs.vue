@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-12 pb-16">
+  <div class="docs-page space-y-12 pb-16">
     <!-- Page heading, section shortcuts, and a full-reference copy action. -->
     <header class="docs-hero">
       <div class="docs-hero-content">
@@ -2487,6 +2487,13 @@ const Callout = defineComponent({
 </script>
 
 <style>
+/* One reading column for the whole page so a wide display does not leave the
+   content pinned to the left edge. */
+.docs-page {
+  width: 100%;
+  max-width: 1140px;
+  margin-inline: auto;
+}
 /* Unscoped because CodeBlock / TabbedCode / Callout and the four
    diagrams are render-fn components inside this SFC, and a scoped
    style's attribute selector never reaches nodes a render function
@@ -3071,7 +3078,7 @@ const Callout = defineComponent({
   font-size: 13px;
   line-height: 1.6;
   color: var(--color-foreground-muted);
-  max-width: 64ch;
+  text-wrap: pretty;
   margin: 0.35rem 0 0;
 }
 
