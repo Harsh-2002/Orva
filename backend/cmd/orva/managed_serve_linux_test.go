@@ -190,7 +190,11 @@ func TestManagedDaemonKernel(t *testing.T) {
 	client := &http.Client{Timeout: 250 * time.Millisecond}
 	awaitHTTP := func() {
 		t.Helper()
-		for until := time.Now().Add(35 * time.Second); time.Now().Before(until); {
+		wait := 8 * time.Second
+		if realRootfs != "" {
+			wait = 100 * time.Second
+		}
+		for until := time.Now().Add(wait); time.Now().Before(until); {
 			r, err := client.Get("http://" + addr + "/api/v1/auth/status")
 			if err == nil {
 				r.Body.Close()
@@ -345,6 +349,7 @@ func checkFreshManagedDeploy(t *testing.T, base string) {
 		req, err := http.NewRequestWithContext(t.Context(), method, base+path, bytes.NewReader(raw))
 		mustManagedBoot(t, err)
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", base)
 		res, err := client.Do(req)
 		mustManagedBoot(t, err)
 		defer res.Body.Close()
