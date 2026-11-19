@@ -11,6 +11,7 @@ const sections = [
   ['/api-keys', 'Keys'], ['/channels', 'Channels'], ['/firewall', 'Egress'],
   ['/ai', 'Chat'], ['/settings', 'Settings'], ['/docs', 'Docs'],
 ]
+const routes = ['/routes', 'Routes']
 const policy = ['/iam/policies', 'Policies']
 const mounted = []
 const originalWidth = window.innerWidth
@@ -22,7 +23,7 @@ afterEach(() => {
 async function make(path = '/') {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [...sections, policy].map(([url]) => ({ path: url, component: { render: () => null } })),
+    routes: [...sections, routes, policy].map(([url]) => ({ path: url, component: { render: () => null } })),
   })
   await router.push(path)
   await router.isReady()
@@ -44,12 +45,12 @@ describe('flat sidebar navigation', () => {
     expect(view.find('nav').classes()).toContain('min-h-0')
   })
 
-  it('places Policies after Functions only when managed access is available', async () => {
+  it('places Routes after Functions and Policies after Routes, only when managed access is available', async () => {
     const { view, iam } = await make()
     iam.available = true
     await flushPromises()
     expect(view.findAll('nav > a').map(link => [link.attributes('href'), link.text()]))
-      .toEqual([...sections.slice(0, 2), policy, ...sections.slice(2)])
+      .toEqual([...sections.slice(0, 2), routes, policy, ...sections.slice(2)])
   })
 
   it('preserves active routes and closes the mobile drawer when a section is chosen', async () => {

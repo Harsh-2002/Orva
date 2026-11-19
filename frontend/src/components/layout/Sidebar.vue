@@ -114,6 +114,7 @@ import {
   Webhook,
   ShieldCheck,
   ShieldHalf,
+  Route,
   Settings,
   LibraryBig,
   Menu,
@@ -133,6 +134,7 @@ const isActive = (path) => {
 const navItems = computed(() => [
   { path: '/',          label: 'Overview',  icon: Gauge },
   { path: '/functions', label: 'Functions', icon: Boxes },
+  ...(iam.available ? [{ path: '/routes', label: 'Routes', icon: Route }] : []),
   ...(iam.available ? [{ path: '/iam/policies', label: 'Policies', icon: ShieldCheck }] : []),
   { path: '/cron', label: 'Schedules', icon: CalendarClock },
   { path: '/jobs', label: 'Jobs', icon: ListChecks },
