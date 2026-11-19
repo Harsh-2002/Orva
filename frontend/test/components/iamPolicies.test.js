@@ -250,4 +250,55 @@ describe('pinned version prefill', () => {
     await flushPromises()
     expect(view.findAll('ul')[0].text()).not.toContain('Attached to')
   })
+
+  it('holds a reopened row at no count until a fresh matching read answers', async () => {
+    let answer
+    const get = vi.fn()
+      .mockImplementationOnce(async () => ({ ...detailResponse(), attachments: [{ owner_id: FN_A, version: '2', enabled: true }] }))
+      .mockImplementationOnce(() => new Promise((resolve) => { answer = resolve }))
+    const api = { ...listApi([{ id: 'p1', name: 'reader-node', latest_version: 2, revoked: false }]), get }
+    const view = mountView(IAMPolicies, { policyId: 'p1', api, functions: FUNCTIONS })
+    const row = () => view.findAll('ul')[0]
+    await flushPromises()
+    expect(row().text()).toContain('Attached to 1 function')
+
+    await view.setProps({ policyId: '' })
+    await flushPromises()
+    expect(row().text()).not.toContain('Attached to')
+
+    await view.setProps({ policyId: 'p1' })
+    await flushPromises()
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(row().text()).toContain('Version 2')
+    expect(row().text()).not.toMatch(/Attached to|Not attached/)
+
+    answer({ ...detailResponse(), attachments: [{ owner_id: FN_A, version: '2', enabled: true }, { owner_id: FN_B, version: '2', enabled: true }] })
+    await flushPromises()
+    expect(row().text()).toContain('Attached to 2 functions')
+  })
+
+  it('never labels another policy with a late count from the previous detail', async () => {
+    let late
+    const get = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
+      .mockImplementationOnce(async () => ({ ...detailResponse(), attachments: [] }))
+    const api = {
+      ...listApi([
+        { id: 'p1', name: 'reader-node', latest_version: 2, revoked: false },
+        { id: 'p2', name: 'writer-node', latest_version: 1, revoked: false },
+      ]),
+      get,
+    }
+    const view = mountView(IAMPolicies, { policyId: 'p1', api, functions: FUNCTIONS })
+    await flushPromises()
+    await view.setProps({ policyId: 'p2' })
+    await flushPromises()
+    const rows = () => view.findAll('ul')[0].findAll('li')
+    expect(rows()[1].text()).toContain('Not attached')
+
+    late({ ...detailResponse(), attachments: [{ owner_id: FN_A, version: '2', enabled: true }] })
+    await flushPromises()
+    expect(rows()[1].text()).toContain('Not attached')
+    expect(rows()[1].text()).not.toContain('Attached to')
+  })
 })

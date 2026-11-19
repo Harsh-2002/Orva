@@ -136,6 +136,10 @@ which violet is correct.
 
 ## Non-obvious
 
+- The policy list shows an attachment count only for the open policy after its
+  own fresh read. Typed Permissions URLs treat canonical UUID-shaped segments
+  as IDs; use Functions → Permissions for an exact link to a UUID-shaped name.
+
 - Cron descriptions are advisory: `cronDescription.js` spells out known aliases
   and exact whole-second `@every` intervals. Complex durations/time-zone prefixes
   retain literal copy pending server validation; the backend remains authoritative.

@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Button from '@/components/common/Button.vue'
 import ManagedPolicyDraft from '@/components/permissions/ManagedPolicyDraft.vue'
 import { rowAction } from '@/utils/rowNav'
@@ -99,13 +99,19 @@ const emit = defineEmits(['select'])
 const creating = ref(false)
 const targets = computed(() => props.functions.map((f) => ({ id: f.id, label: f.name, state: 'resolved' })))
 const list = useIAMResource(() => 'policies', (_, signal) => props.api.list(signal))
-// Only the open policy's count is live; the list itself carries no attachment data.
-const attachments = ref(new Map())
-function setAttachments(count) { attachments.value = new Map([[props.policyId, count]]) }
+// Only the open policy's count is live and verified; the list itself carries no
+// attachment data. Clear it on every switch so a reopened row cannot claim the
+// previous detail's count before its own read lands.
+const attachments = ref(null)
+watch(() => props.policyId, () => { attachments.value = null }, { flush: 'sync' })
+function setAttachments(next) {
+  if (!next || next.id !== props.policyId) return
+  attachments.value = Number.isInteger(next.count) ? { id: next.id, count: next.count } : null
+}
 function status(item) {
   if (!list.fresh.value) return 'Last known state, unverified'
   if (item.revoked) return 'Revoked permanently'
-  const count = item.id === props.policyId ? attachments.value.get(item.id) : undefined
+  const count = attachments.value?.id === item.id ? attachments.value.count : undefined
   if (count === undefined) return ''
   if (count === 0) return 'Not attached'
   return count === 1 ? 'Attached to 1 function' : `Attached to ${count} functions`

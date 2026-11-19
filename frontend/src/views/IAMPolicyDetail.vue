@@ -289,8 +289,15 @@ async function copyPolicyId() { copied.value = await copyText(props.policyId) }
 const attached = ref([])
 const attachHintId = useId()
 // The list rows have no attachment data of their own, so the detail reports its
-// verified count on every load for the selected policy's status.
-watch(() => state.data.value?.attachments.length, (count) => { if (Number.isInteger(count)) emit('attachments', count) }, { immediate: true })
+// verified count for the selected policy. The id travels with the count so a
+// late emission can never label another policy, and a stale/refreshing snapshot
+// clears the count instead of leaving an unverified one behind.
+const attachmentCount = computed(() => (
+  state.fresh.value && Number.isInteger(state.data.value?.attachments?.length)
+    ? state.data.value.attachments.length
+    : null
+))
+watch(attachmentCount, (count) => emit('attachments', { id: props.policyId, count }), { immediate: true })
 function startEdit() {
   if (changeReason.value) return
   editingRevision.value = state.data.value.policy.definition_revision

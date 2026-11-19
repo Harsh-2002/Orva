@@ -2148,6 +2148,12 @@ grants apply only once approved for the function's current deployment.
 Detaching removes one source; revoking disables a policy for every function it
 is attached to. Other sources may still grant the same access.
 
+In the dashboard, open a function's Permissions page from Functions →
+Permissions. A typed `/web/functions/<name>/permissions` URL resolves a name,
+but a segment that is itself a canonical UUID is treated as a function id first,
+so a function whose name is UUID-shaped is ambiguous in a typed URL.
+Functions → Permissions always addresses the exact id.
+
 The MCP and in-product Chat tools are:
 list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,
 get_iam_policy_impact, attach_iam_policy, detach_iam_policy, revoke_iam_policy,
