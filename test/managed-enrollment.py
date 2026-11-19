@@ -33,7 +33,17 @@ exports.handler = async (event) => {
 };
 """
 PYTHON = """
+from orva import OrvaError, kv
+
+
 def handler(event, context):
+    if event["path"] == "/probe":
+        try:
+            kv.put("enrollment-check", "legacy")
+            return {"statusCode": 200, "body": "kv-allowed"}
+        except OrvaError as error:
+            denied = error.status == 403 and "IAM_DENIED" in str(error)
+            return {"statusCode": 200, "body": "IAM_DENIED" if denied else "uncategorized"}
     return {"statusCode": 200, "body": "python-current"}
 """
 EMPTY = '{"schema_version":1,"allow":[],"inbound":[]}'
@@ -235,18 +245,20 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
             params["key"] = key
         return api("GET", "/api/v1/exposures?" + urlencode(params))
 
-    def approval():
-        s = api("GET", base + "/permissions")["host"]
+    def approval(fn):
+        s = api("GET", f"/api/v1/functions/{fn}/permissions")["host"]
         return {k: s[k] for k in ("revision", "current_artifact", "approved_artifact")}
 
     with (scratch / "portable-a.private.log").open("wb") as log:
         daemon = boot("managed", budget / "orva.daemon", log)
         try:
-            api("PUT", base + "/permissions", {"expected": approval(), "policy": {
-                "schema_version": 1, "allow": [{"actions": ["kv.put"],
-                    "resource": {"own_kv": {"key": "enrollment-check"}}, "context": "execution"}], "inbound": []}})
-            api("POST", base + "/permissions/review", {"expected": approval()})
-            assert request("GET", f"/fn/{node}/probe") == (200, b"kv-allowed")
+            for fn in owners.values():
+                perms = f"/api/v1/functions/{fn}/permissions"
+                api("PUT", perms, {"expected": approval(fn), "policy": {
+                    "schema_version": 1, "allow": [{"actions": ["kv.put"],
+                        "resource": {"own_kv": {"key": "enrollment-check"}}, "context": "execution"}], "inbound": []}})
+                api("POST", perms + "/review", {"expected": approval(fn)})
+                assert request("GET", f"/fn/{fn}/probe") == (200, b"kv-allowed")
             r = exposure("route", route)
             api("POST", "/api/v1/routes", {"path": route, "function_id": node, "methods": "GET",
                 "version": r["version"], "expected": r["expected"]})
@@ -288,7 +300,7 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
             try:
                 for lang, fn in owners.items():
                     assert request("GET", f"/fn/{fn}") == (200, f"{lang}-current".encode())
-                assert request("GET", f"/fn/{node}/probe") == (200, b"IAM_DENIED")
+                    assert request("GET", f"/fn/{fn}/probe") == (200, b"IAM_DENIED")
                 assert request("GET", route_invoke)[0] == 404
                 assert request("POST", webhook, body, sig_header)[0] == 404
             finally:
@@ -311,6 +323,18 @@ def portable(run, boot, stop, request, api, data, witness, budget, owners):
         assert db.execute("SELECT owner FROM workload_owner_binding").fetchone() == (manifest["prior_owner"],)
         assert db.execute("SELECT epoch FROM workload_recovery").fetchone() == (1,)
     print("A replay: same Owner and seals, same Node/Python responses, existing restore quarantine applied", flush=True)
+
+    with (scratch / "portable-b-review.private.log").open("wb") as log:
+        daemon = boot("managed", g / "orva.daemon", log, host_b)
+        try:
+            api("POST", base + "/permissions/review", {"expected": approval(node)})
+            assert request("GET", f"/fn/{node}/probe") == (200, b"kv-allowed")
+            assert request("GET", f"/fn/{owners['python']}/probe") == (200, b"IAM_DENIED")
+            assert request("GET", route_invoke)[0] == 404
+            assert request("POST", webhook, body, sig_header)[0] == 404
+        finally:
+            stop(daemon)
+    print("B review: explicit Node review restored only its grant and did not republish either exposure", flush=True)
 
 
 if __name__ == "__main__":
