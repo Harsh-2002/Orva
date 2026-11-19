@@ -55,6 +55,7 @@ type outputJob struct {
 	owner                              *outputState
 	stage                              *artifactfs.Staging
 	path, metadata, parent, generation string
+	source                             string
 	domain                             *workloadfence.Domain
 	proof                              *workloadfence.Proof
 	runtime                            *artifactfs.Lease
@@ -308,6 +309,12 @@ func (j *outputJob) releaseDomain(ctx context.Context) error {
 			return err
 		}
 		j.metadata = ""
+	}
+	if j.source != "" {
+		if err := os.Remove(j.source); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		j.source = ""
 	}
 	if j.runtime != nil {
 		j.runtime.Release()

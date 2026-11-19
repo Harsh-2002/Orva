@@ -131,6 +131,10 @@ func (g *GC) tick(ctx context.Context) {
 		}
 		return
 	}
+	if g.cacheOnly {
+		g.sweepBuildCaches(ctx, live)
+		return
+	}
 
 	// An empty function table is NOT evidence that every directory on disk is
 	// garbage — it is the signature of a lost, recreated, or older-restored

@@ -27,7 +27,7 @@ func outputPath(name string, max int) bool {
 
 // extract admits only bounded data files/directories, never archive links or author metadata authority.
 func (j *outputJob) extract(ctx context.Context, archive string) (string, error) {
-	if j.metadata == "" {
+	if j.owner.cfg.MetadataRoot == "" || j.source != "" {
 		return "", artifactfs.ErrInvalid
 	}
 	cfg := j.owner.cfg
@@ -42,10 +42,13 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 		return "", artifactfs.ErrCapacity
 	}
 	hash := sha256.New()
-	source, err := os.OpenFile(filepath.Join(j.metadata, artifactfs.BuildSourceName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	// A Domain verifies its own metadata namespace. Keep build input beside
+	// that namespace, never inside it or inside the jail's writable tree.
+	source, err := os.CreateTemp(cfg.MetadataRoot, "build-source-*.tar.gz")
 	if err != nil {
 		return "", err
 	}
+	j.source = source.Name()
 	defer source.Close()
 	if err := source.Chmod(0600); err != nil {
 		return "", err
@@ -198,7 +201,7 @@ func (j *outputJob) extract(ctx context.Context, archive string) (string, error)
 }
 
 func (j *outputJob) attachSource(ctx context.Context) error {
-	f, err := os.Open(filepath.Join(j.metadata, artifactfs.BuildSourceName))
+	f, err := os.Open(j.source)
 	if err != nil {
 		return err
 	}
