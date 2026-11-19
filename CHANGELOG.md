@@ -58,10 +58,14 @@ unreleased range, and the sections below as the record for everything before it.
 - `invoke_function` and channel tools now return an error when the invocation
   failed before any response was written, instead of an empty `200` result.
   This applies to the normal server too.
+- Managed REST now supports outbound webhook subscription and delivery
+  management. Test and retry queue delivery records; managed mode does not
+  send them. The MCP and Chat catalogs are unchanged.
 - Not yet on the managed composition: pool and firewall configuration, secrets,
-  KV, fixtures, webhooks, runtimes and syscalls, account password change, and the
-  OAuth authorization server. `GET /api/v1/system/storage` reports the plain data
-  directory only, not sealed artifact stores.
+  KV, fixtures, outbound webhook delivery, runtimes and syscalls, account
+  password change, and the OAuth authorization server.
+  `GET /api/v1/system/storage` reports the plain data directory only, not sealed
+  artifact stores.
 
 ### Upgrade notes
 

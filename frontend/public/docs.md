@@ -29,6 +29,8 @@
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
 > as an invoke-only catalog dispatched through the managed pool. See
 > `docs/API.md` "Managed operator surfaces".
+> Managed outbound webhook REST routes under `/api/v1/webhooks` require `read`
+> for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
@@ -818,9 +820,13 @@ curl -X DELETE {{ORIGIN}}/api/v1/functions/<function_id>/cron/<019df210-7b00-7e0
 ## Webhooks
 
 Operator-managed subscriptions for system events. Configure URLs from
-the Webhooks page; Orva delivers signed POSTs to them when matching
+the Webhooks page; the legacy server delivers signed POSTs when matching
 events fire (deployments, function lifecycle, cron failures, job
 outcomes). Subscriptions are global, not per-function.
+
+In managed mode, the REST routes manage subscriptions and delivery records.
+Test and retry queue deliveries only; managed mode does not run outbound event
+fanout or the delivery worker.
 
 **Headers:** `X-Orva-Event`, `X-Orva-Delivery-Id`,
 `X-Orva-Timestamp`, `X-Orva-Signature`.
