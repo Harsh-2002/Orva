@@ -155,6 +155,9 @@ func TestRedactResult(t *testing.T) {
 		"no paths":       {`{"secret":"x"}`, nil, `{"secret":"x"}`, false},
 		"large number":   {`{"n":12345678901234567890,"secret":"x"}`, []string{"secret"}, `{"n":12345678901234567890,"secret":"` + RedactedPlaceholder + `"}`, true},
 		"unparseable":    {`not json secret`, []string{"secret"}, `"` + RedactedPlaceholder + `"`, true},
+		"trailing data":  {`{"a":1} {"secret":"x"}`, []string{"secret"}, `"` + RedactedPlaceholder + `"`, true},
+		"trailing junk":  {`{"a":1} garbage`, []string{"secret"}, `"` + RedactedPlaceholder + `"`, true},
+		"empty":          {``, []string{"secret"}, `"` + RedactedPlaceholder + `"`, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, changed := redactResult(tc.in, tc.paths)

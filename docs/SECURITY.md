@@ -1028,9 +1028,14 @@ and a code-enforced `confirm=true` requirement on destructive tools.
 Tools that mint a one-time credential (`create_api_key`, `create_webhook`,
 `create_inbound_webhook`) declare the credential fields. The assistant shows the
 value only in that turn's live result; the stored tool call, the conversation
-message, exports and every later model request carry
-`[redacted: shown once to the operator]` instead. External MCP clients still
-receive the value once, as before.
+message and every later model request carry
+`[redacted: shown once to the operator]` instead. The Markdown export lists a
+tool's name and status only, never its result. In the browser the live value is
+held in tab memory (never `localStorage`/`sessionStorage`) and dropped on reload,
+conversation switch, leaving Chat or **Hide value**. Result fields that must be
+redacted are matched only when the whole result is one valid JSON value;
+otherwise the entire result is replaced. External MCP clients still receive the
+value once, as before.
 
 Conversations are a **shared operator space**: because the feature is
 single-operator and admin-only, all admin credentials see the same

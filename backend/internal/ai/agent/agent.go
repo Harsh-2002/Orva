@@ -603,11 +603,16 @@ func emptyToObj(s string) string {
 const RedactedPlaceholder = "[redacted: shown once to the operator]"
 
 // redactResult replaces each present sensitive path with the placeholder and
-// reports whether anything was replaced. A sensitive tool whose result cannot be
-// parsed fails closed: the whole result is replaced.
+// reports whether anything was replaced. A sensitive tool whose result is not
+// exactly one valid JSON value fails closed: the whole result is replaced.
 func redactResult(raw string, paths []string) (string, bool) {
 	if len(paths) == 0 {
 		return raw, false
+	}
+	// The whole result must be one valid JSON value: trailing bytes could hide a
+	// credential from the field walk below.
+	if !json.Valid([]byte(raw)) {
+		return mustJSON(RedactedPlaceholder), true
 	}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()

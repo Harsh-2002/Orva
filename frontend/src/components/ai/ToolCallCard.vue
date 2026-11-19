@@ -61,7 +61,15 @@
           data-testid="one-time-note"
           role="status"
         >
-          Copy this value now. It is shown only once and is not stored: after a reload or export it is replaced by a placeholder.
+          Copy this value now. It is shown only once and is not stored: after a reload it is replaced by a placeholder.
+          <Button
+            size="xs"
+            variant="ghost"
+            class="ml-1"
+            @click="$emit('dismiss-one-time', tool.id)"
+          >
+            Hide value
+          </Button>
         </p>
         <p
           v-else-if="redacted"
@@ -113,7 +121,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['approve', 'reject'])
+defineEmits(['approve', 'reject', 'dismiss-one-time'])
 
 const status = computed(() => props.tool.status)
 

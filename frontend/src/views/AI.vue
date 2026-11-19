@@ -80,6 +80,7 @@
           @delete="onDelete"
           @retry="store.retry"
           @dismiss="store.dismissError"
+          @dismiss-one-time="store.dismissOneTime"
         />
         <Composer
           :streaming="store.streaming"
@@ -94,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Drawer from '@/components/common/Drawer.vue'
@@ -171,4 +172,9 @@ function onKeydown(e) {
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+
+// Leaving the view (keep-alive deactivates rather than unmounts) drops any live
+// one-time credential; coming back shows the stored placeholder.
+onDeactivated(() => store.dismissOneTime())
+onUnmounted(() => store.dismissOneTime())
 </script>

@@ -2177,5 +2177,7 @@ READ `list_routes` (bounded, each row with decimal-string `version` and
 (the service still requires live ADMIN where grants, review or quarantine are
 involved). Deletes require `confirm:true`. Only create returns the signing
 secret, once. Through Chat that value appears only in the live result for the
-turn; stored history, exports and model context hold a placeholder. Chat pauses for approval on every mutating tool under `all_writes`
-and on the deletes under `destructive_only`. The legacy catalog is unchanged.
+turn; stored history and model context hold a placeholder, and the Markdown
+export omits tool results. Chat pauses for approval on every mutating tool under
+`all_writes` and on the deletes under `destructive_only`. The legacy catalog is
+unchanged.

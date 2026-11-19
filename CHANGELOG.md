@@ -18,8 +18,9 @@ unreleased range, and the sections below as the record for everything before it.
 
 - The AI assistant no longer stores one-time credentials it mints. API keys,
   outbound webhook secrets and inbound webhook secrets created through Chat
-  appear only in that turn's live result; history, exports and later model
-  requests show a placeholder. Copy the value before reloading. Existing
+  appear only in that turn's live result; stored history and later model
+  requests show a placeholder (the Markdown export never includes tool
+  results). Copy the value before reloading or leaving Chat. Existing
   conversations created before this change are not rewritten.
 - `orva serve` holds an exclusive data-directory lock. Legacy directories
   without a mode file still support group write access and symlinked directory
