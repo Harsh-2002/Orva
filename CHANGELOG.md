@@ -65,15 +65,19 @@ unreleased range, and the sections below as the record for everything before it.
   dispatches through managed admission. Admission is not approval: an installed
   but unreviewed function still runs its handler (protected SDK operations stay
   denied until review), so bundle only functions agents should be able to run.
-  The managed MCP and Chat catalog grows from 47/13 to 75/25 tools
+  The managed MCP and Chat catalog grows from 47/13 to 82/25 tools
   (all-permissions / read-only key); it adds `replay_execution`,
   `list_activity` and read-only `list_channels` and `get_channel`, and now
   includes the API-key and operator KV tools. Managed KV tools recheck their
   required read or write tier on every call. The normal catalog is unchanged
   (73/28).
-- Managed MCP and Chat can list, save and delete saved request fixtures. Each
-  call rechecks live `read` or `write` permission. Running a fixture through
-  `test_function_with_fixture` remains unavailable in managed mode.
+- Managed MCP and Chat expose six sandbox firewall and DNS tools. Each call
+  rechecks live `admin` permission. DNS edits validate the full request before
+  replacing the settings together, and share validation with REST.
+- Managed MCP and Chat can list, save, delete, and run saved request fixtures.
+  Each call rechecks its live permission tier. `test_function_with_fixture`
+  requires `invoke` and dispatches only the installed managed function. It
+  does not approve permissions or change the saved preset.
 - Managed Chat uses only the managed tool catalog. Model discovery and Chat
   turns do not contact providers until the instance has a compiled egress
   policy. Settings and conversation history remain available.
@@ -86,11 +90,15 @@ unreleased range, and the sections below as the record for everything before it.
 - Managed REST now supports outbound webhook subscription and delivery
   management. Test and retry queue delivery records; managed mode does not
   send them. The MCP and Chat catalogs are unchanged.
+- Managed REST and `orva functions purge-cache` can clear a function's
+  dependency cache without touching its installed deployment.
+- The managed dashboard can change the current account password with a
+  same-origin session. The calling session stays signed in.
 - `orva pool get/set` and the corresponding REST routes work in managed
   mode. Admin writes rotate active workers without reinstalling the function,
   changing its permissions, or giving running requests extra concurrency.
-- Not yet on the managed composition: secrets,
-  fixture execution, outbound webhook delivery, account password change, and
+- Not yet on the managed composition: legacy secret routes, outbound webhook
+  delivery, and
   the OAuth authorization server. `GET /api/v1/system/storage` reports the plain
   data directory only, not sealed artifact stores.
 

@@ -62,7 +62,7 @@ type managedRouteDeps struct {
 	// Managed authentication rereads sessions live; nil is a no-op.
 	InvalidateSession func(token string)
 	// Firewall is the process's egress policy manager — the same instance the
-	// managed builder and Chat guard use. nil leaves the firewall routes
+	// managed builder and Chat guard use. nil leaves the firewall routes and tools
 	// unmounted rather than reporting an empty, unenforced policy.
 	Firewall *firewall.Manager
 
@@ -143,13 +143,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 			mux.Handle("/webhook/", &handlers.InboundTriggerHandler{DB: db, Registry: reg, Pool: manager,
 				Metrics: invoke.Metrics, SDKAuth: invoke.Proxy.SDKAuth, Managed: true})
 		}
-		webAuth := &handlers.AuthHandler{DB: db}
-		mux.HandleFunc("GET /api/v1/auth/status", webAuth.Status)
-		mux.HandleFunc("POST /api/v1/auth/onboard", webAuth.Onboard)
-		mux.HandleFunc("POST /api/v1/auth/login", webAuth.Login)
-		mux.HandleFunc("POST /api/v1/auth/logout", webAuth.Logout)
-		mux.HandleFunc("GET /api/v1/auth/me", webAuth.Me)
-		mux.HandleFunc("POST /api/v1/auth/refresh", webAuth.Refresh)
+		mountManagedWebAuth(mux, db, ops)
 		mux.Handle("GET /web/", uiHandler())
 		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
 			respond.JSON(w, 200, map[string]bool{"managed": true})
@@ -168,6 +162,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy-inline", managedWrite, deploy.DeployInline)
+		gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}/build-cache", managedWrite, purgeManagedBuildCache(db, reg, manager, dataDir))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/rollback", managedWrite, deploy.Rollback)
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}
@@ -189,11 +184,12 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		tools := mcp.Deps{ManagedServer: true, DB: db, Registry: reg, IAM: policy, DataDir: dataDir, Configuration: configuration,
 			DeployIAM: publication, RequireDeployIAM: true, WorkloadLifecycle: publication,
 			AsyncEnabled: async != nil, AsyncIAM: async, CronEnabled: async != nil, CronIAM: async, History: history, Triggers: triggers,
-			InvalidateKey: ops.invalidateKey()}
+			Firewall: ops.Firewall, InvalidateKey: ops.invalidateKey()}
 		tools.PoolMgr, tools.NsjailBin, tools.Version = manager, ops.NsjailBin, version.Version
 		if invoke != nil {
 			// Channel tokens invoke only through this managed proxy and pool.
 			tools.Proxy, tools.Metrics = invoke.Proxy, invoke.Metrics
+			tools.ManagedAuthority = authority
 			tools.ReplayExecution = managedReplayHandler(db, reg, manager, invoke, ops).Replay
 		}
 		mux.Handle("/mcp", mcp.NewHandler(tools))

@@ -141,6 +141,11 @@ func TestManagedServingLive(t *testing.T) {
 		}
 		return b
 	}
+	fixtureRan := false
+	t.Run("fixture-invoke", func(t *testing.T) {
+		fixtureRan = true
+		managedFixtureInvoke(t, db, call)
+	})
 	egressRan := false
 	t.Run("egress-rotation", func(t *testing.T) {
 		egressRan = true
@@ -224,10 +229,23 @@ func TestManagedServingLive(t *testing.T) {
 				nodeRan = true
 			}
 			managedServeLifecycle(t, db, call, lang)
+			t.Run("build-cache", func(t *testing.T) {
+				fn, err := db.GetFunctionByName("managed-" + lang)
+				managedMust(t, err)
+				cache, err := builder.BuildCacheDir(managedDir, fn.ID)
+				managedMust(t, err)
+				managedMust(t, os.MkdirAll(cache, 0700))
+				managedMust(t, os.WriteFile(filepath.Join(cache, "fixture"), []byte("cache"), 0600))
+				call(t, http.MethodDelete, "/api/v1/functions/"+fn.ID+"/build-cache", nil, 200)
+				if _, err := os.Stat(cache); !os.IsNotExist(err) {
+					t.Fatalf("dependency cache remains: %v", err)
+				}
+				call(t, http.MethodGet, "/fn/"+fn.ID, nil, 200)
+			})
 		})
 	}
-	// An isolated egress run does not create the Node fixture used below.
-	if egressRan && !nodeRan {
+	// The standalone journeys do not create the Node owner used below.
+	if (egressRan || fixtureRan) && !nodeRan {
 		return
 	}
 	node, err := db.GetFunctionByName("managed-node")

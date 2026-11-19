@@ -61,7 +61,11 @@
         On a managed server, each function can only use what its permissions
         allow. Grant access inline on the function's Permissions page, or attach
         a reusable policy from Policies. Editing a policy creates a new version;
-        attached functions keep theirs until you roll it out.
+        attached functions keep theirs until you roll it out. Open Permissions
+        from Functions → Permissions; a typed
+        <code class="doc-chip">/web/functions/&lt;name&gt;/permissions</code> URL
+        resolves a name, but a UUID-shaped segment is treated as a function id
+        first, so a UUID-shaped function name is ambiguous there.
       </p>
     </section>
 
@@ -258,9 +262,9 @@
         Managed MCP and Chat also offer <code class="doc-chip">list_fixtures</code>
         (<code class="doc-chip">read</code>), <code class="doc-chip">save_fixture</code>
         and <code class="doc-chip">delete_fixture</code> (both <code class="doc-chip">write</code>).
-        Each tool rechecks the live credential and required permission. These tools
-        only manage stored presets; <code class="doc-chip">test_function_with_fixture</code>
-        is not available on the managed catalog.
+        Each tool rechecks its required permission. Use
+        <code class="doc-chip">test_function_with_fixture</code> (<code class="doc-chip">invoke</code>)
+        to run a preset against an installed managed function without changing the preset.
       </p>
     </section>
 
@@ -781,7 +785,7 @@
         <code class="doc-chip">cacheScope: "private"</code> because the tool
         list depends on the caller. On a standard server, a full-permission
         key lists 73 tools and a read-only key lists 28. Channel tokens list
-        only their bundled functions. The managed server lists 75 and 25
+        only their bundled functions. The managed server lists 82 and 25
         tools respectively and dispatches channel calls through the managed pool.
         Use <code class="doc-chip">tools/list</code> for your exact count.
         <code class="doc-chip">ttlMs</code> is

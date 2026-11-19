@@ -23,7 +23,7 @@ on this composition.
 - Use MCP `tools/list` to see the tools available to the current credential.
   The normal server exposes 73 tools to a key with all four permissions and
   28 to a read-only key. With the managed composition above, those counts are
-  75 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
+  82 and 25 respectively. Channel credentials are accepted at `/mcp` and expose
   only their bundled functions as invoke-only tools, dispatched through the
   managed pool (see "Managed channels").
 - A configuration write atomically records the same sealed pair against the
@@ -51,6 +51,9 @@ credential gets `401`; keys are reread on every request, so a revoked or
 expired key stops at once. Services that require stricter authority at commit
 (deployment publication, creation, deletion, jobs, cron, IAM, history) still do.
 Browser sessions hold every tier but must prove same-origin for mutations.
+Managed MCP and Chat use the same sandbox egress manager as these routes.
+Firewall and DNS tools require live admin authority. A DNS update validates
+and replaces the complete settings together.
 
 | Surface | Routes | Tier |
 | --- | --- | --- |
@@ -63,6 +66,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
 | Pool tuning | `GET /api/v1/pool/config` | read |
 | | `PUT/POST /api/v1/pool/config` | admin, rechecked at commit |
+| Dependency cache | `DELETE /api/v1/functions/{fn_id}/build-cache` | write, rechecked after waiting for the build lock |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
 | | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |
@@ -71,6 +75,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/oauth/connected-apps/{id}`, `DELETE /api/v1/oauth/clients/{client_id}` | write, session cookie |
 | Sessions | `GET /api/v1/auth/sessions` | read, session cookie |
 | | `DELETE /api/v1/auth/sessions/{prefix}` | write, session cookie |
+| | `POST /api/v1/auth/change-password` | write, same-origin session cookie |
 | Channels | `GET/POST /api/v1/channels`, `GET/PATCH/DELETE /api/v1/channels/{id}`, `PUT .../{id}/functions`, `POST .../{id}/rotate` | admin |
 | Outbound webhooks | `GET /api/v1/webhooks`, `GET .../{id}`, `GET .../{id}/deliveries` | read |
 | | `POST /api/v1/webhooks`, `PUT/DELETE .../{id}`, `POST .../{id}/test`, `POST .../deliveries/{id}/retry` | write |
@@ -349,6 +354,10 @@ Invalidates the session.
 ### Account and session management
 
 - `POST /api/v1/auth/change-password` — change the current user's password.
+  On a managed server use a current browser session and same-origin proof;
+  an API key alone cannot change a password. The caller stays signed in and
+  other sessions are revoked. If revocation fails after the password write,
+  the response includes a warning.
 - `GET /api/v1/auth/sessions` — list active login sessions.
 - `DELETE /api/v1/auth/sessions/{prefix}` — revoke a session by token prefix.
 - `GET /api/v1/oauth/connected-apps` — list authorized OAuth clients.
@@ -563,6 +572,9 @@ builds a new version re-downloads its dependencies from scratch; a redeploy of
 identical source is served from the existing version directory and is unaffected.
 Use when a cached dependency is suspect; it never touches deployed versions or
 the running function.
+On managed servers, use a function name or exact UUIDv7. UUID-shaped segments
+are always interpreted as IDs. A deleting function is unavailable. Purging an
+already empty cache succeeds.
 
 ### `GET /api/v1/functions/{id}/diff?from=<dep_id>&to=<dep_id>&format=json|unified`
 Compares the handler source + dependency manifest between two past
@@ -731,8 +743,11 @@ function name or UUID for `{id}`. `GET` requires `read`; `POST`, `PUT`, and
 invoking the function. Managed MCP and Chat share `list_fixtures` (`read`),
 `save_fixture` and `delete_fixture` (both `write`). Each tool rechecks the
 operator's live credential and required tier before accessing stored presets,
-including for inactive functions. `test_function_with_fixture` is not available
-in managed MCP or Chat.
+including for inactive functions. `test_function_with_fixture` (`invoke`) is
+available in managed MCP and Chat for installed functions. It uses managed
+admission and applies overrides only to that invocation. The dashboard loads a
+fixture and runs it via the ordinary `/fn/{id}` path; there is no fixture-run
+REST route.
 
 KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
 JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are
