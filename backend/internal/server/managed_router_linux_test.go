@@ -13,10 +13,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Harsh-2002/Orva/backend/internal/builder"
 	"github.com/Harsh-2002/Orva/backend/internal/database"
 	"github.com/Harsh-2002/Orva/backend/internal/pool"
 	"github.com/Harsh-2002/Orva/backend/internal/registry"
 	"github.com/Harsh-2002/Orva/backend/internal/sandbox"
+	"github.com/Harsh-2002/Orva/backend/internal/workloadconfig"
 	"github.com/Harsh-2002/Orva/backend/internal/workloadiam"
 	"github.com/Harsh-2002/Orva/internal/ids"
 )
@@ -77,6 +79,83 @@ func TestManagedRouterPolicyAndDefaultDeny(t *testing.T) {
 	rec = call(http.MethodPost, "/fn/"+owner+"/nested/path", "", http.StatusServiceUnavailable)
 	if rec.Header().Get("X-Orva-Execution-ID") == "" || !strings.Contains(rec.Body.String(), pool.ErrNoFunction.Error()) {
 		t.Fatalf("direct invocation did not reach the managed pool's missing-Factory guard: %s", rec.Body)
+	}
+}
+
+func TestManagedRouterReadsSecretNamesButNeverWritesThem(t *testing.T) {
+	db, err := database.New(filepath.Join(t.TempDir(), "managed.db"))
+	managedMust(t, err)
+	t.Cleanup(func() { managedMust(t, db.Close()) })
+	managedMust(t, db.Migrate())
+	owner := ids.New()
+	managedMust(t, db.InsertFunction(&database.Function{ID: owner, Name: "managed", Runtime: "node", Status: "active", AuthMode: "none"}))
+	_, err = db.ApplyRecoveryForFixture(t.Context(), "")
+	managedMust(t, err)
+	record, err := db.GetIAMPolicy(t.Context(), owner)
+	managedMust(t, err)
+	evaluator, err := record.AdmissionEvaluator()
+	managedMust(t, err)
+	authority, err := workloadiam.NewAuthority(32, []*workloadiam.Evaluator{evaluator})
+	managedMust(t, err)
+	reg := registry.New(db)
+	runtime := newManagedRuntime(db, reg, authority, nil, pool.SandboxTemplate{DataDir: t.TempDir()}, sandbox.NewLimiter(1))
+	t.Cleanup(func() { managedMust(t, runtime.pool.Shutdown(context.Background())) })
+	ops := runtime.routeDeps("/usr/local/bin/nsjail")
+	recorded := map[string]managedTier{}
+	ops.recordRoute = func(pattern string, tier managedTier) { recorded[pattern] = tier }
+	// The editor's deploy and configuration routes need both services; the
+	// read path below must live beside them, not behind a legacy fallback.
+	router, err := managedRoutesWithAsync(db, reg, authority, runtime.pool, new(workloadconfig.Service), new(builder.PublicationQueue),
+		t.TempDir(), runtime.invoke, nil, nil, nil, ops)
+	managedMust(t, err)
+
+	managedMust(t, db.UpsertSecret(owner, "API_TOKEN", "ciphertext-not-a-value"))
+	managedMust(t, db.UpsertSecret(owner, "ANOTHER", "ciphertext-not-a-value"))
+	const key = "orva_managed_secrets"
+	hash := sha256.Sum256([]byte(key))
+	managedMust(t, db.InsertAPIKey(&database.APIKey{ID: ids.New(), Name: "fixture", Prefix: "fixture",
+		KeyHash: hex.EncodeToString(hash[:]), Permissions: `["read"]`}))
+	call := func(method, path, bearer string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
+		if bearer != "" {
+			req.Header.Set("X-Orva-API-Key", bearer)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, rec.Code, want, rec.Body.String())
+		}
+		return rec
+	}
+	base := "/api/v1/functions/" + owner
+	call(http.MethodGet, base+"/secrets", "", http.StatusUnauthorized)
+	if got := recorded["GET /api/v1/functions/{fn_id}/secrets"]; got != managedRead {
+		t.Fatalf("secret name read is gated at %q, want read", got)
+	}
+	var names struct {
+		Secrets []string `json:"secrets"`
+	}
+	rec := call(http.MethodGet, base+"/secrets", key, http.StatusOK)
+	managedMust(t, json.Unmarshal(rec.Body.Bytes(), &names))
+	if len(names.Secrets) != 2 || names.Secrets[0] != "ANOTHER" || names.Secrets[1] != "API_TOKEN" {
+		t.Fatalf("unexpected managed secret names: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "ciphertext-not-a-value") {
+		t.Fatalf("the managed secret read leaked values: %s", rec.Body.String())
+	}
+	call(http.MethodGet, "/api/v1/functions/"+ids.New()+"/secrets", key, http.StatusNotFound)
+	// Writes stay on the CAS-checked configuration route: POST on this path is
+	// method-rejected (405) and the delete path has no managed route at all.
+	call(http.MethodPost, base+"/secrets", key, http.StatusMethodNotAllowed)
+	call(http.MethodDelete, base+"/secrets/API_TOKEN", key, http.StatusNotFound)
+	var after struct {
+		Secrets []string `json:"secrets"`
+	}
+	rec = call(http.MethodGet, base+"/secrets", key, http.StatusOK)
+	managedMust(t, json.Unmarshal(rec.Body.Bytes(), &after))
+	if len(after.Secrets) != 2 {
+		t.Fatalf("a rejected write changed the secret set: %s", rec.Body.String())
 	}
 }
 
