@@ -6,7 +6,7 @@
 # delegated cgroup, an installed nsjail and a Node runtime that can build.
 #
 # Usage: test/managed-enroll-kill.sh OUT SRC
-#   OUT  existing directory for the test binary, logs and the VM transcript
+#   OUT  existing directory under which a fresh evidence directory is created
 #   SRC  worktree to build from; must hold backend/internal/server/ui_dist
 #        (run `make embed` there first on a fresh clone)
 #
@@ -61,9 +61,10 @@ libs=${ORVA_ENROLL_NSJAIL_LIBS:-}
 
 image=${ORVA_ENROLL_VM_IMAGE:-ubuntu:26.04}
 budget=${ORVA_ENROLL_BUDGET:-/sys/fs/cgroup/orva-enroll-kill}
+out=$(mktemp -d "$(cd "$out" && pwd -P)/run.XXXXXX")
+printf 'EVIDENCE=%s\n' "$out"
 vm="orva-enroll-kill-$$"
 owned=0
-test_rc=1
 
 cleanup() {
 	local rc=$?
@@ -135,27 +136,36 @@ msb exec "$vm" -- /bin/bash -euc '
 	mountpoint -q /sys/fs/cgroup || mount -t cgroup2 none /sys/fs/cgroup
 	echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
 	mkdir -p "$1"
-	set +e
+	rc=0
 	env -i PATH=/usr/bin:/bin HOME=/scratch LD_LIBRARY_PATH=/scratch/libs \
 		ORVA_OWNER_KERNEL_TEST=disposable-vm ORVA_MANAGED_BOOT_BUDGET="$1" \
 		ORVA_ENROLL_VM_ROOTFS=/scratch/rootfs/node \
 		./orva-cmd.test -test.v -test.timeout=12m \
-		-test.run "^TestManagedEnrollProcessKill$" >kill.log 2>&1
-	rc=$?
-	set -e
-	echo "$rc" >kill.rc
-	grep -E "^(--- (PASS|FAIL|SKIP)|    --- (PASS|FAIL|SKIP)|PASS$|FAIL$)|_test.go:[0-9]+:" \
-		kill.log | cut -c1-300 | head -60
-	grep -iE "level=(ERROR|WARN)|error:|refus|denied|unsupported" kill.log |
-		grep -v "^=== " | cut -c1-400 | sort | uniq -c | sort -rn | head -20
-	exit "$rc"
-' bash "$budget" >"$out/vm.log" 2>&1 || true
+		-test.run "^TestManagedEnrollProcessKill$" >kill.log 2>&1 || rc=$?
+	printf "%s\n" "$rc" >kill.rc
+' bash "$budget" >"$out/vm.log" 2>&1
 
-msb copy "$vm":/scratch/kill.log "$out/kill.log" >/dev/null 2>&1 || true
-msb copy "$vm":/scratch/kill.rc "$out/kill.rc" >/dev/null 2>&1 || true
-if [ -s "$out/kill.rc" ]; then
-	test_rc=$(tr -d '[:space:]' <"$out/kill.rc")
-fi
-cat "$out/vm.log"
+msb copy "$vm":/scratch/kill.log "$out/kill.log"
+msb copy "$vm":/scratch/kill.rc "$out/kill.rc"
+read -r test_rc <"$out/kill.rc"
 echo "TEST-RC=$test_rc"
-exit "$test_rc"
+awk '/^[[:space:]]*--- (PASS|FAIL|SKIP):/ || /^(PASS|FAIL)$/' "$out/kill.log"
+if [[ "$test_rc" != 0 ]] || ! awk '
+	BEGIN {
+		n = split("intent owner_provisioned runtime_sealed database_committed code_sealed complete", names)
+		for (i = 1; i <= n; i++) expected["TestManagedEnrollProcessKill/" names[i]] = 1
+	}
+	/^[[:space:]]*--- (FAIL|SKIP):/ || /^FAIL$/ { invalid = 1 }
+	$1 == "---" && $2 == "PASS:" {
+		if ($3 == "TestManagedEnrollProcessKill") parent++
+		else if (!($3 in expected) || ++seen[$3] != 1) invalid = 1
+	}
+	/^PASS$/ { passed++ }
+	END {
+		for (name in expected) if (seen[name] != 1) invalid = 1
+		exit (invalid || parent != 1 || passed != 1)
+	}
+' "$out/kill.log"; then
+	echo "Enrollment gate requires all six named cases to pass without skips; see $out/kill.log" >&2
+	exit 1
+fi

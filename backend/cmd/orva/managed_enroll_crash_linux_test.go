@@ -207,14 +207,19 @@ func enrollmentKernelBudget(t *testing.T) string {
 // removeCgroupTree removes a cgroup and its descendants bottom-up; cgroupfs
 // only accepts rmdir on empty, process-free directories.
 func removeCgroupTree(t *testing.T, dir string) {
-	entries, _ := os.ReadDir(dir)
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Errorf("read test cgroup %s: %v", dir, err)
+		return
+	}
 	for _, e := range entries {
 		if e.IsDir() {
 			removeCgroupTree(t, filepath.Join(dir, e.Name()))
 		}
 	}
 	if err := os.Remove(dir); err != nil {
-		t.Logf("cgroup %s not removed: %v", dir, err)
+		t.Errorf("cgroup %s not removed: %v", dir, err)
 	}
 }
 
