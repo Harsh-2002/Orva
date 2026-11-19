@@ -6,8 +6,8 @@
       class="rounded-lg border border-border bg-surface p-4 text-sm text-foreground-muted"
       role="status"
     >
-      Managed inbound webhooks are unavailable: this server does not report the
-      managed IAM capability.
+      Managed inbound webhooks are unavailable: the server does not report
+      managed IAM.
     </p>
     <template v-else>
       <p
@@ -30,7 +30,7 @@
         role="status"
       >
         No managed function named "{{ name }}" exists. Open inbound webhooks from
-        the function's own page.
+        the function page.
       </p>
       <ManagedInboundWebhooksPanel
         v-else

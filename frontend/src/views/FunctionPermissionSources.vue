@@ -4,7 +4,7 @@
       <h1 class="text-xl font-semibold tracking-tight text-foreground-strong">
         Permissions
       </h1>
-      <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+      <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
         {{ source ? `Platform access for ${source.function.name}.` : 'Platform access for this function.' }}
       </p>
     </header>
@@ -21,15 +21,15 @@
       <h2 class="text-lg font-semibold text-foreground-strong">
         Permission sources
       </h2>
-      <p class="max-w-prose text-sm leading-body text-foreground-muted">
-        Removing one source leaves any overlapping grants in place.
+      <p class="measure text-sm leading-body text-foreground-muted">
+        Removing a source keeps overlapping grants.
       </p>
       <p
         v-if="unconfirmed"
         role="status"
         class="text-sm text-warning-fg"
       >
-        Stale source snapshot. Every source and approval below is last known stored data, not currently verified.
+        Stale source snapshot. Sources and approvals are unverified.
       </p>
       <Button
         variant="secondary"
@@ -44,27 +44,27 @@
             Inline source
           </h3>
           <p class="text-xs text-foreground-muted">
-            Independent of attached policies. Edit only this source below.
+            Edited in the guided editor below.
           </p>
           <p
             v-if="!source.inline_policy.allow.length && !source.inline_policy.inbound.length"
             class="text-sm text-foreground"
           >
-            No inline grants. Attached policy sources may still grant actions or accept callers.
+            No inline grants.
           </p>
           <ul class="space-y-2 text-sm">
             <li
               v-for="(statement, i) in source.inline_policy.allow"
               :key="i"
             >
-              Inline source allowance: {{ statementSummary(statement) }}
+              Inline allowance: {{ statementSummary(statement) }}
             </li>
             <li
               v-for="caller in source.inline_policy.inbound"
               :key="caller.caller_id"
               class="break-all"
             >
-              Inline source caller: {{ caller.caller_id }} ({{ caller.triggers.join(', ') }}).
+              Inline caller: {{ caller.caller_id }} ({{ caller.triggers.join(', ') }}).
             </li>
           </ul>
         </li>
@@ -92,8 +92,7 @@
             </Button>
           </div>
           <p class="text-xs text-foreground-muted">
-            This pinned source contributes only while enabled, non-revoked and covered by current approval.
-            Other sources may grant the same access.
+            Counts only while enabled, not revoked and approved.
           </p>
           <ul class="space-y-2 text-sm">
             <li
@@ -110,7 +109,7 @@
               Source caller: {{ caller.caller_id }} ({{ caller.triggers.join(', ') }}).
             </li>
             <li v-if="!a.policy.allow.length && !a.policy.inbound.length">
-              No grants in this pinned source.
+              No grants.
             </li>
           </ul>
         </li>
@@ -153,8 +152,7 @@
           Effective access after detaching {{ detach.name }}
         </h3>
         <p class="text-sm text-foreground-muted">
-          Only {{ detach.name }} is removed. Remaining inline or attached sources keep their contributions.
-          This is a stored-union preview, not new approval.
+          Only {{ detach.name }} is removed. Other sources keep their grants. Preview only, not approval.
         </p>
         <StatementList
           :function-id="functionId"
@@ -187,7 +185,7 @@
         <pre class="mt-3 overflow-x-auto text-xs">{{ JSON.stringify(source.effective_policy, null, 2) }}</pre>
       </details>
       <p class="border-t border-border pt-4 text-sm text-foreground-muted">
-        The guided editor below changes only inline permissions. Attached policies remain separate.
+        The editor below changes inline permissions only.
       </p>
     </section>
     <FunctionPermissions
@@ -255,17 +253,17 @@ const unconfirmed = computed(() => actions.fresh.value ? '' : 'stale')
 const inlineUnconfirmed = computed(() => unconfirmed.value
   || (controller.snapshot.value?.host.revision !== source.value?.host.revision ? 'stale' : ''))
 const inlineReadOnlyReason = computed(() => {
-  if (!actions.fresh.value) return 'Current authority is unverified. Refresh effective access before saving or reviewing.'
-  if (!source.value?.host.can_manage) return 'Current operator authority is read only. Inline changes cannot be saved.'
-  if (inlineUnconfirmed.value) return 'The inline baseline is older than the effective snapshot. Explicitly refresh and reload or discard the draft before saving.'
+  if (!actions.fresh.value) return 'Authority unverified. Refresh before saving or reviewing.'
+  if (!source.value?.host.can_manage) return 'Read only. Inline changes cannot be saved.'
+  if (inlineUnconfirmed.value) return 'Inline baseline is out of date. Refresh, then reload or discard the draft.'
   return ''
 })
 const changeReason = computed(() => {
   if (!source.value?.host.can_manage) return 'Read only. An administrator must change these sources.'
-  if (controller.saving.value || actions.busy.value) return 'A permissions operation is in progress. Wait before changing sources.'
-  if (controller.loading.value || actions.loading.value) return 'Refreshing permissions. Wait for the current revision.'
-  if (!actions.fresh.value) return 'Current source authority is unverified. Refresh effective access before changing sources.'
-  if (controller.loadError.value || controller.saveError.value || actions.error.value) return 'Refresh permissions and review the current revision before changing sources.'
+  if (controller.saving.value || actions.busy.value) return 'An operation is in progress. Wait before changing sources.'
+  if (controller.loading.value || actions.loading.value) return 'Refreshing. Wait for the current revision.'
+  if (!actions.fresh.value) return 'Authority unverified. Refresh before changing sources.'
+  if (controller.loadError.value || controller.saveError.value || actions.error.value) return 'Refresh and review the current revision before changing sources.'
   return ''
 })
 watch(source, () => { detach.value = null })

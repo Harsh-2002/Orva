@@ -5,7 +5,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           API keys
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Tokens for REST and MCP clients. Secrets are shown once.
         </p>
       </div>

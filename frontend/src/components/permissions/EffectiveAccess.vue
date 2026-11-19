@@ -9,7 +9,7 @@
       </h2>
       <p
         role="status"
-        class="max-w-prose text-sm text-foreground"
+        class="measure text-sm text-foreground"
       >
         {{ stateText }}
       </p>
@@ -70,7 +70,7 @@
         </ul>
       </section>
     </template>
-    <details class="max-w-prose text-xs text-foreground-muted">
+    <details class="measure text-xs text-foreground-muted">
       <summary class="cursor-pointer text-link">
         How access is checked
       </summary>

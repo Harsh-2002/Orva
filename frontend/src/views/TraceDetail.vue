@@ -15,7 +15,7 @@
         <h1 class="text-xl font-semibold text-foreground-strong tracking-tight">
           Trace diagnostics
         </h1>
-        <p class="text-sm text-foreground-muted mt-1.5 max-w-prose leading-body">
+        <p class="text-sm text-foreground-muted mt-1.5 measure leading-body">
           Follow work across functions without leaving the trace.
         </p>
       </div>

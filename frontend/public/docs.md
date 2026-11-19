@@ -2127,16 +2127,17 @@ distros do not need Debian-compatible protobuf or libnl shared-library ABIs.
 orva completion bash | sudo tee /etc/bash_completion.d/orva
 # or zsh / fish / powershell
 ```
-# Staged named Function IAM management (not production-activated)
+# Named Function IAM policies (managed mode)
 
-Explicit scratch hosts can expose source-aware named policies through the shared
-management service. Create/update produces immutable versions; attachment pins a
-specific version per function. New versions never auto-propagate. Effective
-access unions separate inline and enabled managed sources. Inline editing never
-edits the union. Detach removes one contribution; terminal global revoke disables
-only that policy's complete attachment set. Overlapping grants may remain.
+On a managed server, a reusable policy is created once and attached to
+functions. Each attachment pins one version; editing a policy creates a new
+version, and attached functions keep theirs until you roll it out. A function's
+stored policy combines its inline grants and its enabled attached policies;
+grants apply only once approved for the function's current deployment.
+Detaching removes one source; revoking disables a policy for every function it
+is attached to. Other sources may still grant the same access.
 
-The optional shared external-MCP/in-product-AI family is:
+The MCP and in-product Chat tools are:
 list_iam_policies, get_iam_policy, create_iam_policy, update_iam_policy,
 get_iam_policy_impact, attach_iam_policy, detach_iam_policy, revoke_iam_policy,
 delete_iam_policy, get_function_permissions, set_function_permissions and
@@ -2154,9 +2155,7 @@ detach/revoke/delete and iam permissions get/put/review. Mutations require
 confirmation or --yes and confirm:true in the body. Data remains JSON stdout.
 Never invent a function UUID for policy authoring or silently widen resources.
 
-Normal production routes, tool dependencies and IAM boot schemas remain off.
-The precise scratch HTTP/CLI/MCP contract is docs/IAM_MANAGEMENT.md in the source
-repository. Async, boot, restore and deletion lifecycle qualification is separate.
+Servers that are not in managed mode do not offer these routes or tools.
 # Staged exposure management (internal candidate)
 
 Optional `workloadtrigger` handlers and MCP/shared-AI dependencies delegate

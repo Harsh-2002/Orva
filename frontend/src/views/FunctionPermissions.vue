@@ -9,15 +9,15 @@
         >
           {{ inlineOnly ? 'Inline permissions' : 'Permissions' }}
         </component>
-        <p class="mt-1.5 max-w-prose text-sm leading-body text-foreground-muted">
+        <p class="mt-1.5 measure text-sm leading-body text-foreground-muted">
           <template v-if="inlineOnly">
-            The independent inline source for
+            Inline source for
           </template>
           <template v-else>
             What
           </template>
           <span class="font-medium text-foreground-strong">{{ displayName }}</span>
-          {{ inlineOnly ? '. Changes here never edit attached policies or replace effective access.' : 'may do with platform actions, and which callers it accepts.' }}
+          {{ inlineOnly ? '. Attached policies are unchanged.' : 'may do, and which callers it accepts.' }}
         </p>
         <code class="mt-1 block break-all font-mono text-xs text-foreground-strong">{{ functionId }}</code>
       </div>
@@ -90,7 +90,7 @@
       <h2 class="text-sm font-semibold text-foreground-strong">
         {{ blockTitle }}
       </h2>
-      <p class="mx-auto mt-1.5 max-w-prose text-sm text-foreground-muted">
+      <p class="mx-auto mt-1.5 measure-long text-sm text-foreground-muted">
         {{ blockText }}
       </p>
     </div>
@@ -129,7 +129,7 @@
         </div>
         <p
           v-if="screen === 'view' || access.enforcement !== 'active'"
-          class="max-w-prose text-sm text-foreground"
+          class="measure text-sm text-foreground"
         >
           {{ enforcementText }}
         </p>
@@ -144,7 +144,7 @@
           class="mt-0.5 h-4 w-4 shrink-0"
           aria-hidden="true"
         />
-        Retained, not in force. {{ latest.host.quarantined ? 'This policy is quarantined' : 'This policy needs review' }};
+        Retained, not in force. {{ latest.host.quarantined ? 'Quarantined' : 'Needs review' }};
         {{ screen === 'view' ? 'what is listed below is stored, not enforced.' : 'the stored policy is not enforced. Draft changes stay unsaved until you review and save.' }}
       </p>
       <p
@@ -194,7 +194,7 @@
         <p class="leading-snug text-warning-fg">
           The server version changed while you were editing (revision
           <code class="font-mono">{{ conflict.from }}</code> to
-          <code class="font-mono">{{ water === null ? latest.host.revision : String(water) }}</code>). Saving is off until you discard the draft and reload. Your draft is kept.
+          <code class="font-mono">{{ water === null ? latest.host.revision : String(water) }}</code>). Your draft is kept. Discard it and reload to save.
         </p>
         <div class="flex flex-wrap gap-2">
           <Button
@@ -230,7 +230,7 @@
             <span class="min-w-0 break-all">{{ c.text }}</span>
           </li>
           <li v-if="!serverChanges.length">
-            No statements or callers changed. The artifact or approval changed.
+            Only the artifact or approval changed.
           </li>
         </ul>
       </div>
@@ -248,7 +248,7 @@
           Stored policy unavailable
         </h2>
         <p class="text-sm text-foreground">
-          The stored policy is not valid, so it is not shown as permissions and cannot be edited here.
+          The stored policy is not valid, so it is not shown or editable.
         </p>
         <ul class="space-y-1 font-mono text-xs text-foreground">
           <li
@@ -274,8 +274,8 @@
             >
               {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline platform grants (unverified)' : 'Inline platform grants') : 'What this function may do' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
-              {{ inlineOnly ? 'Only the inline source is shown here. Attached sources are listed in effective access above.' : (isEmptyPolicy ? 'No permissions are stored. Where enforcement is on, protected actions are denied by default.' : 'The stored policy, by service. An allowance to call another function is one half: that function must also accept this one as a caller.') }}
+            <p class="mt-1 measure text-xs text-foreground-muted">
+              {{ inlineOnly ? 'Inline source only. Attached sources are in effective access above.' : (isEmptyPolicy ? 'No permissions are stored. Where enforcement is on, protected actions are denied by default.' : 'Stored policy, by service. Calling another function also needs that function to accept this one.') }}
             </p>
           </header>
           <AccessSummary
@@ -300,8 +300,8 @@
             >
               {{ inlineOnly ? (authorityUnconfirmed ? 'Last known inline caller grants (unverified)' : 'Inline caller grants') : 'Who may call this function' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
-              {{ inlineOnly ? 'Only inline caller acceptance, not acceptance from attached sources. Callers also need their own outbound allowance.' : 'Callers are matched by function ID. A caller also needs its own allowance to call this function.' }}
+            <p class="mt-1 measure text-xs text-foreground-muted">
+              {{ inlineOnly ? 'Inline acceptance only. Callers also need their own outbound allowance.' : 'Matched by function ID. A caller also needs its own allowance.' }}
             </p>
           </header>
           <InboundCallers
@@ -328,7 +328,7 @@
             >
               {{ inlineOnly ? 'Edit inline permissions' : 'Edit permissions' }}
             </h2>
-            <p class="mt-1 max-w-prose text-xs text-foreground-muted">
+            <p class="mt-1 measure text-xs text-foreground-muted">
               Changes stay in a draft until you review and save.
             </p>
           </div>
@@ -356,8 +356,8 @@
             class="rounded-lg border border-border bg-surface"
           >
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <p class="min-w-0 max-w-prose text-xs text-foreground-muted">
-                Each permission is one allowance. A call to another function also needs that function to accept this one as a caller.
+              <p class="min-w-0 measure text-xs text-foreground-muted">
+                One allowance each. Calling another function also needs that function to accept this one.
               </p>
               <Button
                 v-if="canEdit"
@@ -403,8 +403,8 @@
             class="rounded-lg border border-border bg-surface"
           >
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <p class="min-w-0 max-w-prose text-xs text-foreground-muted">
-                Accepting a caller lets that function start this one. The caller also needs its own allowance to call this function.
+              <p class="min-w-0 measure text-xs text-foreground-muted">
+                An accepted caller can start this function. It also needs its own allowance.
               </p>
               <Button
                 v-if="canEdit"
@@ -455,7 +455,7 @@
               Advanced
             </h2>
             <p class="mt-0.5 text-xs text-foreground-muted">
-              Review status, policy JSON and revision history.
+              Review status, JSON and history.
             </p>
           </div>
           <Button
@@ -750,13 +750,13 @@ const displayName = computed(() => props.functionName
   || 'this function')
 
 const blocks = {
-  empty: ['No permissions to show', 'Nothing has been loaded for this function yet.'],
-  'other-owner': ['Not shown', 'This snapshot belongs to a different function, so none of it is shown or editable here.'],
-  'no-access': ['No access', 'You do not have access to read this function\'s permissions.'],
+  empty: ['No permissions to show', 'Nothing loaded yet.'],
+  'other-owner': ['Not shown', 'This snapshot belongs to a different function, so nothing here is shown or editable.'],
+  'no-access': ['No access', 'You do not have access to this function\'s permissions.'],
 }
 const blockTitle = computed(() => (view.value === 'unavailable' ? 'Permissions unavailable' : (blocks[view.value] || ['', ''])[0]))
 const blockText = computed(() => (view.value === 'unavailable'
-  ? (normalized.value.problems[0] || 'The permissions data could not be read, so nothing is shown or editable.')
+  ? (normalized.value.problems[0] || 'The permissions data could not be read.')
   : (blocks[view.value] || ['', ''])[1]))
 
 const enforcementBadge = computed(() => {
@@ -776,31 +776,31 @@ const reviewBadge = computed(() => {
 })
 const enforcementText = computed(() => {
   const e = access.value.enforcement
-  if (props.inlineOnly && props.authorityUnconfirmed) return 'This inline baseline and its approval are last known, not currently verified. Your unsaved draft is retained, not effective access. Refreshing the independent inspector does not reload or approve this draft.'
-  if (props.inlineOnly) return 'These are stored inline grants, not the total or active access. Effective access and approval state are shown above; drafts change only this source.'
-  if (e === 'inactive') return 'Permission enforcement is not enabled on this server. This is the stored policy; it does not restrict the function, and editing is off.'
-  if (e === 'unknown') return 'The server did not report whether permissions are enforced, so editing is off.'
+  if (props.inlineOnly && props.authorityUnconfirmed) return 'Inline baseline and approval are unverified. Your draft is kept and is not effective access.'
+  if (props.inlineOnly) return 'Stored inline grants, not total or active access. Drafts change this source only.'
+  if (e === 'inactive') return 'Permission enforcement is not enabled on this server. The stored policy does not restrict the function; editing is off.'
+  if (e === 'unknown') return 'The server did not report whether enforcement is on, so editing is off.'
   return screen.value === 'view'
-    ? 'Permission enforcement is on for this server. Below is the policy stored for this function.'
-    : 'Permission enforcement is on for this server. Draft changes are not saved or applied.'
+    ? 'Enforcement is on. Below is the stored policy.'
+    : 'Enforcement is on. Draft changes are not saved or applied.'
 })
 const lockNote = computed(() => {
   if (!readable.value) return ''
   if (props.readOnlyReason) return props.readOnlyReason
-  if (obsolete.value) return `This response is older than revision ${water.value}, which was already received. Saving and review stay off until a newer one arrives. Refresh.`
+  if (obsolete.value) return `Response is older than revision ${water.value}. Refresh to save or review.`
   if (props.loading || props.loadError || !latest.value.policy) return ''
   if (!access.value.canManage) {
     return dirty.value
-      ? 'Your permission to change this policy was removed. Your draft is kept for reference and cannot be saved.'
+      ? 'Your permission to change this policy was removed. The draft cannot be saved.'
       : 'You can view this policy but not change it.'
   }
   return ''
 })
 const saveErrorText = computed(() => ({
-  conflict: 'The policy changed on the server. Your draft is kept. Refresh to see the server version, then reload or discard.',
-  forbidden: 'The server refused this change. Your draft is kept, but saving is locked.',
-  validation: 'The server rejected this policy. Your draft is kept; adjust it and try again.',
-  error: 'Saving failed. Your draft is kept. Use Retry save to try again.',
+  conflict: 'The policy changed on the server. Your draft is kept. Refresh, then reload or discard.',
+  forbidden: 'The server refused this change. Your draft is kept; saving is locked.',
+  validation: 'The server rejected this policy. Adjust the draft and try again.',
+  error: 'Saving failed. Your draft is kept. Retry save.',
 }[props.saveError && props.saveError.kind] || 'Saving failed. Your draft is kept.'))
 const saveHint = computed(() => {
   if (obsolete.value) return 'Saving is off: this response is older than one already received.'
@@ -919,16 +919,16 @@ const reviewNotes = computed(() => {
   const d = diff.value
   const out = []
   if (d.statements.added.some((s) => s.resource.function) || d.inbound.added.length) {
-    out.push('Calls between functions need both sides: this function must be allowed to call the other, and the other must accept this one as a caller. Check the other function as well.')
+    out.push('Calls between functions need both sides: this one allowed to call, the other accepting it. Check the other function too.')
   }
   if (d.statements.added.some((s) => s.context === 'bootstrap')) {
-    out.push('Startup access runs when the function loads, before any request. It can only read and list.')
+    out.push('Startup access runs at load, before any request, and can only read and list.')
   }
   if (d.statements.added.some((s) => s.resource.own_kv && s.resource.own_kv.prefix === '')) {
     out.push("A permission on every key covers all of this function's storage, including keys added later.")
   }
   if (d.statements.added.some((s) => s.resource.own_cron && s.resource.own_cron.prefix === '')) {
-    out.push('A permission on every schedule covers all schedules that run this function, including ones added later.')
+    out.push('Covers every schedule for this function, including future ones.')
   }
   for (const w of policyWarnings(draft.value)) {
     out.push(`Incomplete: ${statementSummary(draft.value.allow[w.index])}. ${w.text}`)
