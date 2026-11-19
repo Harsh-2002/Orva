@@ -51,6 +51,21 @@ func exists(path string) bool {
 	return err == nil
 }
 
+func TestBuildCacheGCLeavesFunctionTreesAlone(t *testing.T) {
+	data := t.TempDir()
+	db := newGCTestDB(t)
+	insertFn(t, db, "live")
+	path := filepath.Join(data, "functions", "orphan", "versions")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cache := agedCache(t, data, "orphan", 512, time.Hour)
+	NewBuildCacheGC(data, db).tick(t.Context())
+	if !exists(path) || exists(cache) {
+		t.Fatal("managed cache GC must remove orphan caches, not legacy function directories")
+	}
+}
+
 // TestGCSweepsCachesByAge: an unused cache is dropped after
 // build_cache_max_age_days. Without an age bound a cache is an unbounded leak,
 // which is strictly worse than having no cache at all.

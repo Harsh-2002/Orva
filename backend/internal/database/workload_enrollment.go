@@ -174,7 +174,7 @@ func enrollLegacyFunctionTx(ctx context.Context, tx *sql.Tx, plan LegacyEnrollme
 		}
 	} else {
 		if deployment != e.DeploymentID || !validManagedOwnerID(deployment) || status != "active" || !e.Build.valid() ||
-			e.Build.CodeHash != oldHash || e.Build.Entrypoint != entry || e.Build.RuntimeGeneration != plan.Runtimes[runtime] ||
+			e.Build.CodeHash != oldHash || e.Build.RuntimeGeneration != plan.Runtimes[runtime] ||
 			(!sdk && !enrollmentSHA(e.ApprovedArtifact)) || (sdk && e.ApprovedArtifact != "") {
 			return ErrWorkloadArtifactConflict
 		}
@@ -186,7 +186,11 @@ func enrollLegacyFunctionTx(ctx context.Context, tx *sql.Tx, plan LegacyEnrollme
 		if !sdk {
 			r.ApprovedArtifact = e.ApprovedArtifact
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE functions SET sdk=1 WHERE id=?`, e.ID); err != nil {
+		run := ""
+		if e.Build.Entrypoint != entry {
+			run = e.Build.Entrypoint
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE functions SET sdk=1,run_entrypoint=? WHERE id=?`, run, e.ID); err != nil {
 			return err
 		}
 		provenance, err := json.Marshal(deploymentProvenance{Owner: e.ID, Runtime: runtime, Entrypoint: entry, FunctionVersion: version,

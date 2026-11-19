@@ -159,6 +159,14 @@ installed packages
 land in the version directory and are visible at `/code/node_modules`
 or `/code/<package>/` inside the sandbox.
 
+Managed mode uses the same installers and per-function cache. Installers
+require a compiled egress policy even when the function itself runs with
+`network_mode: none`; without one, the build fails closed. The TypeScript
+compiler runs without network after dependency installation. Managed builds
+fence the build's processes before verifying and sealing the complete output.
+`entrypoint` remains the authored TypeScript path and `run_entrypoint` names
+the compiled JavaScript the worker loads.
+
 ```bash
 # Node
 echo '{"dependencies":{"lodash":"^4.17.21"}}' > package.json

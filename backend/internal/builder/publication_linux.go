@@ -193,7 +193,7 @@ func (s *PublicationQueue) buildAndPublish(job BuildJob) error {
 	s.pendingMu.Unlock()
 	output := database.WorkloadBuildOutput{CodeGeneration: code.Generation, CodeDigest: code.Digest,
 		RuntimeGeneration: runtime.Generation, RuntimeDigest: runtime.Digest,
-		CodeHash: result.CodeHash, Entrypoint: result.Entrypoint}
+		CodeHash: result.CodeHash, Entrypoint: result.Entrypoint, SourceArchiveSHA256: result.SourceArchiveSHA256}
 	if err := s.queue.db.RecordWorkloadBuildOutput(ctx, job.DeploymentID, output); err != nil {
 		return err
 	}

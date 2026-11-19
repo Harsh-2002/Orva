@@ -73,8 +73,8 @@ promotion, including for a request prepared before pause.
    evidence may accept a fresh capture without being activated. Durable pause
    intent and inactive targets without that evidence still refuse capture.
 3. Execution takes the shared build/rollback lock and checks durable capture.
-   Compilation happens outside owner/IAM locks, using the existing plain
-   no-dependency Node/Python managed-output profile. Actual returned code/runtime
+   Syntax checks, installs and compilation happen outside owner/IAM locks,
+   inside the managed-output build Domain. Actual returned code/runtime
    generations are independently reacquired and compared through concrete
    store leases before recording their durable association.
 4. Owner lock → IAM gate → transaction rechecks live credential validity,
@@ -118,7 +118,7 @@ After process loss, use inspection-only store recovery, not replay.
 
 Optional raw inline HTTP/MCP/shared-AI decoding bounds input to 256 KiB and rejects
 unknown, duplicate/case-variant fields, invalid UTF-8/surrogates and host metadata.
-Inline supports one plain file; dependencies/extras/TypeScript remain unqualified.
+Use the archive upload for a multi-file TypeScript project.
 MCP requires explicit `wait`; `succeeded` / `review_required` is durable inactive
 DENY publication, **not** invocation readiness.
 
@@ -315,25 +315,23 @@ Exactly one ownership profile is required:
   must not be used by future serving/recovery wiring. Mixed or missing profiles
   deny; there is no fallback between them.
 
-### Deliberately narrow production profile
+### Managed build profile
 
-The owner approved a **plain Node/Python, no-dependency, no-TypeScript** first
-slice. Root `package.json`, `requirements.txt`, or `tsconfig.json` denies before
-any command, even if the manifest is empty. Entrypoints must be plain
-`.js`/`.cjs`/`.mjs` or `.py`. No npm/pip/npx process runs here.
+Node accepts `.js`/`.cjs`/`.mjs` or `.ts`, and Python accepts `.py`.
+The matching manifest selects the same jailed npm or pip install as legacy.
+Installs require compiled egress policy and use caches scoped by function UUID.
+The configured TypeScript compiler runs without network. Host hooks deny.
 The bounded data-only archive extractor refuses links, special entries,
 extended metadata, duplicates and over-budget inputs. Archive UID/GID do not
 authorize host chown; newly produced files belong to the host producer.
 Actual output UID/GID, POSIX modes, link text and hardlink relationships are
 observed without rewriting or filtering when constructing expectations.
 
-This restriction matters: existing `RunBuild` grants writable code and unlimited
-file size, not an aggregate disk quota. A post-fence scan cannot retroactively
-enforce a byte reservation during arbitrary install scripts. Until a reviewed
-storage-quota boundary exists, installing/compiling third-party code is not part
-of this managed profile. The pinned interpreter's syntax-only tools are trusted
-not to execute author code or make unbounded writes. This is not a general
-disk-quota or hostile-runtime containment claim.
+The post-fence scan verifies the complete tree, including emitted JavaScript
+and installed dependencies. It does not enforce a live aggregate disk quota
+during install scripts. The authored archive is retained separately from the
+writable stage until fencing, then bound by digest to the sealed deployment
+so portable restore can compile and install again on the destination.
 
 ### Exclusive epoch and staging ownership
 

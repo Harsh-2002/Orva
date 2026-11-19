@@ -60,20 +60,23 @@
 > traces or grants operator READ. Accepted telemetry may persist after revoke;
 > ACK is not durability. Normal serving is unchanged; real-runtime qualification
 > of this increment remains separate.
-> Internal queued-build boundary: explicit `DeployIAM` dependencies route REST
-> deploy and external MCP/shared-AI `deploy_function_inline` through one managed
-> capture/publication service. Normal dependencies/boot are unchanged. Only fresh
-> managed-store plain no-dependency Node/Python is in scope; legacy directories
-> are refused, not linked/adopted. Token-free host submitter provenance and exact
-> source/epoch/config digests are captured with deployment and live-rechecked at
+> Managed queued-build boundary: REST deploy and external MCP/shared-AI
+> `deploy_function_inline` use one managed capture/publication service. Archive
+> uploads support Node/npm, Python/pip and TypeScript. Installers require
+> compiled egress policy; TypeScript compilation runs without network. Legacy
+> function directories are refused, not linked or adopted. Token-free host
+> submitter provenance and exact source/epoch/config digests are captured with
+> deployment and live-rechecked at
 > publication. Empty review-free authority requires WRITE; outbound/inbound/
 > retained/quarantined/review-required authority requires ADMIN, without blanket
 > READ. Epoch/source/config changes invalidate queued work even for ADMIN.
 > `succeeded` / `review_required` means inactive DENY, not ready to invoke: fresh
 > concrete-pair host Factory installation and source-aware review are separate.
-> Optional raw inline rejects duplicate/unknown/host metadata and invalid
-> UTF-8/surrogates (256 KiB cap); MCP requires explicit `wait`. Dependency/TS,
-> legacy source/rollback/GC, restore, boot and automatic resume are unqualified.
+> Managed inline deploy accepts a single source file without a dependency
+> manifest or project files. It rejects duplicate, unknown or host metadata
+> fields and invalid UTF-8/surrogates (256 KiB cap); MCP requires explicit
+> `wait`. Use an archive upload for dependency manifests or a TypeScript
+> project. Portable restore rebuilds from source under a new Owner.
 > In this fixture only, REST rollback and MCP/shared-AI `rollback_function`
 > promote a verified historical deployment UUID for an exact function UUID
 > without allocating a version. MCP/AI additionally require `confirm: true`.

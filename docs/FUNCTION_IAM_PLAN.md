@@ -49,7 +49,8 @@ The guest was removed. This is not a different-kernel, power-loss, or
 full-release E2E qualification.
 
 Cut-over slice 2 adds explicit Linux server-only offline enrollment. Its scope
-is current plain Node/Python deployment rebuild under the Owner, empty grants,
+is current supported Node/Python deployment rebuild (including npm, pip and
+TypeScript) under the Owner, empty grants,
 SDK-enabled policy review, standing-work suspension/quarantine, and preservation
 of the legacy tree. It is not automatic activation, historical rollback, or
 cross-host restore. Fault injection covers the durable layout refusal boundary.
@@ -1025,9 +1026,29 @@ and policy together. Serving wiring remains absent until the full proof gates.
   pass. Corrected independent rejection/compatibility/metadata checks under both
   umasks, normal/race suites, vet and fresh physical Node/Python pipelines also
   pass, with original HOLD evidence retained and the owned VM removed.
-  Dependency manifests,
-  TypeScript and host build hooks deny in this limited profile. No serving,
-  durable publication, current authority or recovery activation is included.
+  That initial qualification excluded dependency manifests and TypeScript and
+  did not cover serving, durable publication, current authority or recovery.
+  Host build hooks remain denied.
+
+- Later managed serving, enrollment and portable restore extend that profile
+  to npm/pip installs under the compiled egress policy and network-disabled
+  TypeScript compilation. They use a pinned runtime and fence the build Domain
+  before verifying the full output. Portable rebuilds use the retained,
+  digest-bound source input, not the dependency or compiler output. Host build
+  hooks remain denied. The seal limits accepted output; they are not a live
+  aggregate disk quota during a build.
+  The real-nsjail disposable-VM fixture in `test/managed-enrollment.py` ran
+  pinned npm `semver`, pip `idna` and TypeScript through legacy deployment,
+  enrollment, and new managed upload/install. Each invocation checked the
+  expected body; TypeScript also checked the authored and executed paths.
+  The fixture then rebuilt all six dependency deployments under a second
+  Owner, verified source-only backup archives, and exercised same-Owner
+  replay and quarantine. VM egress was deny-by-default, allowing DNS and
+  resolved registry IPv4 `/32` addresses only on TCP 443. The first attempt
+  exposed an invalid build-domain metadata entry; moving the retained source
+  outside that metadata namespace fixed it. The dependency-free enrollment
+  and restore fixture also passed in a separate no-network VM. This is not
+  full installer or Docker E2E coverage.
 
 - Internal builder runtime binding now captures one concrete generation at Build
   entry, retains a pipeline anchor and leases each command through cleanup.

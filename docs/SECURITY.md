@@ -271,11 +271,12 @@ does not confer exclusive ownership or prove all build descendants have exited.
 The separate managed-output mode creates its own exclusive build Domain and
 fresh artifact staging. Fence/Check must succeed before output inspection,
 sealing or deletion. Failed cleanup retains staging, runtime and finite quota
-ownership for explicit retry; it never returns an approved output. Host hooks,
-provider-supplied Domains, dependency manifests and TypeScript deny in this
-limited plain Node/Python profile. Archive parent components reject before
-normalization. This does not bind stores to an instance epoch, publish current
-generations, enable recovery or restore approval.
+ownership for explicit retry; it never returns an approved output. Host hooks
+and provider-supplied Domains are denied. npm and pip use the compiled egress
+policy and a per-function cache; TypeScript compilation runs without network.
+The complete output is verified after fencing. Archive parent components are
+rejected before normalization. Sealing alone does not approve a deployment or
+restore authority.
 
 Typed child Domains additionally serialize creation and command entry against
 their ancestors. Parent fencing covers descendant builds, while child fencing

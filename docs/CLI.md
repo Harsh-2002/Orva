@@ -36,6 +36,11 @@ by `--data-dir` (default `ORVA_DATA_DIR`), prints a canonical JSON plan, and
 optionally creates a new `--plan` file outside that instance. Applying
 requires an unchanged plan and explicit confirmation. Repeat `--exclude
 FUNCTION_UUID` for each unsupported function you elect to leave inactive.
+`unsupported_reason` explains why a row cannot be rebuilt. npm/pip manifests
+and a supported TypeScript build are not by themselves reasons to exclude a
+function. Legacy invocation egress, mismatched or missing manifests, pip
+output that cannot be separated from source, and TypeScript without a separate
+output directory are examples of reasons that still require exclusion.
 See the [offline procedure](OPERATIONS.md#offline-legacy-enrollment) before
 making changes. This command is not part of the shared slim CLI command tree.
 
