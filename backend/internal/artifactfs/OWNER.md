@@ -24,6 +24,8 @@ The owner root has a separate versioned wrapper format:
   denies unless the exact host-bound same-boot prepared transition below matches.
 - `owner.prepared`: bounded, witness-authenticated digests of the predecessor
   and successor records, written after the signed successor file is synced.
+- `owner.retire`: witness-authenticated predecessor/successor digests, exact
+  oldest epoch reference and metadata digest for a separate retirement commit.
 
 No per-store epoch file is written: **one owner record binds both stores**.
 Store `.artifactfs-control` stays version 1. There is no in-place adoption of
@@ -33,9 +35,9 @@ All directories are private, euid-owned and link-free; metadata is no-follow,
 single-link, mode-0600, without xattrs. Owner JSON is capped at 64 KiB and parsed
 with duplicate/unknown/null/canonical-encoding and allocation bounds. The
 metadata/epoch directory enumeration is bounded too. Limits are immutable;
-MaxEpochs must be 2..64. Old empty cgroups/metadata are retained, not silently
-removed or reused. Reaching the history cap denies without creating another
-epoch. These are logical allocation/work bounds, not filesystem quotas.
+MaxEpochs must be 2..64. Version 1 still retains old cgroups and metadata and
+denies at the cap. Version 2 uses bounded retirement. These are logical
+allocation/work bounds, not filesystem quotas.
 
 As with the underlying packages, ancestors, mount topology and privileged host
 writers must be stable and trusted, with no outside entrants or inode reuse.
@@ -44,7 +46,7 @@ Raw Budget provisioning remains privileged and outside Domain entry gates.
 
 ## Commit and capability publication
 
-Before creating/mutating an instance association, the owner exclusively writes
+Before creating an instance or appending an epoch, the owner exclusively writes
 and fsyncs `owner.intent`, then fsyncs the owner directory. Fresh stores and a
 new root Domain remain private to construction. It writes owner.json.tmp by
 exclusive no-follow create, exact write and file fsync; rename plus directory
@@ -52,8 +54,8 @@ fsync is the shared association commit. Held old-root proofs are freshly checked
 again after that commit, before intent removal. Only after removing the intent
 and fsyncing that removal can any Store/Domain reference be returned.
 
-Any error exposes no bindings and closes constructor-owned descriptors. No
-failed initializer deletes assets or cgroups. Partial directories/intent remain,
+Any error exposes no bindings and closes constructor-owned descriptors.
+Initial creation never deletes assets or cgroups. Partial directories/intent remain,
 so repeated construction cannot grow an unbounded new set of unknown epochs.
 A failed final unlink barrier attempts to restore the denial marker. The fault
 tests model syscall failures, not actual power loss or a filesystem that lies
@@ -69,10 +71,10 @@ before clearing its markers. The candidate goes into history; it is never
 reopened for entry. Recovery must still provision a fresh live epoch within
 the original cap before any bindings are returned.
 
-Before a complete authenticated prepared transition is available, partial
-state still denies. Missing or replaced same-boot groups and unknown layouts
-also deny. This is not first-create repair, cold-transition replay, epoch
-retirement, or daemon boot wiring.
+An incomplete append without a complete authenticated prepared record still
+denies. Missing or replaced associated same-boot groups and unknown layouts
+also deny. This is not first-create repair, cold append replay, or daemon boot
+wiring.
 
 `Bindings(ctx)` checks the still-owned association/layout/store identities and
 current verified Domain reference before returning trusted internal references.
@@ -101,15 +103,17 @@ must still use the same returned binding triple; it is not hostile-host isolatio
    missing/replaced current groups, corrupt records and mixed/unknown state.
    A host-bound owner also verifies the host binding and each prior-boot
    reference before skipping any previous run.
-2. Persists a transition intent and Fence/Checks the exact old roots under that
-   valid captured budget. The root contains every typed build/worker descendant.
+2. Fence/Checks the exact old roots under that valid captured budget. Ordinary
+   append records intent first; a full history completes retirement before
+   starting append. The root contains every typed build/worker descendant.
    No recovered tree is activated, removed or reclaimed before this proof.
 3. Reads the stores in inspection mode **after fencing**, using the unchanged
    bounded persistent reader and full strict verification of committed/retired
    trees. Role mismatches deny. No observed-tree manifest is blessed as authority.
-4. Creates a fresh root Domain and commits its single association to the same
-   two verified stores before privately reconstructing acquirable committed
-   records. Their generation/kind/owner/digest identities stay exact.
+4. Completes any prepared append or retirement, and frees one history slot if
+   required. It creates a fresh root Domain and commits its single association
+   to the same two verified stores before privately reconstructing acquirable
+   committed records. Their generation/kind/owner/digest identities stay exact.
 5. Stable committed records with no temporary metadata alone become acquirable.
    Retired, staging, publish/delete intents and pending metadata stay quarantined,
    charged and unmodifiable. `Quarantined()` returns store-role-labelled detached observations only;
@@ -152,8 +156,8 @@ each exact old record against the current live captured budget and rejects the
 current boot. It does not open an old cgroup or mint a Domain or fence proof.
 If the final run is from this boot, use `OpenOwnerRecovery`; missing cgroups in
 that run deny, regardless of which entry point is used. Both entry points use
-the same intent and commit barrier and store verification, retain old metadata,
-and never repair incomplete state or reclaim anything.
+the same append intent, commit barrier and store verification. Cold recovery
+can replay authenticated retirement; it does not repair incomplete append state.
 
 The witness is not hardware attestation or rollback detection. Host placement
 and backup-root completeness are trusted provisioning facts. Privileged host
@@ -162,7 +166,33 @@ the configured roots, cloned witness/identity, and rollback of exact in-place
 state are outside this proof. Witness and existing asset filesystem identities
 must remain stable across reboots; changed device/inode values deny.
 
-### Budget recapture prerequisite
+## Bounded epoch retirement
+
+At `MaxEpochs`, a host-bound recovery retires exactly the oldest associated
+epoch before appending a new one. The newest predecessor is always retained.
+The rule also applies if reconciling a prepared append fills the last slot.
+The opener must validate prior-boot references via `ValidatePriorBootUnderBudget`
+and hold a fresh `Fence` + `Check` proof for each reopened current-boot root.
+
+After validation, it syncs `owner.retire` and its directory, then commits
+`owner.json` without that epoch using the usual synced temp file and rename.
+Before the commit, replay requires the exact predecessor and repeats its
+validation. After the commit, replay accepts only the exact successor and the
+recorded cleanup residue. It checks and removes the same-boot empty cgroup
+tree first, then unlinks the exact metadata record and directory, syncs the
+directory removals, and removes and syncs the journal. A missing same-boot
+group is accepted only in this authenticated, already-unbound cleanup phase;
+it is not death evidence. A still-present group must match the exact identity
+and be empty; replacement, population, and unknown layouts deny. Prior-boot
+cgroups are never looked up or removed.
+
+No bindings are returned until retirement and the fresh append finish. Sealed
+code/runtime and staged or retired store entries are unchanged; no grants or
+policy are restored. Bound same-boot cgroups must outlive the daemon process
+(the planned host placement is `orva-workloads.slice`); this code does not
+provision that slice or wire daemon boot.
+
+## Budget recapture prerequisite
 
 Ordinary OpenRecovering still requires a strict child of current membership.
 The budget-aware variant accepts only a live process-local CaptureBudget
@@ -209,6 +239,6 @@ in flight. Owner-method serialization is synchronous; waiting for another owner
 operation can outlast a waiting caller's deadline.
 
 Before daemon cut-over, qualify cold-start budget placement and real-runtime
-handoff, resolve interrupted intent recovery and bounded epoch retirement,
-and define operator recovery and reclamation. The cold opener is not selected
-by `orva serve` and does not itself restore policy approval.
+handoff, and define operator recovery for incomplete append state and asset
+reclamation. The cold opener is not selected by `orva serve` and does not
+itself restore policy approval.

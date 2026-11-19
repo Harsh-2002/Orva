@@ -194,9 +194,11 @@ failure is accepted only as the exact monotonic closed transition and is
 persisted/fsynced again before kill/proof. Failed file-fsync or rename leaves the
 temporary record intact; retries/reopen deny rather than discard it. An operator
 must investigate such state; there is no metadata repair or cleanup API.
-The package never removes metadata or artifact data. Only explicit typed-child
-ReclaimChild removes cgroups; root cleanup remains host-owned. Constructor
-failure never removes evidence automatically.
+The package never removes metadata or artifact data. In addition to typed-child
+`ReclaimChild`, the wider artifact owner can remove an exact empty root via
+`RemoveRetiredRootUnderBudget` only after authenticated retirement commits.
+That cleanup-only API does not fence or prove death. Constructor failure never
+removes evidence automatically.
 
 ## Owned jail-parent extension (requires new independent acceptance)
 

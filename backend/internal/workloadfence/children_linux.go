@@ -208,7 +208,7 @@ func (d *Domain) ReclaimChild(ctx context.Context, child *Domain, proof *Proof) 
 	}
 	s.deleting = true
 	count := 0
-	if err := removeEmptyGroups(ctx, s.path, 0, &count); err != nil {
+	if err := removeEmptyGroups(ctx, s.path, 0, &count, 0); err != nil {
 		return err
 	}
 	s.reclaimed = true
@@ -216,7 +216,7 @@ func (d *Domain) ReclaimChild(ctx context.Context, child *Domain, proof *Proof) 
 	return nil
 }
 
-func removeEmptyGroups(ctx context.Context, path string, depth int, count *int) error {
+func removeEmptyGroups(ctx context.Context, path string, depth int, count *int, mount uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -229,6 +229,12 @@ func removeEmptyGroups(ctx context.Context, path string, depth int, count *int) 
 		return err
 	}
 	defer dir.Close()
+	if mount != 0 {
+		id, err := descriptorMountID(dir)
+		if err != nil || id != mount {
+			return ErrIntegrity
+		}
+	}
 	for total := 0; ; {
 		entries, err := dir.ReadDir(128)
 		if err != nil && !errors.Is(err, io.EOF) {
@@ -240,7 +246,7 @@ func removeEmptyGroups(ctx context.Context, path string, depth int, count *int) 
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				if err := removeEmptyGroups(ctx, filepath.Join(path, entry.Name()), depth+1, count); err != nil {
+				if err := removeEmptyGroups(ctx, filepath.Join(path, entry.Name()), depth+1, count, mount); err != nil {
 					return err
 				}
 			}

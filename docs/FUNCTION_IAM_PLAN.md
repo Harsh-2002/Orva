@@ -39,8 +39,16 @@ Chat approval; the slim CLI commits through the same REST service.
 An unwired cold-recovery candidate passed a hard reboot on stable guest-local
 ext4: the previous cgroup was gone, the wrong witness was refused, and both
 seals reopened through the original witness. The guest overlay changed inode
-identities, so that layout is not qualified. This is not daemon recovery;
-crash resumption, epoch-history retirement and production provisioning remain open.
+identities, so that layout is not qualified. This is not daemon recovery.
+
+The internal host-bound Owner now retires the oldest exact epoch at the
+history cap, leaving the newest predecessor in place. A witness-authenticated
+decision precedes unbinding and cleanup, and replay does not restore IAM
+policy, approvals or grants. Version 1 still denies at the cap. An offline
+disposable VM passed 12 same-boot restarts at cap 3, 13 retirement fault
+points, process-exit replay on both sides of the association rename, denial
+cases, and a synthetic prior-boot metadata fixture. This is not power-loss,
+general interrupted append recovery, or production slice provisioning evidence.
 
 SDK availability is normal runtime functionality. Authorization determines
 which actions a function identity may perform on which resources. Replace the

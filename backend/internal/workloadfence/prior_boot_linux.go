@@ -99,10 +99,13 @@ func readPriorBootEpoch(dir *os.File, expected EpochReference, liveBoot string) 
 	if err != nil {
 		return record{}, err
 	}
-	actual := EpochReference{Version: r.Version, Epoch: r.Epoch, Boot: r.Boot, InstanceEpoch: r.Epoch,
-		MetadataDevice: r.Root.Device, MetadataInode: r.Root.Inode, GroupDevice: r.Group.Device, GroupInode: r.Group.Inode}
-	if root != r.Root || actual != expected {
+	if root != r.Root || rootEpochReference(r) != expected {
 		return record{}, ErrIntegrity
 	}
 	return r, nil
+}
+
+func rootEpochReference(r record) EpochReference {
+	return EpochReference{Version: r.Version, Epoch: r.Epoch, Boot: r.Boot, InstanceEpoch: r.Epoch,
+		MetadataDevice: r.Root.Device, MetadataInode: r.Root.Inode, GroupDevice: r.Group.Device, GroupInode: r.Group.Inode}
 }

@@ -31,6 +31,7 @@ func TestOwnerKernelPreparedTransition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			first := o.s.disk.Epochs[0]
 			code := sealed(t, o.s.code, KindCode, ids.New())
 			runtime := sealed(t, o.s.runtime, KindRuntime, "node")
 			if err := o.Close(ctx); err != nil {
@@ -117,12 +118,6 @@ func TestOwnerKernelPreparedTransition(t *testing.T) {
 					t.Fatal("ambiguous transition accepted")
 				}
 				return
-			case "capacity":
-				if got != nil || !errors.Is(err, ErrCapacity) {
-					t.Fatalf("exhausted transition capacity: %v", err)
-				}
-				assertNoOwnerIntent(t, cfg)
-				return
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -133,8 +128,18 @@ func TestOwnerKernelPreparedTransition(t *testing.T) {
 				t.Fatal(err)
 			}
 			ref, err := bindings.Domain.Reference(ctx)
-			if err != nil || len(got.s.disk.Epochs) != 3 || got.s.disk.Epochs[1] != candidate ||
-				ref == candidate.Reference || ref != got.s.disk.Epochs[2].Reference {
+			n := len(got.s.disk.Epochs)
+			want := 3
+			if mode == "capacity" {
+				want = 2
+				for _, path := range []string{got.s.epochRoot(first.ID), filepath.Join(parent, "epoch-"+first.Reference.Epoch)} {
+					if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("oldest prepared predecessor not retired", err)
+					}
+				}
+			}
+			if err != nil || n != want || got.s.disk.Epochs[n-2] != candidate ||
+				ref == candidate.Reference || ref != got.s.disk.Epochs[n-1].Reference {
 				t.Fatalf("did not fence and rebind to a fresh exact epoch: %v", err)
 			}
 			candidateFile := filepath.Join(got.s.epochRoot(candidate.ID), "epoch.json")
@@ -164,13 +169,29 @@ func TestOwnerKernelPreparedTransition(t *testing.T) {
 }
 
 func TestOwnerKernelPreparedProcessCrash(t *testing.T) {
-	for _, phase := range []string{"pre-rename", "post-rename"} {
+	testOwnerProcessCrash(t, false)
+}
+
+func TestOwnerKernelRetirementProcessCrash(t *testing.T) {
+	testOwnerProcessCrash(t, true)
+}
+
+func testOwnerProcessCrash(t *testing.T, retirement bool) {
+	t.Helper()
+	phases := []string{"pre-rename", "post-rename"}
+	if retirement {
+		phases = []string{"retire-pre-rename", "retire-post-rename"}
+	}
+	for _, phase := range phases {
 		t.Run(phase, func(t *testing.T) {
 			budget, parent := ownerTestBudget(t, false)
 			base, dir := filepath.Dir(parent), t.TempDir()
 			ctx := ownerTestContext(t)
 			cfg := ownerConfigAt(t, dir, budget, parent)
 			cfg.Host = testOwnerHost(t)
+			if retirement {
+				cfg.MaxEpochs = 2
+			}
 			self, err := os.Executable()
 			if err != nil {
 				t.Fatal(err)
@@ -204,8 +225,19 @@ func TestOwnerKernelPreparedProcessCrash(t *testing.T) {
 				t.Fatal(err)
 			}
 			code := sealed(t, o.s.code, KindCode, ids.New())
+			runtime := sealed(t, o.s.runtime, KindRuntime, "node")
+			first := o.s.disk.Epochs[0]
 			if err := o.Close(ctx); err != nil {
 				t.Fatal(err)
+			}
+			if retirement {
+				o, err = OpenOwnerRecovery(ctx, cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := o.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := os.WriteFile(filepath.Join(dir, "delegate"), []byte("ready"), 0600); err != nil {
 				t.Fatal(err)
@@ -219,7 +251,10 @@ func TestOwnerKernelPreparedProcessCrash(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = got.Close(ctx) }()
-			if len(got.s.disk.Epochs) != 3 {
+			if retirement {
+				assertEpochAbsent(t, cfg, first)
+				assertRetiredBindings(t, ctx, got, code, runtime)
+			} else if len(got.s.disk.Epochs) != 3 {
 				t.Fatal("crashed candidate was not retained and replaced")
 			}
 			lease, err := got.s.code.Acquire(code)
@@ -236,7 +271,9 @@ func TestOwnerKernelPreparedProcessCrash(t *testing.T) {
 
 func TestOwnerPreparedCrashHelper(t *testing.T) {
 	phase := os.Getenv("OWNER_PREPARED_CRASH")
-	if phase != "pre-rename" && phase != "post-rename" {
+	switch phase {
+	case "pre-rename", "post-rename", "retire-pre-rename", "retire-post-rename":
+	default:
 		t.Skip("subprocess only")
 	}
 	base, dir := os.Getenv("OWNER_CRASH_BUDGET"), os.Getenv("OWNER_CRASH_DIR")
@@ -255,8 +292,11 @@ func TestOwnerPreparedCrashHelper(t *testing.T) {
 	awaitOwnerFile(t, filepath.Join(dir, "delegate"))
 	cfg := ownerConfigAt(t, dir, budget, filepath.Join(base, "domains"))
 	cfg.Host = &OwnerHostConfig{WitnessPath: os.Getenv("OWNER_CRASH_WITNESS"), BackupRoots: []string{}}
+	if phase == "retire-pre-rename" || phase == "retire-post-rename" {
+		cfg.MaxEpochs = 2
+	}
 	ops := defaultOwnerOps()
-	if phase == "pre-rename" {
+	if phase == "pre-rename" || phase == "retire-pre-rename" {
 		ops.rename = func(_, _ string) error {
 			os.Exit(42)
 			return nil

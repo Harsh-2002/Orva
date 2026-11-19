@@ -178,6 +178,7 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 	var proofs []*workloadfence.Proof
 	var prior []ownerEpochRecord
 	var replay *preparedOwnerReplay
+	var retirement *ownerRetirementReplay
 	defer func() {
 		for _, d := range old {
 			_ = d.Close()
@@ -207,13 +208,19 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 				return nil, err
 			}
 		}
-		if !cold && s.witness != nil {
+		if s.witness != nil {
+			retirement, err = s.readOwnerRetirement(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if retirement == nil && !cold && s.witness != nil {
 			replay, err = s.readPreparedOwner(ctx)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if replay == nil {
+		if retirement == nil && replay == nil {
 			if err := s.validateLayout(ctx); err != nil {
 				return nil, err
 			}
@@ -229,7 +236,7 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 		if err := s.matchStoreRoots(); err != nil {
 			return nil, err
 		}
-		if replay == nil && len(s.disk.Epochs) >= cfg.MaxEpochs {
+		if s.witness == nil && len(s.disk.Epochs) >= cfg.MaxEpochs {
 			return nil, ErrCapacity
 		}
 		sameBoot := s.disk.Epochs
@@ -280,7 +287,8 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if replay == nil {
+	retiring := retirement != nil || recovering && s.witness != nil && len(s.disk.Epochs) == cfg.MaxEpochs
+	if replay == nil && !retiring {
 		if err := s.writeIntent(); err != nil {
 			return nil, err
 		}
@@ -313,9 +321,19 @@ func openOwner(ctx context.Context, cfg OwnerConfig, recovering, cold bool, ops 
 			if err := s.reconcilePreparedOwner(ctx, replay, old, proofs, prior); err != nil {
 				return nil, err
 			}
-			if len(s.disk.Epochs) >= cfg.MaxEpochs {
-				return nil, ErrCapacity
+		}
+		if retiring {
+			removed, err := s.retireOwnerEpoch(ctx, retirement, old, proofs, prior)
+			if err != nil {
+				return nil, err
 			}
+			if removed && len(prior) != 0 {
+				prior = prior[1:]
+			} else if removed {
+				old, proofs = old[1:], proofs[1:]
+			}
+		}
+		if replay != nil || retiring {
 			if err := s.writeIntent(); err != nil {
 				return nil, err
 			}
@@ -517,20 +535,24 @@ func readOwnerRecord(path string) (ownerRecord, error) {
 	default:
 		return disk, ErrIntegrity
 	}
+	return disk, validateOwnerEpochs(disk.Epochs)
+}
+
+func validateOwnerEpochs(records []ownerEpochRecord) error {
 	seen := make(map[string]bool)
 	epochs := make(map[string]bool)
-	for _, epoch := range disk.Epochs {
+	for _, epoch := range records {
 		ref := epoch.Reference
 		if !generationID(epoch.ID) || seen[epoch.ID] || epochs[ref.Epoch] || ref.Version != 1 || ref.Depth != 0 ||
 			ref.ParentEpoch != "" || ref.InstanceEpoch != ref.Epoch ||
 			!ownerHex(ref.Epoch, 32) || !ownerBoot(ref.Boot) ||
 			ref.MetadataInode == 0 || ref.GroupInode == 0 {
-			return disk, ErrIntegrity
+			return ErrIntegrity
 		}
 		seen[epoch.ID] = true
 		epochs[ref.Epoch] = true
 	}
-	return disk, nil
+	return nil
 }
 
 func ownerHex(value string, size int) bool {
@@ -552,6 +574,10 @@ func (s *ownerState) validateLayout(ctx context.Context) error {
 }
 
 func (s *ownerState) validateOwnerLayout(ctx context.Context, expected ...string) error {
+	return s.validateOwnerLayoutWithRetired(ctx, "", expected...)
+}
+
+func (s *ownerState) validateOwnerLayoutWithRetired(ctx context.Context, retired string, expected ...string) error {
 	root, err := ownerStoreIdentity(s.meta)
 	d := s.disk
 	if err != nil || root.Identity != d.Root || d.Parent != s.cfg.Parent || d.MaxEpochs != s.cfg.MaxEpochs ||
@@ -584,10 +610,13 @@ func (s *ownerState) validateOwnerLayout(ctx context.Context, expected ...string
 	if err != nil {
 		return err
 	}
-	if len(names) != len(d.Epochs) {
+	if len(names) < len(d.Epochs) {
 		return ErrIntegrity
 	}
 	known := make(map[string]bool)
+	if retired != "" {
+		known["epoch-"+retired] = true
+	}
 	for _, e := range d.Epochs {
 		known["epoch-"+e.ID] = true
 		path := s.epochRoot(e.ID)
@@ -653,11 +682,7 @@ func (s *ownerState) writeIntent() error {
 }
 
 func (s *ownerState) commit(prepared bool, predecessor ownerRecord) error {
-	raw, err := json.Marshal(s.disk)
-	if err != nil || len(raw) > ownerRecordLimit {
-		return ErrCapacity
-	}
-	if err := s.writeFile("owner.json.tmp", raw); err != nil {
+	if err := s.stageOwnerRecord(s.disk); err != nil {
 		return err
 	}
 	if prepared {
@@ -666,6 +691,14 @@ func (s *ownerState) commit(prepared bool, predecessor ownerRecord) error {
 		}
 	}
 	return s.promoteOwnerRecord()
+}
+
+func (s *ownerState) stageOwnerRecord(disk ownerRecord) error {
+	raw, err := json.Marshal(disk)
+	if err != nil || len(raw) > ownerRecordLimit {
+		return ErrCapacity
+	}
+	return s.writeFile("owner.json.tmp", raw)
 }
 
 func (s *ownerState) promoteOwnerRecord() error {
