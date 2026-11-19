@@ -36,7 +36,7 @@ type ReplayExecutionInput struct {
 type ReplayExecutionOutput struct {
 	ExecutionID string `json:"execution_id" jsonschema:"the new execution created by the replay"`
 	ReplayOf    string `json:"replay_of"`
-	StatusCode  int    `json:"status_code"`
+	StatusCode  int    `json:"status_code" jsonschema:"the replayed function's own HTTP status"`
 	Body        string `json:"body"`
 }
 
@@ -62,7 +62,11 @@ func registerManagedReplayTool(rc *regCtx) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/executions/"+in.ExecutionID+"/replay", nil).WithContext(ctx)
 			rec := httptest.NewRecorder()
 			replay(rec, req)
-			if rec.Code != http.StatusOK {
+			// The handler sets X-Orva-Replay-Of only once the function ran and its
+			// execution was recorded, and then forwards the function's own status
+			// (a 201 or 204 is a successful replay, a 500 is the function's answer).
+			// Admission, capture and dispatch failures never set it: those are errors.
+			if rec.Header().Get("X-Orva-Replay-Of") == "" {
 				var failure struct {
 					Error struct {
 						Code, Message string

@@ -108,3 +108,38 @@ func TestManagedCatalogOperatorSurfaces(t *testing.T) {
 		}
 	}
 }
+
+// The replayed function's own status is a result, not a tool failure; only
+// refusals before or during dispatch (no replay headers) are errors.
+func TestManagedReplayToolReportsTheFunctionStatus(t *testing.T) {
+	f := iamSurfaceSetup(t)
+	run := func(status int, replayed bool, body string) (any, error) {
+		deps := Deps{ManagedServer: true, DB: f.db, Registry: f.registry, IAM: f.service,
+			ReplayExecution: func(w http.ResponseWriter, _ *http.Request) {
+				if replayed {
+					w.Header().Set("X-Orva-Execution-ID", "new-exec")
+					w.Header().Set("X-Orva-Replay-Of", "old-exec")
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
+			}}
+		reg := BuildAgentRegistry(deps, permSet{permRead: true, permWrite: true, permAdmin: true})
+		return reg.Dispatch(f.ctx, "replay_execution", json.RawMessage(`{"execution_id":"old-exec"}`))
+	}
+	for _, status := range []int{200, 201, 204, 404, 500} {
+		out, err := run(status, true, "fn-body")
+		if err != nil {
+			t.Fatalf("function status %d was reported as a tool failure: %v", status, err)
+		}
+		view, ok := out.(ReplayExecutionOutput)
+		if !ok || view.StatusCode != status || view.ExecutionID != "new-exec" || view.ReplayOf != "old-exec" {
+			t.Fatalf("function status %d lost in the result: %#v", status, out)
+		}
+	}
+	for _, status := range []int{404, 409, 410, 502, 503, 504} {
+		if _, err := run(status, false, `{"error":{"code":"X","message":"denied by admission"}}`); err == nil ||
+			!strings.Contains(err.Error(), "denied by admission") {
+			t.Fatalf("refusal %d was not a tool error: %v", status, err)
+		}
+	}
+}
