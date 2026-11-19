@@ -344,6 +344,8 @@ func TestManagedRoutesRequireTheLegacyTier(t *testing.T) {
 		{http.MethodGet, "/api/v1/traces", managedRead},
 		{http.MethodGet, "/api/v1/activity", managedRead},
 		{http.MethodGet, "/api/v1/system/metrics.json", managedRead},
+		{http.MethodGet, "/api/v1/runtimes", managedRead},
+		{http.MethodGet, "/api/v1/syscalls", managedRead},
 		{http.MethodDelete, "/api/v1/executions/" + ids.New(), managedWrite},
 		{http.MethodPost, "/api/v1/executions/bulk-delete", managedWrite},
 		{http.MethodPost, "/api/v1/executions/" + ids.New() + "/replay", managedWrite},
@@ -605,12 +607,48 @@ func TestEveryManagedRouteMatchesTheLegacyTier(t *testing.T) {
 }
 
 // A GET pattern also serves HEAD; the legacy router requires write for it.
+func TestManagedRuntimeAndSyscallInventory(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	reader, _ := f.key("reader", `["read"]`)
+	for _, path := range []string{"/api/v1/runtimes", "/api/v1/syscalls"} {
+		f.expect(http.MethodGet, path, "", "", http.StatusUnauthorized)
+	}
+	var catalog struct {
+		Runtimes []struct {
+			ID      string `json:"id"`
+			Handler string `json:"default_handler"`
+		} `json:"runtimes"`
+	}
+	runtimes := f.call(http.MethodGet, "/api/v1/runtimes", reader, "")
+	if err := json.Unmarshal(runtimes.Body.Bytes(), &catalog); runtimes.Code != http.StatusOK || err != nil {
+		t.Fatalf("runtime catalog: status %d, decode %v", runtimes.Code, err)
+	}
+	if len(catalog.Runtimes) != 2 ||
+		catalog.Runtimes[0].ID != "node" || catalog.Runtimes[0].Handler != "handler.js" ||
+		catalog.Runtimes[1].ID != "python" || catalog.Runtimes[1].Handler != "handler.py" {
+		t.Fatalf("unexpected runtime inventory: %+v", catalog.Runtimes)
+	}
+	var inventory struct {
+		Total    int                        `json:"total"`
+		Syscalls []json.RawMessage          `json:"syscalls"`
+		Policies map[string]json.RawMessage `json:"policies"`
+	}
+	syscalls := f.call(http.MethodGet, "/api/v1/syscalls", reader, "")
+	if err := json.Unmarshal(syscalls.Body.Bytes(), &inventory); syscalls.Code != http.StatusOK || err != nil {
+		t.Fatalf("syscall inventory: status %d, decode %v", syscalls.Code, err)
+	}
+	if inventory.Total == 0 || inventory.Total != len(inventory.Syscalls) || len(inventory.Policies) == 0 {
+		t.Fatalf("unexpected syscall inventory: total=%d, syscalls=%d, policies=%d",
+			inventory.Total, len(inventory.Syscalls), len(inventory.Policies))
+	}
+}
+
 func TestManagedHeadRequiresTheLegacyWriteTier(t *testing.T) {
 	f := newManagedOpsFixture(t)
 	reader, _ := f.key("reader", `["read"]`)
 	writer, _ := f.key("writer", `["write"]`)
 	admin, _ := f.key("admin", `["admin"]`)
-	for _, path := range []string{"/api/v1/executions", "/api/v1/traces", "/api/v1/activity", "/api/v1/system/metrics.json"} {
+	for _, path := range []string{"/api/v1/executions", "/api/v1/traces", "/api/v1/activity", "/api/v1/system/metrics.json", "/api/v1/runtimes"} {
 		if got := requiredPermission(http.MethodHead, path); got != "write" {
 			t.Fatalf("legacy tier for HEAD %s is %q", path, got)
 		}

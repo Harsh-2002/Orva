@@ -58,6 +58,7 @@ Browser sessions hold every tier but must prove same-origin for mutations.
 | | `DELETE /api/v1/executions/{id}`, `POST .../bulk-delete`, `POST .../{id}/replay` | write |
 | Traces | `GET /api/v1/traces`, `/traces/{trace_id}`, `/functions/{id}/baseline` | read |
 | Activity and events | `GET /api/v1/activity`, `GET /api/v1/events` (SSE) | read |
+| Runtime and syscall inventory | `GET /api/v1/runtimes`, `GET /api/v1/syscalls` | read |
 | System | `GET /api/v1/system/metrics`, `/metrics.json` | read |
 | | `GET /api/v1/system/storage`, `POST /api/v1/system/vacuum` | admin |
 | | `GET /api/v1/system/health`, `GET /metrics` | none (probes, scrapers) |
