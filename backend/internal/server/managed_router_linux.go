@@ -164,6 +164,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		gateRoute(mux, db, ops, "POST /api/v1/iam/functions", managedWrite, createManagedFunction(publication))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy", managedWrite, deploy.Deploy)
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/deploy-inline", managedWrite, deploy.DeployInline)
+		gateRoute(mux, db, ops, "DELETE /api/v1/functions/{fn_id}/build-cache", managedWrite, purgeManagedBuildCache(db, reg, manager, dataDir))
 		gateRoute(mux, db, ops, "POST /api/v1/functions/{fn_id}/rollback", managedWrite, deploy.Rollback)
 		history := &workloadhistory.Service{DB: db, Authority: authority, Registry: reg, Managed: policy,
 			CurrentArtifact: manager.CurrentArtifact, InvalidateFactoryUnderGate: manager.InvalidateOwnerFactoryUnderGate}

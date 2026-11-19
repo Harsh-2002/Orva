@@ -41,6 +41,9 @@
 > for GET and `write` for other methods. See [Webhooks](#webhooks) for delivery limits.
 > Managed runtime and syscall inventory use the same read tier as legacy.
 > `orva login --test` and runtime shell completion use the runtime catalog.
+> Managed `DELETE /api/v1/functions/{fn_id}/build-cache` requires live `write`.
+> `orva functions purge-cache` drops only that function's npm/pip cache, not
+> its installed deployment or permissions. It waits for any current build.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
