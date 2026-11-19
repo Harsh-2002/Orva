@@ -296,6 +296,15 @@ print(r.json())
 > collision-checks against other functions before saving).
 > Reserved prefixes: `/api/` `/auth/` `/fn/` `/mcp/` `/web/` `/webhook/` `/_orva/`.
 
+### Saved request fixtures (managed REST)
+
+Use a function name or UUID in `/api/v1/functions/{id}/fixtures`. `GET` on
+the collection lists presets and `GET /{name}` retrieves one; both require
+`read`. `POST` on the collection creates a preset, `PUT /{name}` creates or
+replaces one, and `DELETE /{name}` removes one; all three require `write`.
+These routes only store or read presets; they do not invoke functions.
+Managed MCP and Chat do not expose fixture tools.
+
 ### Check response latency
 
 `GET {{ORIGIN}}/api/v1/system/metrics.json` (with a read-capable API key)

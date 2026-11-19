@@ -258,6 +258,13 @@
         (include the route path as <code class="doc-chip">key</code>).
         Restored mappings must be explicitly republished before they can receive requests.
       </Callout>
+      <p class="doc-prose">
+        The managed REST API stores request presets at
+        <code class="doc-chip">/api/v1/functions/{id}/fixtures</code> (function name or UUID).
+        Listing or getting a preset requires <code class="doc-chip">read</code>;
+        creating, replacing, or deleting one requires <code class="doc-chip">write</code>.
+        Saving does not invoke the function. Managed MCP and Chat do not expose fixture tools.
+      </p>
     </section>
 
     <!-- ── 3. Configuration reference ─────────────────────────────── -->

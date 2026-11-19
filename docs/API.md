@@ -702,6 +702,11 @@ Operator-facing function resources use the normal API-key/session auth:
 - `PUT|DELETE /api/v1/functions/{id}/cron/{schedule_id}`
 - `GET /api/v1/cron` — list schedules across all functions.
 
+The managed listener also exposes the five fixture CRUD routes above. Use a
+function name or UUID for `{id}`. `GET` requires `read`; `POST`, `PUT`, and
+`DELETE` require `write`. Saving a fixture stores a request preset without
+invoking the function. Managed MCP and Chat do not expose fixture tools.
+
 KV keys must be non-empty UTF-8 up to 256 characters and values must be valid
 JSON up to 64 KiB. Internal SDK batches accept at most 100 operations and are
 atomic. For put/increment/CAS, omitted `ttl_seconds` preserves an existing
