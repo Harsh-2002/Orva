@@ -455,14 +455,22 @@ func TestScrubChatCredentialsOnlySucceededCallsAreSources(t *testing.T) {
 // every boot, and returns the per-boot stats.
 func scrubUntilDone(t *testing.T, db *Database, maxBoots, reads, writes int) []scrubStats {
 	t.Helper()
+	return scrubUntilDoneSlack(t, db, maxBoots, reads, writes, 0)
+}
+
+// scrubUntilDoneSlack allows each boot to exceed the bound by at most slack rows
+// read and written: the one documented exception, a resumed final phase that
+// rewrites a batch's minting rows together.
+func scrubUntilDoneSlack(t *testing.T, db *Database, maxBoots, reads, writes, slack int) []scrubStats {
+	t.Helper()
 	var boots []scrubStats
 	for db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
 		if len(boots) >= maxBoots {
 			t.Fatalf("scrub still unfinished after %d boots", maxBoots)
 		}
 		st := db.scrubChatCredentials()
-		if st.scanned > reads || st.rewritten > writes {
-			t.Fatalf("boot %d exceeded the hard bound: read %d/%d rewritten %d/%d", len(boots)+1, st.scanned, reads, st.rewritten, writes)
+		if st.scanned > reads+slack || st.rewritten > writes+slack {
+			t.Fatalf("boot %d exceeded the hard bound: read %d/%d rewritten %d/%d (slack %d)", len(boots)+1, st.scanned, reads, st.rewritten, writes, slack)
 		}
 		if st.scanned == 0 && db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
 			t.Fatalf("boot %d made no progress", len(boots)+1)
@@ -711,5 +719,86 @@ func TestScrubQueriesUseIndexes(t *testing.T) {
 		if !strings.Contains(joined, "USING INDEX") && !strings.Contains(joined, "USING COVERING INDEX") || strings.Contains(joined, "TEMP B-TREE") {
 			t.Errorf("%s: plan = %s", name, joined)
 		}
+	}
+}
+
+// The reviewer's scenario: two minting calls in one conversation, the second
+// result repeating the first credential, and enough other rows that a boot runs
+// out of budget around the final phase. Whatever boot that happens in, the next
+// one must leave no copy of either credential, and the marker may only appear
+// once none is left.
+func seedFinalPhaseScenario(t *testing.T, db *Database, echoes int) (string, string) {
+	t.Helper()
+	a, b := secretOf(11), secretOf(12)
+	seedChatCall(t, db, scrubSeed{"x", "a", "create_api_key", `{"key":"` + a + `"}`}, "")
+	seedChatCall(t, db, scrubSeed{"x", "b", "create_webhook", `{"subscription":{"name":"copy of ` + a + `"},"secret":"` + b + `"}`}, "")
+	if _, err := db.write.Exec(`WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i < ?)
+		INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq)
+		SELECT 'echo'||i, 'x', 'assistant', 'again `+a+`', '[]', 1000+i FROM n`, echoes-1); err != nil {
+		t.Fatal(err)
+	}
+	return a, b
+}
+
+func checkFinalPhaseScenario(t *testing.T, db *Database, a, b string, maxBoots, reads, writes int) int {
+	t.Helper()
+	resetScrub(t, db)
+	boots := 0
+	for db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+		if boots++; boots > maxBoots {
+			t.Fatalf("unfinished after %d boots", maxBoots)
+		}
+		st := db.scrubChatCredentials()
+		if st.scanned > reads+2 || st.rewritten > writes+2 {
+			t.Fatalf("boot %d beyond bound plus the 2-row final phase: %+v", boots, st)
+		}
+		if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
+			for _, v := range []string{a, b} {
+				if n := rowsHolding(t, db, v); n != 0 {
+					t.Fatalf("marker set after boot %d with %d rows still holding a credential", boots, n)
+				}
+			}
+		}
+	}
+	return boots
+}
+
+func TestScrubChatCredentialsFinalPhaseIsNeverSplitReducedBudget(t *testing.T) {
+	multi := 0
+	for reads := 16; reads <= 70; reads++ {
+		db := newTestDB(t)
+		setScrubBudget(t, 50, reads, 12)
+		a, b := seedFinalPhaseScenario(t, db, 9)
+		if boots := checkFinalPhaseScenario(t, db, a, b, 40, reads, 12); boots > 1 {
+			multi++
+		}
+		if rowsHolding(t, db, a)+rowsHolding(t, db, b) != 0 {
+			t.Fatalf("reads=%d: a credential survived", reads)
+		}
+	}
+	if multi == 0 {
+		t.Fatal("no budget in the sweep exhausted the first boot; the scenario is not exercised")
+	}
+}
+
+func TestScrubChatCredentialsFinalPhaseIsNeverSplitDefaultBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("seeds ~5000 rows per run")
+	}
+	multi := 0
+	// Around 4,997 echoed messages the first boot's 10,000 reads run out right at
+	// the final phase.
+	for echoes := 4990; echoes <= 5000; echoes++ {
+		db := newTestDB(t)
+		a, b := seedFinalPhaseScenario(t, db, echoes)
+		if boots := checkFinalPhaseScenario(t, db, a, b, 10, chatScrubMaxScanned, chatScrubMaxRewritten); boots > 1 {
+			multi++
+		}
+		if rowsHolding(t, db, a)+rowsHolding(t, db, b) != 0 {
+			t.Fatalf("echoes=%d: a credential survived", echoes)
+		}
+	}
+	if multi == 0 {
+		t.Fatal("no run exhausted the default budget in the first boot")
 	}
 }

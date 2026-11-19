@@ -257,7 +257,12 @@ never been executed.
   before every read and write. At a bound it commits what is done and persists
   the minting-row cursor plus a conversation/phase/rowid position
   (`chat_credential_scrub_pos`), so the next boot resumes there without rescanning
-  finished rows; a large history therefore takes several boots. It adds
+  finished rows; a large history therefore takes several boots. The one exception
+  to the bound: the batch's own minting rows are the only record of the credential
+  values (they are never persisted elsewhere), so they are rewritten last and all
+  together. If the remaining budget cannot cover them the pass stops before
+  touching any, and the boot that resumes at that phase always finishes it, so a
+  boot can exceed either bound by at most that batch's minting rows (≤ 50). It adds
   `idx_ai_tc_tool` (additive). It exists because those credentials were stored
   and re-sent to the model in clear; it does not guarantee that every copy is
   gone. The list and paths are the single shared `onetime.Fields` that live Chat

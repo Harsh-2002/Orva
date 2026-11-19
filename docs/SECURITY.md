@@ -1066,8 +1066,10 @@ stands alone (neighbours are not letters, digits, `_` or `-`). Failed calls supp
 no value and are not replaced wholesale, but an exact copy of a succeeded call's
 value inside one is scrubbed. Other conversations, rows without the value and JSON
 that does not parse are left as they are. Each boot reads and rewrites at most
-10,000 rows apiece, and resumes exactly where it stopped, so a large history can
-take several boots. It cannot reach copies outside the database (logs, exports,
+10,000 rows apiece (except that the minting calls' own results, at most 50 rows
+per batch, are always rewritten together, never split across boots, so the
+credential values are not lost mid-way) and resumes where it stopped, so a large
+history can take several boots. It cannot reach copies outside the database (logs, exports,
 backups, provider-side prompt logs), altered forms of a value (truncated,
 re-encoded, split) or a value too short to match safely. It does not promise that
 every copy is gone: rotate any credential that was ever shown in Chat.

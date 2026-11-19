@@ -63,12 +63,17 @@ const (
 //     replaced wholesale, but an exact copy of a value inside it is scrubbed.
 //
 // A conversation is processed in phases (messages, tool calls, title, then the
-// minting rows themselves, so their credential fields stay readable until the
-// rest is done), each row re-read immediately before it is written. The pass is
-// hard-bounded per boot on rows read and rewritten; when a bound is reached it
-// commits what is done and persists the batch's minting cursor plus a
-// per-conversation position (table and rowid), so the next boot continues exactly
-// there. The marker is set only after the walk completes. Nothing is dropped.
+// minting rows themselves), each row re-read immediately before it is written.
+// The minting rows are the only record of the credential values (nothing else
+// persists them), so their credential fields are left readable until everything
+// else is done and are then rewritten together in one step that is never split:
+// if the budget cannot cover them all the pass stops before touching any, and the
+// next boot resumes at that phase and always finishes it. That is the one place
+// the per-boot bound can be exceeded, by at most one batch's minting rows. Apart
+// from it the pass is hard-bounded per boot on rows read and rewritten; at a
+// bound it commits what is done and persists the batch's minting cursor plus a
+// per-conversation position (phase and rowid), so the next boot continues there.
+// The marker is set only after the walk completes. Nothing is dropped.
 func (db *Database) scrubChatCredentials() scrubStats {
 	var total scrubStats
 	if db.GetSystemConfigString(chatScrubMarkerKey, "") == "true" {
@@ -399,9 +404,18 @@ func (w *convWork) scrubConversation(tx *sql.Tx, conv string, start scrubPos, b 
 				st.rewritten++
 			}
 		}
-		phase, start.Rowid = phaseFinal, math.MinInt64
 	}
-	return w.finalPhase(tx, start.Rowid, b, st)
+	// The minting rows hold the only copy of the credential values, so they are
+	// rewritten together, never split across boots: if the budget cannot cover all
+	// of them, stop before touching any (every credential field stays readable) and
+	// resume at this phase, which then always finishes. That resumed boot is the one
+	// place a bound can be exceeded, by at most this batch's minting rows.
+	forced := start.Phase == phaseFinal
+	k := len(w.mints)
+	if !forced && (b.readsLeft() < k || b.maxWrites-b.writes < k) {
+		return &scrubPos{Phase: phaseFinal}, nil
+	}
+	return nil, w.finalPhase(tx, b, st)
 }
 
 type messageCand struct {
@@ -525,26 +539,20 @@ func (w *convWork) toolsPhase(tx *sql.Tx, conv string, after int64, b *scrubBudg
 	}
 }
 
-// finalPhase rewrites the batch's own minting rows, in rowid order.
-func (w *convWork) finalPhase(tx *sql.Tx, after int64, b *scrubBudget, st *scrubStats) (*scrubPos, error) {
+// finalPhase rewrites every minting row of the batch in this conversation, each
+// re-read fresh and carrying the full union of the batch's values, in one step.
+func (w *convWork) finalPhase(tx *sql.Tx, b *scrubBudget, st *scrubStats) error {
 	mints := make([]mintRow, 0, len(w.mints))
 	for _, m := range w.mints {
 		mints = append(mints, m)
 	}
 	sort.Slice(mints, func(i, j int) bool { return mints[i].rowid < mints[j].rowid })
 	for _, m := range mints {
-		if m.rowid <= after {
-			continue
-		}
-		if b.readsLeft() < 1 || !b.canWrite() {
-			return &scrubPos{Phase: phaseFinal, Rowid: after}, nil
-		}
 		if err := w.rewriteToolCall(tx, m.id, b, st); err != nil {
-			return nil, err
+			return err
 		}
-		after = m.rowid
 	}
-	return nil, nil
+	return nil
 }
 
 // rewriteToolCall re-reads one tool call by id and writes the scrubbed copy.
