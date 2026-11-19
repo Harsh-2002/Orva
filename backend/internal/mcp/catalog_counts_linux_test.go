@@ -45,8 +45,8 @@ func TestOperatorCatalogMatchesChat(t *testing.T) {
 	}{
 		{"normal-admin", "orva_catalog_all_test", normal, all, "invoke_function", 73},
 		{"normal-read", "orva_catalog_read_test", normal, read, "list_functions", 28},
-		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 69},
-		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 23},
+		{"managed-admin", "orva_catalog_all_test", managed, all, "create_iam_policy", 75},
+		{"managed-read", "orva_catalog_read_test", managed, read, "list_iam_policies", 25},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := NewHandler(tc.deps)
