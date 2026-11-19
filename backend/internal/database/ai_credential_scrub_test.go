@@ -50,6 +50,30 @@ func seedChatCallStatus(t *testing.T, db *Database, s scrubSeed, echo, status st
 	}
 }
 
+// seedChatTurn stores a minting call the way the agent does: an assistant message
+// requests it (the audit row carries that message's id), the tool message holds
+// the result, and an optional assistant reply echoes the credential.
+func seedChatTurn(t *testing.T, db *Database, s scrubSeed, echo string) {
+	t.Helper()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.write.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT OR IGNORE INTO ai_conversations (id) VALUES (?)`, s.conv)
+	req := "req-" + s.conv + s.callID
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, ?, 'assistant', 'calling the tool', '[]', ?)`, req, s.conv, seqOf(t, db, s.conv))
+	exec(`INSERT INTO ai_tool_calls (id, conversation_id, message_id, call_id, tool_name, result, status) VALUES (?, ?, ?, ?, ?, ?, 'succeeded')`,
+		"tc-"+s.conv+"-"+s.callID+s.tool, s.conv, req, s.callID, s.tool, s.result)
+	exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, ?, 'tool', ?, ?, ?)`,
+		"m-tool-"+s.conv+s.callID+s.tool, s.conv, s.result, fmt.Sprintf(`[{"type":"tool_result","call_id":%q,"status":"succeeded"}]`, s.callID), seqOf(t, db, s.conv))
+	if echo != "" {
+		exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, ?, 'assistant', ?, '[]', ?)`,
+			"m-asst-"+s.conv+s.callID+s.tool, s.conv, "Here is your key: "+echo, seqOf(t, db, s.conv))
+	}
+}
+
 func seqOf(t *testing.T, db *Database, conv string) int {
 	t.Helper()
 	var n int
@@ -155,7 +179,7 @@ func TestScrubChatCredentialsShapesAndUnparseable(t *testing.T) {
 		{"c", "3", "create_api_key", `{"key":"` + secretOf(4) + `"} {"trailing":"` + secretOf(5) + `"}`},
 		{"d", "4", "create_inbound_webhook", `{"error":"denied"}`}, // a failure: nothing to redact
 	} {
-		seedChatCall(t, db, c, "")
+		seedChatTurn(t, db, c, "")
 	}
 	resetScrub(t, db)
 	_ = db.scrubChatCredentials()
@@ -813,8 +837,8 @@ func TestScrubChatCredentialsMalformedResultToolMessageByCallID(t *testing.T) {
 			db := newTestDB(t)
 			setScrubBudget(t, batch, 10000, 10000)
 			a, b := secretOf(13), secretOf(14)
-			seedChatCall(t, db, scrubSeed{"m", "a", "create_api_key", `{"key":"` + a + `"}`}, "")
-			seedChatCall(t, db, scrubSeed{"m", "b", "create_webhook", `{"secret":"` + b + `"} trailing copy ` + a}, "")
+			seedChatTurn(t, db, scrubSeed{"m", "a", "create_api_key", `{"key":"` + a + `"}`}, "")
+			seedChatTurn(t, db, scrubSeed{"m", "b", "create_webhook", `{"secret":"` + b + `"} trailing copy ` + a}, "")
 			resetScrub(t, db)
 			for boots := 0; db.GetSystemConfigString(chatScrubMarkerKey, "") != "true"; boots++ {
 				if boots > 20 {
@@ -877,4 +901,116 @@ func TestScrubChatCredentialsCallIDReuseDoesNotReachOtherMessages(t *testing.T) 
 			t.Errorf("%s was altered through a reused call id: %s", id, got)
 		}
 	}
+}
+
+// Nothing is changed that cannot be proven. The reviewer's two reachable cases:
+// (1) the same call id twice in one turn, (2) an id reused in a later turn after
+// the call's own tool message was deleted. An unrelated tool result that happens
+// to have a "key" field stays byte-identical, and so does every other message.
+func TestScrubChatCredentialsNeverChangesWhatItCannotProve(t *testing.T) {
+	secret := secretOf(16)
+	unrelated := `{"key":"unrelated-setting"}`
+	setup := func(t *testing.T) (*Database, func(string, string, string, string, int)) {
+		db := newTestDB(t)
+		exec := func(q string, args ...any) {
+			t.Helper()
+			if _, err := db.write.Exec(q, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		exec(`INSERT INTO ai_conversations (id) VALUES ('p')`)
+		msg := func(id, role, content, call string, seq int) {
+			parts := "[]"
+			if role == "tool" {
+				parts = fmt.Sprintf(`[{"type":"tool_result","call_id":%q,"status":"succeeded"}]`, call)
+			}
+			exec(`INSERT INTO ai_messages (id, conversation_id, role, content, parts, seq) VALUES (?, 'p', ?, ?, ?, ?)`, id, role, content, parts, seq)
+		}
+		return db, func(id, role, content, call string, seq int) { msg(id, role, content, call, seq) }
+	}
+	audit := func(t *testing.T, db *Database, id, msgID, call, tool, result string) {
+		t.Helper()
+		if _, err := db.write.Exec(`INSERT INTO ai_tool_calls (id, conversation_id, message_id, call_id, tool_name, args, result, status) VALUES (?, 'p', ?, ?, ?, '{}', ?, 'succeeded')`,
+			id, msgID, call, tool, result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish := func(t *testing.T, db *Database) scrubStats {
+		t.Helper()
+		resetScrub(t, db)
+		var total scrubStats
+		for i := 0; i < 5 && db.GetSystemConfigString(chatScrubMarkerKey, "") != "true"; i++ {
+			st := db.scrubChatCredentials()
+			total.ambiguous += st.ambiguous
+		}
+		if db.GetSystemConfigString(chatScrubMarkerKey, "") != "true" {
+			t.Fatal("not finished")
+		}
+		return total
+	}
+
+	t.Run("same call id twice in one turn", func(t *testing.T) {
+		db, msg := setup(t)
+		msg("a1", "assistant", "two calls", "", 1)
+		bad := `{"key":"` + secret + `"} trailing`
+		msg("t-mint", "tool", bad, "call_0", 2)
+		msg("t-kv", "tool", unrelated, "call_0", 3) // a kv_put whose id the provider repeated
+		audit(t, db, "mint", "a1", "call_0", "create_api_key", bad)
+		audit(t, db, "kv", "a1", "call_0", "kv_put", unrelated)
+		st := finish(t, db)
+		if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 't-kv'`); got != unrelated {
+			t.Fatalf("unrelated tool message changed: %s", got)
+		}
+		if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE id = 'kv'`); got != unrelated {
+			t.Fatalf("unrelated audit row changed: %s", got)
+		}
+		if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 't-mint'`); got != bad {
+			t.Fatalf("ambiguous message was changed: %s", got)
+		}
+		if st.ambiguous == 0 {
+			t.Fatal("the skipped message was not counted")
+		}
+		// The audit row of the minting call itself is the source and is redacted.
+		if got := column(t, db, `SELECT result FROM ai_tool_calls WHERE id = 'mint'`); got != `"`+scrubPlaceholder+`"` {
+			t.Fatalf("minting audit row = %s", got)
+		}
+	})
+
+	t.Run("id reused in a later turn after the result was deleted", func(t *testing.T) {
+		db, msg := setup(t)
+		msg("a1", "assistant", "mint", "", 1)
+		// the minting call's own tool message (seq 2) was deleted
+		msg("a2", "assistant", "later", "", 3)
+		msg("t-kv", "tool", unrelated, "call_0", 4)
+		bad := `{"key":"` + secret + `"} trailing`
+		audit(t, db, "mint", "a1", "call_0", "create_api_key", bad)
+		audit(t, db, "kv", "a2", "call_0", "kv_put", unrelated)
+		finish(t, db)
+		if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 't-kv'`); got != unrelated {
+			t.Fatalf("a later turn's result was rewritten: %s", got)
+		}
+	})
+
+	t.Run("a parseable result redacts only a proven value", func(t *testing.T) {
+		db, msg := setup(t)
+		msg("a1", "assistant", "mint", "", 1)
+		good := `{"key":"` + secret + `"}`
+		msg("t-mint", "tool", good, "call_0", 2)
+		msg("a2", "assistant", "later", "", 3)
+		msg("t-kv", "tool", unrelated, "call_0", 4) // reuses the id later
+		audit(t, db, "mint", "a1", "call_0", "create_api_key", good)
+		audit(t, db, "kv", "a2", "call_0", "kv_put", unrelated)
+		// Even when the lookup lands on the wrong message (the real one deleted),
+		// a field is replaced only if it holds the credential.
+		if _, err := db.write.Exec(`DELETE FROM ai_messages WHERE id = 't-mint'`); err != nil {
+			t.Fatal(err)
+		}
+		finish(t, db)
+		if got := column(t, db, `SELECT content FROM ai_messages WHERE id = 't-kv'`); got != unrelated {
+			t.Fatalf("an unproven field was redacted by name: %s", got)
+		}
+		if strings.Contains(chatText(t, db), secret) {
+			t.Fatal("credential survived")
+		}
+	})
 }

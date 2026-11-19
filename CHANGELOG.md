@@ -33,7 +33,9 @@ unreleased range, and the sections below as the record for everything before it.
   results). Copy the value before reloading or leaving Chat. On the first boot
   after upgrading, a best-effort migration also replaces one-time credentials
   already stored in Chat history with the placeholder: the audit rows, each call's own
-  tool message (matched by call id, replaced whole if its JSON is malformed) and exact copies of the value elsewhere in the same conversation
+  tool message (a field only if it holds the credential; replaced whole if the
+  result was malformed JSON and the call id matches unambiguously, otherwise left
+  and counted) and exact copies of the value elsewhere in the same conversation
   (messages, thinking, later tool arguments and results including failed ones, the
   title; whole strings only, never part of a longer token). Each boot is bounded to
   10,000 rows read and 10,000 rewritten (a batch's minting-call results and their

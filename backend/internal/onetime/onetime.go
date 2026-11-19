@@ -66,6 +66,61 @@ func Values(raw string, paths []string) (values []string, ok bool) {
 	return values, true
 }
 
+// RedactMatching replaces a field at one of the paths only when its current
+// string value is in allowed (the credential values taken from a minting call),
+// never because of its name. Input that is not one valid JSON value is returned
+// unchanged: nothing can be proven about it.
+func RedactMatching(raw string, paths []string, allowed map[string]bool) (string, bool) {
+	if len(paths) == 0 || len(allowed) == 0 {
+		return raw, false
+	}
+	doc, ok := parse(raw)
+	if !ok {
+		return raw, false
+	}
+	changed := false
+	for _, p := range paths {
+		if redactPathIf(doc, strings.Split(p, "."), allowed) {
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, false
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return raw, false
+	}
+	return string(b), true
+}
+
+func redactPathIf(node any, path []string, allowed map[string]bool) bool {
+	switch n := node.(type) {
+	case []any:
+		changed := false
+		for _, el := range n {
+			if redactPathIf(el, path, allowed) {
+				changed = true
+			}
+		}
+		return changed
+	case map[string]any:
+		v, ok := n[path[0]]
+		if !ok {
+			return false
+		}
+		if len(path) == 1 {
+			if str, isStr := v.(string); isStr && allowed[str] {
+				n[path[0]] = Placeholder
+				return true
+			}
+			return false
+		}
+		return redactPathIf(v, path[1:], allowed)
+	}
+	return false
+}
+
 func quoted() string {
 	b, _ := json.Marshal(Placeholder)
 	return string(b)

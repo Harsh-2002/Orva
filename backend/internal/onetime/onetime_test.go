@@ -21,3 +21,19 @@ func TestRedactIsIdempotentAndValuesFindsCredentials(t *testing.T) {
 		t.Fatal("malformed input reported as locatable")
 	}
 }
+
+func TestRedactMatchingOnlyReplacesProvenValues(t *testing.T) {
+	allowed := map[string]bool{"real-credential-value": true}
+	if got, ok := RedactMatching(`{"key":"real-credential-value","n":1}`, []string{"key"}, allowed); !ok || got != `{"key":"`+Placeholder+`","n":1}` {
+		t.Fatalf("matching value: %q %v", got, ok)
+	}
+	// Same field name, a different value: not provable, so untouched.
+	for _, in := range []string{`{"key":"unrelated-setting"}`, `{"key":7}`, `not json`, `{"other":"real-credential-value"}`} {
+		if got, ok := RedactMatching(in, []string{"key"}, allowed); ok || got != in {
+			t.Fatalf("%q was changed to %q", in, got)
+		}
+	}
+	if _, ok := RedactMatching(`{"key":"x"}`, []string{"key"}, nil); ok {
+		t.Fatal("no allowed values must never redact")
+	}
+}

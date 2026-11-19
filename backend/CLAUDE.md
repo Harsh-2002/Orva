@@ -357,9 +357,15 @@ only copy of the values (never persisted) and are therefore rewritten together i
 one step: if the budget cannot cover them all the pass stops before touching any
 and the next boot, which resumes at that phase, always finishes it. That is the
 one place a boot may exceed the bounds, by at most 2 × `chatScrubBatchRows` rows.
-The tool message is found by call id (first one after the requesting assistant
-message; content equality only without a call id), so an earlier batch's text
-rewrite cannot break the match; unparseable content is replaced wholesale.
+Rule: never change what cannot be proven. A credential field outside the minting
+audit row (the source) is redacted only if its value equals a credential taken
+from the conversation's succeeded minting calls (`onetime.RedactMatching`, never
+by field name). The call's tool message is found by call id (first after the
+requesting assistant message) for that value-verified redaction; a malformed
+result's tool message is replaced whole only on unambiguous correlation (one audit
+row with the id in the turn, one tool message with it before the next assistant
+message, content not valid JSON), else skipped and counted
+(`scrubStats.ambiguous`, INFO log). Content equality only without a call id.
 Values come only from succeeded calls of the tools in `onetime.Fields`; a failed
 call is never replaced wholesale, but copies of a value inside it are scrubbed.
 JSON columns are rewritten through decoded string leaves (unparseable ones are

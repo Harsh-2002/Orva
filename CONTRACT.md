@@ -240,12 +240,19 @@ never been executed.
   source, best effort. Credential values are read only from succeeded
   `create_api_key` / `create_webhook` / `create_inbound_webhook` calls (the shared
   `onetime.Fields`). Their own result loses the credential field (wholesale if it
-  is not valid JSON). The call's own `ai_messages` role=`tool` message is found by
-  call id (the first one after the assistant message that requested the call, so a
-  reused id elsewhere is not reached; content equality only when the call has no
-  call id) and treated the same way from its current content: credential field
-  removed, or the whole content replaced if it is not valid JSON, in the same
-  atomic final step as the audit row. Within the same conversation the exact value (≥16 characters)
+  is not valid JSON). Nothing else is changed on a
+  name or a guess: a credential field in any other row, including the call's
+  correlated `ai_messages` role=`tool` message (the first one with its call id
+  after the assistant message that requested the call), is replaced only if its
+  current decoded value equals a credential taken from that conversation's
+  succeeded minting calls. When the call's result is malformed JSON no value can
+  be taken, so its tool message is replaced whole only if the correlation is
+  unambiguous (the requesting assistant message exists, exactly one audit row has
+  the call id in that turn, exactly one tool message has it before the next
+  assistant message, and its content is itself not valid JSON); otherwise it is
+  left untouched and only counted (logged at INFO as a count, never a value). With
+  no call id, content equality with the result is the only correlation. These
+  rewrites happen in the same atomic final step as the audit row. Within the same conversation the exact value (≥16 characters)
   is also replaced in `ai_messages.content`/`parts`, `ai_tool_calls.args`/`result`
   and `ai_conversations.title`: inside decoded string leaves of JSON columns
   (re-marshalled, never patched as raw text; a JSON column that does not parse is

@@ -108,6 +108,10 @@ func (db *Database) scrubChatCredentials() scrubStats {
 			if total.rewritten > 0 {
 				slog.Info("scrubbed stored Chat credentials", "minting_calls", total.minted, "rows_rewritten", total.rewritten)
 			}
+			if total.ambiguous > 0 {
+				slog.Info("Chat credential scrub left tool messages untouched: correlation to a malformed result was ambiguous; rotate any credential shown in Chat",
+					"messages", total.ambiguous)
+			}
 			if err := db.SetSystemConfig(chatScrubMarkerKey, "true"); err != nil {
 				slog.Warn("chat credential scrub marker write failed", "err", err)
 			}
@@ -126,7 +130,7 @@ func parseCursor(v string) (int64, bool) {
 	return n, err == nil && n >= 0
 }
 
-type scrubStats struct{ scanned, rewritten, minted int }
+type scrubStats struct{ scanned, rewritten, minted, ambiguous int }
 
 type scrubBudget struct{ reads, writes, maxReads, maxWrites int }
 
@@ -178,6 +182,13 @@ type convWork struct {
 	// rewritten in the final step, from their current content: structurally if it
 	// parses, wholesale if it does not.
 	toolMsgs map[string]string
+	// allValues is every credential value (any length) taken from this batch's
+	// minting calls; a correlated message's credential field is redacted only if
+	// its value is in it.
+	allValues map[string]bool
+	// wholesale holds tool messages to replace entirely: the call's result was
+	// malformed JSON and the message is the one unambiguous match for it.
+	wholesale map[string]bool
 }
 
 // resultCorrelation finds the role=tool message that stores a minting result.
@@ -249,33 +260,46 @@ func (db *Database) scrubChatBatch(cursor int64, pos *scrubPos, b *scrubBudget, 
 		st.minted++
 		w := work[r.conversationID]
 		if w == nil {
-			w = &convWork{mints: map[string]mintRow{}, toolMsgs: map[string]string{}}
+			w = &convWork{mints: map[string]mintRow{}, toolMsgs: map[string]string{}, allValues: map[string]bool{}, wholesale: map[string]bool{}}
 			work[r.conversationID] = w
 		}
 		w.mints[r.id] = r
-		// The tool message is correlated by call id, not by content: an earlier
-		// batch may already have rewritten its text, so it need not equal the
-		// audit result any more. Content equality is only the fallback for a call
-		// that has no call id.
-		target := ""
-		if r.callID != "" {
-			var err error
-			if target, err = findToolMessage(tx, r.conversationID, r.messageID, callIDPart(r.callID)); err != nil {
+		values, parseable := onetime.Values(r.result.String, paths)
+		for _, v := range values {
+			w.allValues[v] = true
+			if len(v) >= chatScrubMinValueLen {
+				w.values = append(w.values, v)
+			}
+		}
+		switch {
+		case r.callID == "":
+			// No call id to correlate by: the message that equals the result.
+			w.corr = append(w.corr, resultCorrelation{orig: r.result.String, redacted: redacted})
+		case parseable:
+			// The credential field of the call's tool message is redacted only if
+			// it holds one of these values, so a wrong guess cannot change anything.
+			target, err := findToolMessage(tx, r.conversationID, r.messageID, callIDPart(r.callID))
+			if err != nil {
 				return batchResult{}, err
 			}
 			b.reads++
 			st.scanned++
-		}
-		if target != "" {
-			w.toolMsgs[target] = r.tool
-		} else {
-			w.corr = append(w.corr, resultCorrelation{orig: r.result.String, redacted: redacted, callPart: callIDPart(r.callID)})
-		}
-		if values, ok := onetime.Values(r.result.String, paths); ok {
-			for _, v := range values {
-				if len(v) >= chatScrubMinValueLen {
-					w.values = append(w.values, v)
-				}
+			if target != "" {
+				w.toolMsgs[target] = r.tool
+			}
+		default:
+			// Malformed result: no value can be extracted, so the message can only
+			// be replaced as a whole, and only when the correlation is unambiguous.
+			target, ok, err := findUnambiguousToolMessage(tx, r)
+			if err != nil {
+				return batchResult{}, err
+			}
+			b.reads += 3
+			st.scanned += 3
+			if ok {
+				w.wholesale[target] = true
+			} else {
+				st.ambiguous++
 			}
 		}
 	}
@@ -433,7 +457,7 @@ func (w *convWork) scrubConversation(tx *sql.Tx, conv string, start scrubPos, b 
 	// resume at this phase, which then always finishes. That resumed boot is the one
 	// place a bound can be exceeded, by at most this batch's minting rows.
 	forced := start.Phase == phaseFinal
-	k := len(w.mints) + len(w.toolMsgs)
+	k := len(w.mints) + len(w.finalMessageIDs())
 	if !forced && (b.readsLeft() < k || b.maxWrites-b.writes < k) {
 		return &scrubPos{Phase: phaseFinal}, nil
 	}
@@ -574,17 +598,30 @@ func (w *convWork) finalPhase(tx *sql.Tx, b *scrubBudget, st *scrubStats) error 
 			return err
 		}
 	}
-	ids := make([]string, 0, len(w.toolMsgs))
-	for id := range w.toolMsgs {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
+	for _, id := range w.finalMessageIDs() {
 		if err := w.rewriteToolMessage(tx, id, b, st); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// finalMessageIDs lists the correlated tool messages rewritten with the minting
+// rows, in a stable order.
+func (w *convWork) finalMessageIDs() []string {
+	set := map[string]bool{}
+	for id := range w.toolMsgs {
+		set[id] = true
+	}
+	for id := range w.wholesale {
+		set[id] = true
+	}
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // rewriteToolMessage re-reads a minting call's tool message and writes it with
@@ -611,6 +648,57 @@ func (w *convWork) rewriteToolMessage(tx *sql.Tx, id string, b *scrubBudget, st 
 	b.writes++
 	st.rewritten++
 	return nil
+}
+
+// findUnambiguousToolMessage finds the one tool message for a call whose result
+// is malformed, or reports that it cannot be proven: the requesting assistant
+// message must exist, exactly one audit row may carry the call id within that
+// turn, and exactly one tool message with the call id may sit between that
+// assistant message and the next one. Anything else (a duplicate id in one turn,
+// a deleted result, an id reused in a later turn) leaves the message alone.
+func findUnambiguousToolMessage(tx *sql.Tx, r mintRow) (string, bool, error) {
+	if r.messageID == "" {
+		return "", false, nil
+	}
+	var aseq int64
+	err := tx.QueryRow(`SELECT seq FROM ai_messages WHERE id = ? AND conversation_id = ? AND role = 'assistant'`,
+		r.messageID, r.conversationID).Scan(&aseq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	var audits int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM ai_tool_calls WHERE conversation_id = ? AND call_id = ? AND message_id = ?`,
+		r.conversationID, r.callID, r.messageID).Scan(&audits); err != nil {
+		return "", false, err
+	}
+	if audits != 1 {
+		return "", false, nil
+	}
+	rows, err := tx.Query(`SELECT id FROM ai_messages WHERE conversation_id = ?1 AND role = 'tool' AND instr(parts, ?2) > 0
+		AND seq > ?3 AND seq < COALESCE((SELECT MIN(seq) FROM ai_messages WHERE conversation_id = ?1 AND role = 'assistant' AND seq > ?3), 9223372036854775807)
+		LIMIT 2`, r.conversationID, callIDPart(r.callID), aseq)
+	if err != nil {
+		return "", false, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return "", false, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rowsDone(rows, "lookup"); err != nil {
+		return "", false, err
+	}
+	if len(ids) != 1 {
+		return "", false, nil
+	}
+	return ids[0], true, nil
 }
 
 // findToolMessage returns the first role=tool message carrying the call id after
@@ -655,12 +743,20 @@ func (w *convWork) rewriteToolCall(tx *sql.Tx, id string, b *scrubBudget, st *sc
 // message computes one message's scrubbed content and parts.
 func (w *convWork) message(id, role, content, parts string, final bool) (string, string, bool) {
 	c := content
-	if tool, own := w.toolMsgs[id]; own {
+	tool, byID := w.toolMsgs[id]
+	whole := w.wholesale[id]
+	if byID || whole {
 		if !final {
 			return content, parts, false // rewritten with the minting rows, atomically
 		}
-		if red, ch := onetime.Redact(c, onetime.Fields[tool]); ch {
-			c = red
+		if byID {
+			// Value-verified: only a field holding one of this call's credentials.
+			if red, ch := onetime.RedactMatching(c, onetime.Fields[tool], w.allValues); ch {
+				c = red
+			}
+		}
+		if whole && !json.Valid([]byte(c)) {
+			c = jsonString(onetime.Placeholder)
 		}
 	}
 	if role == "tool" {
