@@ -17,9 +17,14 @@ Managed boot authenticates the canonical Owner record with a distinct,
 pre-provisioned 32-byte random host witness before choosing an opener. The
 witness is mode `0600` in a mode `0700` directory, outside data/backup roots;
 it is never migrated, regenerated, rotated or backed up. Authenticated
-same-kernel-boot records require exact cgroup fencing, including after
-daemon process loss. Only a different kernel boot qualifies for cold opening;
-a missing or replaced cgroup on the same boot is failure, not death proof.
+same-kernel-boot records require either exact cgroup fencing or typed removal
+of both authenticated identities (epoch and parent), observed on the captured
+cgroup-v2 mount. The kernel does not let populated or non-leaf cgroups be
+removed or permit renames; recreated paths have distinct 64-bit kernfs IDs.
+A missing/replaced group under the original parent, older references with no
+authenticated parent identity, and ambiguous mount or metadata views fail
+closed when exact fencing is unavailable. Only a different kernel boot
+qualifies for cold opening.
 Deleting the witness on uninstall makes sealed stores unrecoverable on that
 host. The kernel boot and witness do not attest the host or prevent privileged
 in-place rollback.

@@ -21,8 +21,14 @@ unreleased range, and the sections below as the record for everything before it.
   paths. Legacy startup exits 78 (`EX_CONFIG`) before opening SQLite if it
   cannot take the lock or finds an unexpected mode, tombstone or assertion.
   Managed serving remains explicit opt-in via the durable mode record and
-  retains stricter directory checks. It needs a separately provisioned
-  witness and persistent delegated cgroup budget. Native uninstall destroys
+  retains stricter directory checks. It needs a separately provisioned witness
+  and a delegated cgroup-v2 budget. Same-boot daemon restarts fence intact
+  epochs or recover when the manager removes both the epoch and its recorded
+  parent and recreates the service/container at the same path. Partial
+  removal, absent authenticated parent identities when a group is gone,
+  changed paths, and witness mismatches still exit 78. Older references
+  require exact same-boot fencing until retired or a verified cold recovery.
+  Native uninstall destroys
   the standard witness even if data is retained; the sealed stores then
   become unrecoverable on that host. New systemd units do not restart on 78.
 

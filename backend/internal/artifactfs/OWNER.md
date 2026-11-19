@@ -65,16 +65,15 @@ from incomplete/unknown intent.
 For host-bound same-boot recovery only, a synced `owner.prepared` permits
 reconciliation before or after the successor record's rename. With the
 witness and all root locks held, the opener verifies an exact one-epoch
-append, fences the candidate and all current-boot roots, and verifies the
-prior-boot associations as usual. It completes and rechecks the commit
+append, verifies exact fencing or typed removal for the candidate and all
+current-boot roots, and verifies prior-boot associations as usual. It completes and rechecks the commit
 before clearing its markers. The candidate goes into history; it is never
 reopened for entry. Recovery must still provision a fresh live epoch within
 the original cap before any bindings are returned.
 
 An incomplete append without a complete authenticated prepared record still
-denies. Missing or replaced associated same-boot groups and unknown layouts
-also deny. This is not first-create repair, cold append replay, or daemon boot
-wiring.
+denies. Ambiguous epoch identities and unknown layouts also deny. This is
+not first-create repair or cold append replay.
 
 `Bindings(ctx)` checks the still-owned association/layout/store identities and
 current verified Domain reference before returning trusted internal references.
@@ -97,12 +96,11 @@ must still use the same returned binding triple; it is not hostile-host isolatio
 
 1. Holds the owner and both store locks, checks exact association/root/role/
    limit/layout identity, then opens all associated root epochs for version 1
-   or every exact epoch in the final boot run for version 2 through the
-   narrow `OpenRecoveringUnderBudget` constructor. Every fresh verified
-   Reference must equal its stored association data. It rejects wrong boot,
-   missing/replaced current groups, corrupt records and mixed/unknown state.
-   A host-bound owner also verifies the host binding and each prior-boot
-   reference before skipping any previous run.
+   or verifies every epoch in the final boot run for version 2. Exact live
+   groups reopen with `OpenRecoveringUnderBudget`; verified-removed epochs
+   enter history without reopening. Both paths require the authenticated
+   reference to match the durable epoch. The host-bound owner also verifies
+   each prior-boot reference before skipping any previous run.
 2. Fence/Checks the exact old roots under that valid captured budget. Ordinary
    append records intent first; a full history completes retirement before
    starting append. The root contains every typed build/worker descendant.
@@ -157,13 +155,22 @@ verified Domain reference; no boot ID is accepted from configuration.
 recorded epoch validates through `ValidatePriorBootUnderBudget`. That API checks
 each exact old record against the current live captured budget and rejects the
 current boot. It does not open an old cgroup or mint a Domain or fence proof.
-If the final run is from this boot, use `OpenOwnerRecovery`; missing cgroups in
-that run deny, regardless of which entry point is used. Both entry points use
+If the final run is from this boot, use `OpenOwnerRecovery`. Both entry points use
 the same append intent, commit barrier and store verification. Cold recovery
 can replay authenticated retirement; it does not repair incomplete append state.
 `OpenOwnerForBoot` chooses these paths after checking the witness MAC and
 durable instance ID under the owner lock. Provisioning accepts only three
 empty private roots.
+
+For new host-bound epochs the witness MAC also covers the parent device and
+inode. The typed removal path reads and matches `epoch.json` under its lock
+and checks both paths on the pinned live cgroup-v2 mount. It accepts an exact
+parent and group only for normal fencing, or both identities gone as removal
+evidence. The kernel rejects renames and will not remove a cgroup with
+processes or children; 64-bit kernfs IDs include a generation, so a recreated
+path is not the old group. A missing/replaced group with the original parent
+present still denies. Version 1 and older host-bound references without the
+authenticated parent identity always require exact same-boot fencing.
 
 The witness is not hardware attestation or rollback detection. Host placement
 and backup-root completeness are trusted provisioning facts. Privileged host
@@ -177,8 +184,8 @@ must remain stable across reboots; changed device/inode values deny.
 At `MaxEpochs`, a host-bound recovery retires exactly the oldest associated
 epoch before appending a new one. The newest predecessor is always retained.
 The rule also applies if reconciling a prepared append fills the last slot.
-The opener must validate prior-boot references via `ValidatePriorBootUnderBudget`
-and hold a fresh `Fence` + `Check` proof for each reopened current-boot root.
+The opener must validate prior-boot and removed same-boot history and hold a
+fresh `Fence` + `Check` proof for each reopened current-boot root.
 
 After validation, it syncs `owner.retire` and its directory, then commits
 `owner.json` without that epoch using the usual synced temp file and rename.
@@ -186,17 +193,15 @@ Before the commit, replay requires the exact predecessor and repeats its
 validation. After the commit, replay accepts only the exact successor and the
 recorded cleanup residue. It checks and removes the same-boot empty cgroup
 tree first, then unlinks the exact metadata record and directory, syncs the
-directory removals, and removes and syncs the journal. A missing same-boot
-group is accepted only in this authenticated, already-unbound cleanup phase;
-it is not death evidence. A still-present group must match the exact identity
-and be empty; replacement, population, and unknown layouts deny. Prior-boot
-cgroups are never looked up or removed.
+directory removals, and removes and syncs the journal. In this authenticated
+post-commit cleanup phase an already absent group needs no cleanup. For a
+verified-removed epoch, a replacement group under a replacement parent is
+left untouched. Prior-boot cgroups are never looked up or removed.
 
 No bindings are returned until retirement and the fresh append finish. Sealed
 code/runtime and staged or retired store entries are unchanged; no grants or
-policy are restored. Bound same-boot cgroups must outlive the daemon process;
-a native systemd launcher needs a separate delegated unit under
-`orva-workloads.slice`.
+policy are restored. A same-boot restart may retain the parent for exact
+fencing or remove the whole parent subtree and create it again at its path.
 
 ## Budget recapture prerequisite
 

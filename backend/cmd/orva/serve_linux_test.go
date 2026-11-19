@@ -14,6 +14,7 @@ import (
 func TestServeRefusesBeforeOpeningDatabase(t *testing.T) {
 	logger := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(logger) })
+	t.Setenv(managedParentEnv, "")
 	for _, tc := range []struct{ mode, env string }{
 		{"tombstone", servingmode.Legacy},
 		{servingmode.Managed, servingmode.Managed},

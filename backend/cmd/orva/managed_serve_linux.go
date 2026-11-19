@@ -64,8 +64,12 @@ func managedOutputConfig(dataDir string, limits artifactfs.Limits) builder.Outpu
 
 func openManagedBootOwner(ctx context.Context, dataDir string, record servingmode.Record, create bool) (*artifactfs.Owner, *workloadfence.Budget, error) {
 	cfg := managedOwnerConfig(dataDir)
-	if cfg.Parent == "" {
-		return nil, nil, fmt.Errorf("%s must name the delegated orva.workers cgroup", managedParentEnv)
+	if _, set := os.LookupEnv(managedParentEnv); !set {
+		parent, err := workloadfence.DefaultServingParent()
+		if err != nil {
+			return nil, nil, fmt.Errorf("derive managed workload parent: %w", err)
+		}
+		cfg.Parent = parent
 	}
 	if create {
 		for _, path := range []string{cfg.MetadataRoot, cfg.CodeRoot, cfg.RuntimeRoot, managedOutputConfig(dataDir, cfg.CodeLimits).MetadataRoot} {

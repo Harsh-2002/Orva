@@ -12,7 +12,8 @@ only valid exact associations; restore gets a deny evaluator before dispatch.
 `scheduler.RunManaged` starts only shared-authority job/cron loops and drains
 before it returns. Legacy mutation routes and tools are not mounted in this
 composition. The authenticated final boot run selects same-boot exact fencing
-or a true kernel-cold opener. Legacy enrollment and portable restore remain gates.
+or typed epoch-and-parent removal, or a true kernel-cold opener. Legacy
+enrollment and portable restore remain gates.
 
 Managed inbound webhooks (`/webhook/{id}`) use the same pattern: `MatchManagedInbound`
 over `workload_inbound_publications` (triggers unpublish any non-managed write;
@@ -93,7 +94,7 @@ go vet ./...
 
 | Package | Purpose |
 |---|---|
-| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. Opt-in managed boot requires a host-bound Owner, exact same-boot fencing or a verified prior kernel boot. At the epoch cap it retires the oldest proven epoch. See OWNER.md. |
+| `artifactfs` | Linux staging, strict manifest verification and code/runtime leases. Unbound recovery stays inspection-only. Managed boot uses a host-bound Owner with exact fencing, typed same-boot epoch-and-parent removal, or verified prior-boot history. At the cap it retires the oldest verified epoch. See OWNER.md. |
 | `workloadspawn` | Inactive frozen-generation factories issue bounded one-use spawn plans from owned config/secrets and concrete code/runtime leases. Matching resource facts do not establish current-generation proof, policy approval or serving-pool wiring. |
 | `workloadiam` | Function-IAM policy parser, immutable evaluator and admission/publication coordinator. SDK-host KV integration is internal opt-in only; no serving, scheduler, boot migration or public API activation yet. See the package README and `docs/FUNCTION_IAM_PLAN.md`. |
 | `workloadpolicy` | Shared policy publication core and unregistered HTTP adapter. Requires trusted live authentication/current-artifact observation; mutations recheck live operator authority transactionally. The live scratch KV workflow exercises it, but no serving route or observer is installed. |

@@ -167,7 +167,7 @@ func (s *ownerState) readPreparedOwner(ctx context.Context) (*preparedOwnerRepla
 }
 
 func (s *ownerState) reconcilePreparedOwner(ctx context.Context, replay *preparedOwnerReplay,
-	old []*workloadfence.Domain, proofs []*workloadfence.Proof, prior []ownerEpochRecord) error {
+	old []*workloadfence.Domain, proofs []*workloadfence.Proof, history ownerEpochHistory) error {
 	marker, err := openNoFollow(filepath.Join(s.cfg.MetadataRoot, ownerPreparedFile), false)
 	if err != nil {
 		return ErrIO
@@ -185,7 +185,7 @@ func (s *ownerState) reconcilePreparedOwner(ctx context.Context, replay *prepare
 			return err
 		}
 	}
-	if err := s.checkRecoveryBindings(ctx, old, proofs, prior); err != nil {
+	if err := s.checkRecoveryBindings(ctx, old, proofs, history); err != nil {
 		return err
 	}
 	if err := s.checkPreparedCommitted(ctx); err != nil {

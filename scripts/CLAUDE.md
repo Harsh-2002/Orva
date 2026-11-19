@@ -17,10 +17,9 @@ Support scripts for deployment and installation. None of these are called by the
 
 ## Gotchas
 
-- `install.sh --bare-metal --managed-workload-slice` installs the persistent
-  placement slice without starting or restarting Orva. Systemd delegation lives
-  on a separate persistent service/scope, not the slice or the legacy daemon
-  unit. Uninstall deletes the standard native witness and warns that retained
+- The daemon's original systemd unit provides the service-local delegation;
+  the installer no longer installs a persistent slice. Uninstall deletes the
+  standard native witness and warns that retained
   sealed stores are unrecoverable. It also removes the dedicated Docker witness
   volume when mounted at `/var/lib/orva-host` under the documented name.
 - With a durable mode entry, the Docker entrypoint supplies managed witness and

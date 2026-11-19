@@ -75,6 +75,14 @@ func ValidatePriorBootUnderBudget(ctx context.Context, budget *Budget, root, par
 }
 
 func readPriorBootEpoch(dir *os.File, expected EpochReference, liveBoot string) (record, error) {
+	r, err := readRootEpoch(dir, expected, liveBoot)
+	if err == nil && r.Boot == liveBoot {
+		return record{}, ErrIntegrity
+	}
+	return r, err
+}
+
+func readRootEpoch(dir *os.File, expected EpochReference, liveBoot string) (record, error) {
 	names, err := dir.Readdirnames(2)
 	if err != nil && err != io.EOF {
 		return record{}, err
@@ -92,14 +100,14 @@ func readPriorBootEpoch(dir *os.File, expected EpochReference, liveBoot string) 
 	if !validBootID(liveBoot) || liveBoot == zeroBootID || r.Boot == zeroBootID {
 		return record{}, ErrInvalid
 	}
-	if r.Boot == liveBoot || r.Group == r.Parent || r.Group.Device != r.Parent.Device {
+	if r.Group == r.Parent || r.Group.Device != r.Parent.Device {
 		return record{}, ErrIntegrity
 	}
 	root, err := identity(dir)
 	if err != nil {
 		return record{}, err
 	}
-	if root != r.Root || rootEpochReference(r) != expected {
+	if root != r.Root || !rootEpochReference(r).Matches(expected) {
 		return record{}, ErrIntegrity
 	}
 	return r, nil
@@ -107,5 +115,6 @@ func readPriorBootEpoch(dir *os.File, expected EpochReference, liveBoot string) 
 
 func rootEpochReference(r record) EpochReference {
 	return EpochReference{Version: r.Version, Epoch: r.Epoch, Boot: r.Boot, InstanceEpoch: r.Epoch,
-		MetadataDevice: r.Root.Device, MetadataInode: r.Root.Inode, GroupDevice: r.Group.Device, GroupInode: r.Group.Inode}
+		MetadataDevice: r.Root.Device, MetadataInode: r.Root.Inode, GroupDevice: r.Group.Device, GroupInode: r.Group.Inode,
+		ParentDevice: r.Parent.Device, ParentInode: r.Parent.Inode}
 }

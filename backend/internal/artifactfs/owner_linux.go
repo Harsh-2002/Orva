@@ -47,6 +47,8 @@ type ownerEpochRecord struct {
 	Reference workloadfence.EpochReference `json:"reference"`
 }
 
+type ownerEpochHistory map[string]ownerEpochRecord
+
 type ownerRecord struct {
 	Version   int                `json:"version"`
 	ID        string             `json:"id"`
@@ -202,7 +204,7 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 	}
 	var old []*workloadfence.Domain
 	var proofs []*workloadfence.Proof
-	var prior []ownerEpochRecord
+	history := make(ownerEpochHistory)
 	var replay *preparedOwnerReplay
 	var retirement *ownerRetirementReplay
 	defer func() {
@@ -278,6 +280,7 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 		if s.witness == nil && len(s.disk.Epochs) >= cfg.MaxEpochs {
 			return nil, ErrCapacity
 		}
+		var prior []ownerEpochRecord
 		sameBoot := s.disk.Epochs
 		if cold {
 			prior, sameBoot = sameBoot, nil
@@ -288,7 +291,20 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 			}
 			prior, sameBoot = sameBoot[:start], sameBoot[start:]
 		}
+		for _, epoch := range prior {
+			history[epoch.ID] = epoch
+		}
 		for _, epoch := range sameBoot {
+			if s.witness != nil && epoch.Reference.ParentInode != 0 {
+				removed, err := workloadfence.ValidateRemovedSameBootUnderBudget(ctx, cfg.Budget, s.epochRoot(epoch.ID), cfg.Parent, epoch.Reference)
+				if err != nil {
+					return nil, err
+				}
+				if removed.Verified() {
+					history[epoch.ID] = epoch
+					continue
+				}
+			}
 			d, err := workloadfence.OpenRecoveringUnderBudget(cfg.Budget, s.epochRoot(epoch.ID), cfg.Parent)
 			if err != nil {
 				return nil, err
@@ -298,11 +314,11 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 			if err != nil {
 				return nil, err
 			}
-			if ref != epoch.Reference {
+			if !ref.Matches(epoch.Reference) {
 				return nil, ErrIntegrity
 			}
 		}
-		if err := s.validatePrior(ctx, prior); err != nil {
+		if err := s.validateHistory(ctx, history); err != nil {
 			return nil, err
 		}
 	} else {
@@ -360,17 +376,18 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 			return nil, err
 		}
 		if replay != nil {
-			if err := s.reconcilePreparedOwner(ctx, replay, old, proofs, prior); err != nil {
+			if err := s.reconcilePreparedOwner(ctx, replay, old, proofs, history); err != nil {
 				return nil, err
 			}
 		}
 		if retiring {
-			removed, err := s.retireOwnerEpoch(ctx, retirement, old, proofs, prior)
+			first := s.disk.Epochs[0].ID
+			removed, err := s.retireOwnerEpoch(ctx, retirement, old, proofs, history)
 			if err != nil {
 				return nil, err
 			}
-			if removed && len(prior) != 0 {
-				prior = prior[1:]
+			if removed && history[first].ID != "" {
+				delete(history, first)
 			} else if removed {
 				old, proofs = old[1:], proofs[1:]
 			}
@@ -421,6 +438,9 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 	if err != nil {
 		return nil, err
 	}
+	if s.witness == nil {
+		epoch.Reference.ParentDevice, epoch.Reference.ParentInode = 0, 0
+	}
 	s.disk.Epochs = append(s.disk.Epochs, epoch)
 	if s.witness != nil {
 		if _, err := lastOwnerBootRun(s.disk.Epochs); err != nil {
@@ -437,14 +457,14 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 	if err := s.commit(prepared, predecessor); err != nil {
 		return nil, err
 	}
-	if err := s.checkRecoveryBindings(ctx, old, proofs, prior); err != nil {
+	if err := s.checkRecoveryBindings(ctx, old, proofs, history); err != nil {
 		return nil, err
 	}
 	current, err := s.domain.Reference(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if current != epoch.Reference {
+	if !current.Matches(epoch.Reference) {
 		return nil, ErrIntegrity
 	}
 	if s.witness != nil {
@@ -476,21 +496,37 @@ func openOwnerForBoot(ctx context.Context, cfg OwnerConfig, recovering, cold boo
 	return &Owner{s}, nil
 }
 
-func (s *ownerState) checkRecoveryBindings(ctx context.Context, old []*workloadfence.Domain, proofs []*workloadfence.Proof, prior []ownerEpochRecord) error {
+func (s *ownerState) checkRecoveryBindings(ctx context.Context, old []*workloadfence.Domain, proofs []*workloadfence.Proof, history ownerEpochHistory) error {
 	for i, d := range old {
 		if err := d.Check(ctx, proofs[i]); err != nil {
 			return err
 		}
 	}
-	if err := s.validatePrior(ctx, prior); err != nil {
+	if err := s.validateHistory(ctx, history); err != nil {
 		return err
 	}
 	return s.matchStoreRoots()
 }
 
-func (s *ownerState) validatePrior(ctx context.Context, epochs []ownerEpochRecord) error {
+func (s *ownerState) validateHistory(ctx context.Context, epochs ownerEpochHistory) error {
+	if len(epochs) == 0 {
+		return nil
+	}
+	boot, err := s.cfg.Budget.BootID()
+	if err != nil {
+		return err
+	}
 	for _, epoch := range epochs {
-		if err := workloadfence.ValidatePriorBootUnderBudget(ctx, s.cfg.Budget, s.epochRoot(epoch.ID), s.cfg.Parent, epoch.Reference); err != nil {
+		root := s.epochRoot(epoch.ID)
+		if epoch.Reference.Boot == boot {
+			removed, err := workloadfence.ValidateRemovedSameBootUnderBudget(ctx, s.cfg.Budget, root, s.cfg.Parent, epoch.Reference)
+			if err != nil {
+				return err
+			}
+			if !removed.Verified() {
+				return ErrIntegrity
+			}
+		} else if err := workloadfence.ValidatePriorBootUnderBudget(ctx, s.cfg.Budget, root, s.cfg.Parent, epoch.Reference); err != nil {
 			return err
 		}
 	}
@@ -588,7 +624,9 @@ func validateOwnerEpochs(records []ownerEpochRecord) error {
 		if !generationID(epoch.ID) || seen[epoch.ID] || epochs[ref.Epoch] || ref.Version != 1 || ref.Depth != 0 ||
 			ref.ParentEpoch != "" || ref.InstanceEpoch != ref.Epoch ||
 			!ownerHex(ref.Epoch, 32) || !ownerBoot(ref.Boot) ||
-			ref.MetadataInode == 0 || ref.GroupInode == 0 {
+			ref.MetadataInode == 0 || ref.GroupInode == 0 ||
+			(ref.ParentInode == 0 && ref.ParentDevice != 0) ||
+			(ref.ParentInode != 0 && (ref.ParentInode == ref.GroupInode || ref.ParentDevice != ref.GroupDevice)) {
 			return ErrIntegrity
 		}
 		seen[epoch.ID] = true
@@ -848,7 +886,7 @@ func (o *Owner) Bindings(ctx context.Context) (OwnerBindings, error) {
 	if err != nil {
 		return OwnerBindings{}, err
 	}
-	if ref != s.disk.Epochs[len(s.disk.Epochs)-1].Reference {
+	if !ref.Matches(s.disk.Epochs[len(s.disk.Epochs)-1].Reference) {
 		return OwnerBindings{}, ErrIntegrity
 	}
 	return OwnerBindings{s.code, s.runtime, s.domain}, nil

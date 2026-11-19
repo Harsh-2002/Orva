@@ -7,28 +7,23 @@ same outer lock as legacy serving. It requires an exclusive, verified sealed
 Owner and matching database. This does not enroll legacy functions or support
 portable restore. Keep the first listener private during operator onboarding.
 
-Prepare a dedicated, service-user-owned cgroup v2 budget with CPU, memory and
-PID delegation. The workload parent is its `orva.workers` child. Keep the
-budget and worker groups alive across daemon restarts: the daemon service
-must not own (or remove) the persistent subtree. A trusted launcher starts
-the first process in the undelegated budget and subsequent ones in its
-`orva.daemon` leaf; it must not start an Orva daemon at the host cgroup root.
-
-On systemd, `install.sh --bare-metal --managed-workload-slice` installs an
-inactive `orva-workloads.slice` without starting or changing the regular
-daemon unit. Enable/start the slice separately. Systemd supports `Delegate=yes`
-on **services and scopes**, not slices: a separate persistent delegated
-service/scope under that slice must own the budget and place the daemon
-processes as above. The installer does not provide that launcher. Do not
-restart/stop the budget holder as a way to restart only the daemon.
+Prepare an owned cgroup-v2 service/container budget with CPU, memory and PID
+delegation. The workload parent is its `orva.workers` child. Systemd can use
+the regular `orva.service` with `Delegate=yes`; no persistent slice is needed.
+When the manager removes the entire old subtree, the daemon can recover under
+the replacement at the same absolute path. If a launcher keeps the original
+subtree, restart in its `orva.daemon` leaf with an explicit workload-parent
+path and the daemon fences the exact old epochs. Never start a managed daemon
+at the host cgroup root.
 
 For a supervised container setup, keep `/var/lib/orva-host/witness` on a
 separate, private volume (dedicated name `orva-host-witness`) outside the data
-volume and backups. A container restart on the same Linux kernel boot that
-removes the old cgroups is **not** recoverable by the current opener and
-refuses with exit 78. Cold recovery requires a different kernel boot, the
-same witness and sealed-store identities, and the same absolute workload
-parent path. Do not enable automatic managed Docker restarts.
+volume and backups. A same-container restart can recover after Docker removes
+the whole cgroup subtree, provided its replacement has the same absolute
+workload-parent path and the host cgroup view is unchanged. Container
+recreation can change that path and is not supported by this proof. Cold
+recovery still requires a different kernel boot and stable witness and store
+identities.
 
 Managed custom routes do not carry public exposure across restore. To re-expose
 a retained mapping, use fresh inspection and the managed REST CAS upsert after

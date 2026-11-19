@@ -28,7 +28,7 @@ be stopped and SQLite checkpointed with no WAL, SHM, or rollback journal.
 ## Fresh managed provisioning
 
 Stop existing daemons and use a new data directory with no legacy workload,
-database, keys or restore residue. Prepare the [persistent delegation and
+database, keys or restore residue. Prepare the [cgroup delegation and
 witness location](DEPLOYMENT.md#opt-in-managed-daemon-supervised-setups-only).
 Run these explicitly as the daemon user, with the same `ORVA_DATA_DIR` and
 managed environment that the daemon will use:
@@ -42,20 +42,25 @@ managed environment that the daemon will use:
 3. From the prepared cgroup, run `orva serve`. In provisioning mode it creates
    the Owner only if the three private roots are empty, then exits without
    opening a database or listener.
-4. From the persistent `orva.daemon` leaf, run
+4. From either the same service's replacement cgroup or the retained
+   `orva.daemon` leaf (with explicit `ORVA_MANAGED_WORKLOAD_PARENT`), run
    `orva setup --managed-layout publish`. It verifies and closes the exact
    Owner before explicitly publishing managed mode. If you set
    `ORVA_SERVING_MODE`, update it from `provisioning` to `managed` only after
    publication; leaving it unset is simpler.
-5. Run `orva serve` again from the same leaf. Without explicitly configured
+5. Run `orva serve` again in that service layout. Without explicitly configured
    sealed runtimes the listener can start, but new builds cannot run.
 
 SIGTERM closes and drains HTTP, then closes the managed instance (including
 its scheduler), then fences and closes its Owner. Startup or shutdown refusal
-exits 78, never the restore restart status 70. Do not delete stale cgroups
-to force a start: on the same boot the exact prior groups must still be
-present. A missing group or witness mismatch is not an invitation to
-reprovision or substitute a new witness. Incomplete fresh provisioning
+exits 78, never the restore restart status 70. On the same boot, the daemon
+fences intact groups or proves that both the old parent and its group were
+removed. Do not delete individual stale cgroups to force a start: a missing
+group under its original parent still denies, as do missing old groups with
+no authenticated parent identity and witness mismatches. Before restarting a
+host-bound install first booted with an older binary that lacks parent
+identities, preserve exact groups until a verified cold recovery or until
+bounded same-boot retirement removes the older references. Incomplete fresh provisioning
 requires supervised inspection, not an automatic retry with new stores.
 
 Uninstall deletes the standard native witness, even when retaining data;

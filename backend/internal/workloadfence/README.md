@@ -50,11 +50,9 @@ unbound artifact stores remain inspection-only.
 - The durable random epoch, kernel boot ID, metadata-root identity, parent
   identity and cgroup identity are checked together. Caller-supplied expected
   paths, inode numbers, released flock, PID absence, SDK EOF, and kill intent
-  alone never constitute proof. Inode numbers can be recycled: same-boot
-  inode equality is meaningful only under exclusive ownership and **no
-  deletion/recreation/reuse**. A reboot, missing group, changed identity, or
-  ambiguous record denies same-boot recovery; there is no reboot adoption or
-  inode-reuse recovery.
+  alone never constitute proof. The exact-domain reopener denies reboot,
+  missing group, changed identity or ambiguity. The separate removal check
+  below never opens or adopts an epoch.
 
 ## API and ordering
 
@@ -301,10 +299,7 @@ No durable budget schema changes are made. No capability can be restored from a
 database/path/record. `OpenRecoveringUnderBudget` retains a valid freshly
 captured capability and verifies a same-boot root; it never restores Start or
 child adoption. Ordinary OpenRecovering remains inspection/fence-only under
-its original current-membership constraint. No serving boot owner is installed.
-Restart placement, recapturing a
-service budget after a crash, and production delegation remain integration
-obligations, not acceptance established by this process-local API.
+its original current-membership constraint.
 See the kernel's [no-internal-process constraint](https://docs.kernel.org/admin-guide/cgroup-v2.html#no-internal-process-constraint).
 
 ### Prior-boot validation (no recovery)
@@ -330,6 +325,23 @@ Success returns no `Domain`, `Proof`, or recovery authority. The check does
 not fence, write, activate or reclaim anything, change the existing same-boot
 constructors, or wire any recovery path. Fixture tests do not qualify a real
 reboot.
+
+### Same-boot removal evidence
+
+`ValidateRemovedSameBootUnderBudget` checks locked, exact root metadata
+against a trusted host owner's authenticated reference, including the parent
+device/inode. Both identities must be absent or replaced at their recorded
+paths, reached without symlinks or mount crossings from the live captured
+cgroup-v2 budget. An intact pair yields no removal evidence (fence it
+normally); a surviving parent with only the epoch missing/replaced denies.
+Wrong boot, unknown layout and missing authenticated parent identity deny.
+
+Cgroup v2 doesn't allow directory renames and permits removal only after
+processes and children are gone. On supported 64-bit kernels the kernfs inode
+includes the generation, so path recreation does not reuse a removed
+identity within a boot. These properties and the trusted host's unchanged
+cgroup hierarchy view make the pair of absences meaningful; a pathname alone
+does not prove death. The typed result has no entry, fence or cleanup rights.
 
 ## Sandbox integration contract (internal opt-in only)
 

@@ -154,6 +154,17 @@ type EpochReference struct {
 	GroupDevice, GroupInode       uint64
 	InstanceEpoch, ParentEpoch    string
 	Depth                         int
+	ParentDevice                  uint64 `json:",omitempty"`
+	ParentInode                   uint64 `json:",omitempty"`
+}
+
+// Matches accepts older references without a recorded parent identity for
+// existing verification paths. Those references cannot prove removal.
+func (r EpochReference) Matches(expected EpochReference) bool {
+	if expected.ParentDevice == 0 && expected.ParentInode == 0 {
+		r.ParentDevice, r.ParentInode = 0, 0
+	}
+	return r == expected
 }
 
 func (d *Domain) Reference(ctx context.Context) (EpochReference, error) {
@@ -170,8 +181,13 @@ func (d *Domain) Reference(ctx context.Context) (EpochReference, error) {
 		return EpochReference{}, err
 	}
 	r := s.rec
-	return EpochReference{r.Version, r.Epoch, r.Boot, r.Root.Device, r.Root.Inode,
-		r.Group.Device, r.Group.Inode, s.instance().rec.Epoch, r.Lineage.Parent, s.depth}, nil
+	if r.Version == 1 {
+		return rootEpochReference(r), nil
+	}
+	return EpochReference{Version: r.Version, Epoch: r.Epoch, Boot: r.Boot,
+		MetadataDevice: r.Root.Device, MetadataInode: r.Root.Inode,
+		GroupDevice: r.Group.Device, GroupInode: r.Group.Inode,
+		InstanceEpoch: s.instance().rec.Epoch, ParentEpoch: r.Lineage.Parent, Depth: s.depth}, nil
 }
 
 // ReclaimChild removes only a direct, still-owned child's empty cgroup tree.

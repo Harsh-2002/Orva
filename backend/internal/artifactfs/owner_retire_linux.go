@@ -131,8 +131,8 @@ func (s *ownerState) readOwnerRetirement(ctx context.Context) (*ownerRetirementR
 }
 
 func (s *ownerState) retireOwnerEpoch(ctx context.Context, r *ownerRetirementReplay, old []*workloadfence.Domain,
-	proofs []*workloadfence.Proof, prior []ownerEpochRecord) (bool, error) {
-	if err := s.checkRecoveryBindings(ctx, old, proofs, prior); err != nil {
+	proofs []*workloadfence.Proof, history ownerEpochHistory) (bool, error) {
+	if err := s.checkRecoveryBindings(ctx, old, proofs, history); err != nil {
 		return false, err
 	}
 	if r == nil {
@@ -190,7 +190,7 @@ func (s *ownerState) retireOwnerEpoch(ctx context.Context, r *ownerRetirementRep
 	if committed == nil || committed.promote || committed.marker != r.marker {
 		return false, ErrIntegrity
 	}
-	held := r.promote && len(prior) == 0
+	held := r.promote && history[r.marker.Epoch.ID].ID == ""
 	if err := s.cleanRetiredEpoch(ctx, r.marker, held); err != nil {
 		return false, err
 	}

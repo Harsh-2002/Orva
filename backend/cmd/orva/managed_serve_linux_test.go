@@ -50,39 +50,34 @@ func TestManagedInstallerUnit(t *testing.T) {
 	installer, err := filepath.Abs("../../../scripts/install.sh")
 	mustManagedBoot(t, err)
 	root := t.TempDir()
-	legacy, managed := filepath.Join(root, "legacy"), filepath.Join(root, "managed")
 	cmd := exec.Command("sh", "-ec", `
 		ORVA_INSTALL_LIB=1 . "$1"
 		DRYRUN=0 SERVICE_DISABLE_USERNS=0
 		PREFIX=$2 INSTALL_RECORD=$2/install.conf
-		write_service_files
-		PREFIX=$3 INSTALL_RECORD=$3/install.conf
-		parse_args --managed-workload-slice
-		write_service_files`, "sh", installer, legacy, managed)
+		write_service_files`, "sh", installer, root)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generate installer units: %v\n%s", err, output)
 	}
-	read := func(prefix, name string) string {
-		raw, err := os.ReadFile(filepath.Join(prefix, "share", "orva", "scripts", name))
+	read := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join(root, "share", "orva", "scripts", name))
 		mustManagedBoot(t, err)
 		return string(raw)
 	}
-	legacyUnit := read(legacy, "orva.service")
-	managedUnit := strings.ReplaceAll(read(managed, "orva.service"), managed, legacy)
-	if legacyUnit != managedUnit || !strings.Contains(legacyUnit, "RestartForceExitStatus=70\nRestartPreventExitStatus=78\n") {
-		t.Fatal("opt-in provisioning changed the original daemon unit")
+	unit := read("orva.service")
+	if !strings.Contains(unit, "RestartForceExitStatus=70\nRestartPreventExitStatus=78\n") ||
+		!strings.Contains(unit, "\nDelegate=yes\n") || strings.Contains(unit, "orva-workloads.slice") ||
+		strings.Contains(unit, "ORVA_SERVING_MODE=") {
+		t.Fatal("daemon unit must delegate only its own subtree and never select managed mode")
 	}
-	_, err = os.Stat(filepath.Join(legacy, "share", "orva", "scripts", "orva-workloads.slice"))
+	_, err = os.Stat(filepath.Join(root, "share", "orva", "scripts", "orva-workloads.slice"))
 	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy install generated the managed slice: %v", err)
+		t.Fatalf("installer generated the retired slice: %v", err)
 	}
-	slice := read(managed, "orva-workloads.slice")
-	if !strings.Contains(slice, "StopWhenUnneeded=no\n") || strings.Contains(slice, "Delegate=") {
-		t.Fatal("persistent slice lifetime or delegation is wrong")
-	}
-	uninstall := read(managed, "uninstall.sh")
+	uninstall := read("uninstall.sh")
 	if !strings.Contains(uninstall, `rm -f "/etc/orva/host-witness/witness"`) ||
-		!strings.Contains(uninstall, "sealed stores will be unrecoverable on this host") {
+		!strings.Contains(uninstall, "sealed stores will be unrecoverable on this host") ||
+		!strings.Contains(uninstall, "systemctl disable --now orva-workloads.slice 2>/dev/null || true\n") ||
+		!strings.Contains(uninstall, "systemctl daemon-reload 2>/dev/null || true\n") {
 		t.Fatal("uninstall does not clearly destroy the managed host witness")
 	}
 }
@@ -232,8 +227,36 @@ func TestManagedDaemonKernel(t *testing.T) {
 	}
 	populated(old, false)
 	assertExit(child, -1)
-	mustManagedBoot(t, second.Process.Signal(syscall.SIGTERM))
-	mustManagedBoot(t, second.Wait())
+	oldParent, err := os.Stat(parent)
+	mustManagedBoot(t, err)
+	mustManagedBoot(t, second.Process.Kill())
+	assertExit(second, -1)
+	var remove func(string)
+	remove = func(path string) {
+		t.Helper()
+		populated(path, false)
+		entries, err := os.ReadDir(path)
+		mustManagedBoot(t, err)
+		for _, e := range entries {
+			if e.IsDir() {
+				remove(filepath.Join(path, e.Name()))
+			}
+		}
+		mustManagedBoot(t, os.Remove(path))
+	}
+	remove(budget)
+	mustManagedBoot(t, os.Mkdir(budget, 0700))
+	mustManagedBoot(t, os.Unsetenv(managedParentEnv)) // Exercise service-cgroup autodetection.
+	third := start(budget, "serve")
+	awaitHTTP()
+	newParent, err := os.Stat(parent)
+	mustManagedBoot(t, err)
+	if os.SameFile(oldParent, newParent) {
+		t.Fatal("service restart did not replace the worker parent")
+	}
+	mustManagedBoot(t, third.Process.Signal(syscall.SIGTERM))
+	mustManagedBoot(t, third.Wait())
+	t.Setenv(managedParentEnv, parent)
 	ownerRecord := filepath.Join(data, "sealed-owner", "owner.json")
 	prior, err := os.ReadFile(ownerRecord)
 	mustManagedBoot(t, err)

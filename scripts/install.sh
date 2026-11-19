@@ -55,7 +55,6 @@ MODE=""                 # "", docker, bare-metal, cli
 ASSUME_YES=0            # --yes / -y
 WANT_START=""           # "", 1 (force start), 0 (skip)
 WANT_CLI_SHORTCUT=1     # install `orva` onto PATH after a bare-metal install
-MANAGED_WORKLOAD_SLICE=0
 MANAGED_WITNESS=/etc/orva/host-witness/witness
 DO_UNINSTALL=0
 PURGE=0
@@ -144,7 +143,6 @@ OPTIONS:
   --repo <owner/name> GitHub repo (default: ${REPO})                  [ORVA_REPO]
   -y, --yes           non-interactive; accept all defaults
   --start / --no-start  enable+start the service after a bare-metal install
-  --managed-workload-slice  install the systemd slice for supervised managed setup; do not start Orva
   --no-cli            do not add the 'orva' CLI shortcut to PATH (bare-metal)
   --no-pkg            skip system package installation                [ORVA_NO_PKG]
   --dry-run           detect + print plan, change nothing             [ORVA_INSTALL_DRYRUN]
@@ -243,7 +241,6 @@ parse_args() {
             -y|--yes|--non-interactive) ASSUME_YES=1 ;;
             --start)       WANT_START=1 ;;
             --no-start)    WANT_START=0 ;;
-            --managed-workload-slice) MANAGED_WORKLOAD_SLICE=1 ;;
             --no-cli)      WANT_CLI_SHORTCUT=0 ;;
             --no-pkg)      NO_PKG=1 ;;
             --dry-run|--dryrun) DRYRUN=1 ;;
@@ -987,10 +984,6 @@ Environment=ORVA_PORT=${PORT}
 [Install]
 WantedBy=multi-user.target
 EOF
-    if [ "$MANAGED_WORKLOAD_SLICE" = "1" ]; then
-        write_managed_slice
-    fi
-
     cat > "$PREFIX/share/orva/scripts/orva.openrc" <<EOF
 #!/sbin/openrc-run
 description="Orva self-hosted serverless platform"
@@ -1028,23 +1021,6 @@ EOF
     write_install_record
 }
 
-write_managed_slice() {
-    # systemd supports Delegate= on a service/scope, not a slice.
-    cat > "$PREFIX/share/orva/scripts/orva-workloads.slice" <<EOF
-[Unit]
-Description=Persistent Orva workload placement
-StopWhenUnneeded=no
-
-[Slice]
-CPUAccounting=yes
-MemoryAccounting=yes
-TasksAccounting=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-}
-
 # A bare `orva upgrade` has no access to the unit's environment, so the data
 # directory it must inspect is recorded here. Without it a custom --data-dir
 # install looks unstamped and the rootfs guard silently passes.
@@ -1079,9 +1055,6 @@ install_unit() {
         SVC_KIND="systemd"
         log "installing systemd unit"
         install -m 0644 "$PREFIX/share/orva/scripts/orva.service" /etc/systemd/system/orva.service
-        if [ "$MANAGED_WORKLOAD_SLICE" = "1" ]; then
-            install -m 0644 "$PREFIX/share/orva/scripts/orva-workloads.slice" /etc/systemd/system/orva-workloads.slice
-        fi
         # A drop-in that pins ORVA_DISABLE_USERNS overrides the mode the probe
         # just selected, silently restoring the weaker fallback. Warn instead of
         # deleting it: the operator may have pinned it on purpose.
@@ -1151,14 +1124,6 @@ install_cli_shortcut() {
 }
 
 run_bare_metal() {
-    if [ "$MANAGED_WORKLOAD_SLICE" = "1" ]; then
-        [ "$WANT_START" != "1" ] || die "--managed-workload-slice cannot be used with --start"
-        if [ "$DRYRUN" = "1" ]; then
-            log "(dryrun) would install persistent Orva workload slice; no daemon start"
-        elif ! { have systemctl && [ -d /etc/systemd/system ]; }; then
-            die "--managed-workload-slice requires systemd"
-        fi
-    fi
     bm_upgrade=0
     [ "$EXISTING_KIND" = "bare" ] && bm_upgrade=1
     if [ "$bm_upgrade" = "1" ]; then
@@ -1193,9 +1158,7 @@ run_bare_metal() {
     write_service_files
     # Always refresh the unit file so unit changes reach existing installs.
     install_unit
-    if [ "$MANAGED_WORKLOAD_SLICE" = "1" ]; then
-        warn "managed slice installed without changing or starting Orva's daemon unit; provision a persistent delegated launcher separately"
-    elif [ "$bm_upgrade" = "1" ]; then
+    if [ "$bm_upgrade" = "1" ]; then
         # Apply the new binary + refreshed unit to a running service, but don't
         # resurrect one the operator stopped, and don't re-prompt to start.
         restart_if_running
@@ -1336,9 +1299,9 @@ if have systemctl && [ -f /etc/systemd/system/orva.service ]; then
     rm -f /etc/systemd/system/orva.service; systemctl daemon-reload 2>/dev/null || true
 fi
 if have systemctl && [ -f /etc/systemd/system/orva-workloads.slice ]; then
-    systemctl disable --now orva-workloads.slice
+    systemctl disable --now orva-workloads.slice 2>/dev/null || true
     rm -f /etc/systemd/system/orva-workloads.slice
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || true
 fi
 if [ -e "${MANAGED_WITNESS}" ] || [ -L "${MANAGED_WITNESS}" ]; then
     echo "Deleting the Orva host witness. The sealed stores will be unrecoverable on this host." >&2
@@ -1495,7 +1458,6 @@ main() {
     decide_interactive
     detect_existing
     choose_mode
-    [ "$MANAGED_WORKLOAD_SLICE" = "0" ] || [ "$MODE" = "bare-metal" ] || die "--managed-workload-slice requires --bare-metal"
     ensure_downloader
     resolve_version
 

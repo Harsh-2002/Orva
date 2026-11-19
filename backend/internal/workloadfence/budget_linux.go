@@ -55,20 +55,19 @@ func CaptureServingBudget(parent string) (*Budget, error) {
 	if err := noLinks(base); err != nil {
 		return nil, err
 	}
-	if current == base {
-		b, err := CaptureBudget()
-		if err != nil {
-			return nil, err
-		}
-		b.s.servingParent = parent
-		return b, nil
-	}
-	if current != filepath.Join(base, "orva.daemon") {
+	leaf := filepath.Join(base, "orva.daemon")
+	if current != base && current != leaf {
 		return nil, ErrInvalid
 	}
-	for _, path := range []string{base, current, parent, filepath.Join(base, "cgroup.procs")} {
+	for _, path := range []string{base, filepath.Join(base, "cgroup.procs"), leaf, parent} {
 		info, err := os.Lstat(path)
+		if current == base && (path == leaf || path == parent) && errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+			return nil, ErrIntegrity
+		}
+		if path != filepath.Join(base, "cgroup.procs") && !info.IsDir() {
 			return nil, ErrIntegrity
 		}
 	}
@@ -76,12 +75,30 @@ func CaptureServingBudget(parent string) (*Budget, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := b.s.check(parent); err != nil {
-		b.Close()
-		return nil, err
+	for _, path := range []string{leaf, parent} {
+		f, err := b.s.openRemovalPath(b.s.objects[1], filepath.Base(path))
+		if err != nil || f == nil && current == leaf {
+			b.Close()
+			if err != nil {
+				return nil, err
+			}
+			return nil, ErrIntegrity
+		}
+		if f != nil {
+			f.Close()
+		}
 	}
 	b.s.servingParent = parent
 	return b, nil
+}
+
+// DefaultServingParent derives the worker child of the current service cgroup.
+func DefaultServingParent() (string, error) {
+	base, err := currentBudgetPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "orva.workers"), nil
 }
 
 func captureBudget(path string) (*Budget, error) {

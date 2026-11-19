@@ -41,6 +41,15 @@ func RemoveRetiredRootUnderBudget(ctx context.Context, budget *Budget, root, par
 	} else if err != nil {
 		return err
 	}
+	if expected.ParentInode != 0 {
+		removed, err := inspectSameBootRemoval(ctx, b, parent, expected)
+		if err != nil {
+			return err
+		}
+		if removed.Verified() {
+			return nil // Never remove the replacement tenant's group.
+		}
+	}
 	dir, err := openPrivateRoot(root)
 	if err != nil {
 		return err
@@ -51,7 +60,7 @@ func RemoveRetiredRootUnderBudget(ctx context.Context, budget *Budget, root, par
 		return err
 	}
 	metadataID, err := identity(dir)
-	if err != nil || metadataID != rec.Root || !rec.Closed || rootEpochReference(rec) != expected {
+	if err != nil || metadataID != rec.Root || !rec.Closed || !rootEpochReference(rec).Matches(expected) {
 		return ErrIntegrity
 	}
 	b.mu.Lock()
