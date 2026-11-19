@@ -190,11 +190,22 @@ func registerInvokeTools(rc *regCtx) {
 		},
 	)
 
-	regAddTool(rc, permInvoke,
+	registerFixtureInvokeTool(rc)
+	registerExecutionTools(rc)
+}
+
+func registerFixtureInvokeTool(rc *regCtx) {
+	deps := rc.deps
+	rc.group = "invoke"
+	description := "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved."
+	if deps.ManagedServer {
+		description = "Run a function's saved request fixture against its installed managed deployment. Optional overrides replace method, path or body and merge headers without saving changes. Returns status, headers, body, execution_id and the applied overrides. Use list_fixtures to see what's saved."
+	}
+	regAddFixtureTool(rc, permInvoke,
 		&mcpsdk.Tool{
 			Name:        "test_function_with_fixture",
 			Title:       "Test Function With Fixture",
-			Description: "Invoke a function using a previously-saved fixture as the request envelope. Applies optional shallow-merge overrides (override wins on key collision). Returns the same shape as invoke_function plus a `fixture` block listing which overrides were applied. Use list_fixtures to see what's saved.",
+			Description: description,
 			Annotations: &mcpsdk.ToolAnnotations{
 				DestructiveHint: ptrFalse(),
 				OpenWorldHint:   ptrTrue(),
@@ -204,8 +215,6 @@ func registerInvokeTools(rc *regCtx) {
 			return testFunctionWithFixture(ctx, deps, in)
 		},
 	)
-
-	registerExecutionTools(rc)
 }
 
 // registerExecutionTools is shared by the legacy catalog and the managed one:
@@ -348,6 +357,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 	if err != nil {
 		return nil, InvokeFunctionOutput{}, err
 	}
+	return invokeResolvedFunction(ctx, deps, fn, in)
+}
+
+func invokeResolvedFunction(ctx context.Context, deps Deps, fn *database.Function, in InvokeFunctionInput) (*mcpsdk.CallToolResult, InvokeFunctionOutput, error) {
 	if deps.ManagedServer && deps.Proxy == nil {
 		return nil, InvokeFunctionOutput{}, errors.New("managed invocation is unavailable")
 	}
@@ -431,7 +444,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		fullPath += path
 	}
 
-	req := httptest.NewRequest(method, fullPath, strings.NewReader(bodyStr))
+	req, err := http.NewRequestWithContext(ctx, method, fullPath, strings.NewReader(bodyStr))
+	if err != nil {
+		return nil, InvokeFunctionOutput{}, errors.New("invalid request method or path")
+	}
 	for k, v := range in.Headers {
 		req.Header.Set(k, v)
 	}
@@ -471,7 +487,10 @@ func invokeFunction(ctx context.Context, deps Deps, in InvokeFunctionInput) (*mc
 		defer deps.Metrics.ActiveRequests.Add(-1)
 	}
 
-	codeDir := deps.DataDir + "/functions/" + fn.ID + "/code"
+	codeDir := ""
+	if !deps.ManagedServer {
+		codeDir = deps.DataDir + "/functions/" + fn.ID + "/code"
+	}
 	lang := sandbox.Language(fn.Runtime)
 	start := time.Now()
 	reqWithCtx := req.WithContext(tCtx)
@@ -603,11 +622,16 @@ func hasPriorCode(dataDir, fnID string) bool {
 	return false
 }
 
-// testFunctionWithFixture loads a fixture, applies the caller's overrides
-// (shallow-merge: override wins), and routes through invokeFunction so
-// the execution shows up in the same activity / executions tables as a
-// regular invoke. The saved fixture row is never mutated.
+func managedFixtureInvocationAvailable(deps Deps) bool {
+	return deps.ManagedServer && deps.DB != nil && deps.Registry != nil && deps.ManagedAuthority != nil &&
+		deps.Proxy != nil && deps.Proxy.DB == deps.DB && deps.Proxy.SDKAuth != nil &&
+		deps.Proxy.Config.MaxBodyBytes > 0 && deps.Proxy.Pool == deps.PoolMgr && deps.PoolMgr.ManagedBy(deps.ManagedAuthority)
+}
+
 func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWithFixtureInput) (*mcpsdk.CallToolResult, TestFunctionWithFixtureOutput, error) {
+	if deps.ManagedServer && !managedFixtureInvocationAvailable(deps) {
+		return nil, TestFunctionWithFixtureOutput{}, errors.New("managed fixture invocation is unavailable")
+	}
 	fn, err := resolveFunction(deps, in.FunctionID)
 	if err != nil {
 		return nil, TestFunctionWithFixtureOutput{}, err
@@ -625,9 +649,13 @@ func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWith
 	}
 
 	// Decode stored headers, then merge per-call overrides.
-	headers := map[string]string{}
+	var storedHeaders map[string]string
 	if fix.HeadersJSON != "" {
-		_ = json.Unmarshal([]byte(fix.HeadersJSON), &headers)
+		_ = json.Unmarshal([]byte(fix.HeadersJSON), &storedHeaders)
+	}
+	headers := make(map[string]string, len(storedHeaders)+len(in.Override.Headers))
+	for k, v := range storedHeaders {
+		headers[http.CanonicalHeaderKey(k)] = v
 	}
 
 	method := fix.Method
@@ -644,7 +672,7 @@ func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWith
 	}
 	if len(in.Override.Headers) > 0 {
 		for k, v := range in.Override.Headers {
-			headers[k] = v
+			headers[http.CanonicalHeaderKey(k)] = v
 		}
 		applied = append(applied, "headers")
 	}
@@ -654,6 +682,9 @@ func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWith
 	if in.Override.Body != "" {
 		body = in.Override.Body
 		applied = append(applied, "body")
+	}
+	if deps.ManagedServer && int64(len(body)) > deps.Proxy.Config.MaxBodyBytes {
+		return nil, TestFunctionWithFixtureOutput{}, errors.New("request body exceeds the configured cap")
 	}
 
 	// Fixtures store the wire string verbatim, so wrap it in a
@@ -671,7 +702,7 @@ func testFunctionWithFixture(ctx context.Context, deps Deps, in TestFunctionWith
 		Body:       bodyEnv,
 		TimeoutMS:  in.TimeoutMS,
 	}
-	_, invokeOut, ferr := invokeFunction(ctx, deps, invokeIn)
+	_, invokeOut, ferr := invokeResolvedFunction(ctx, deps, fn, invokeIn)
 	out := TestFunctionWithFixtureOutput{
 		InvokeFunctionOutput: invokeOut,
 		Fixture: FixtureApplied{

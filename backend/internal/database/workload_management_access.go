@@ -21,12 +21,11 @@ func (db *Database) CheckIAMOperator(ctx context.Context, ref OperatorCredential
 	return nil
 }
 
-// CheckOperatorPermission requires exactly one permission of the live operator,
-// matching a legacy route's required tier. Sessions hold every tier; channel
-// references never qualify.
+// CheckOperatorPermission requires one exact tier of the live operator.
+// Sessions hold every tier; channel references never qualify.
 func (db *Database) CheckOperatorPermission(ctx context.Context, ref OperatorCredentialReference, permission string) error {
 	switch permission {
-	case "read", "write", "admin":
+	case "read", "write", "admin", "invoke":
 	default:
 		return operatorDenied(ctx)
 	}
