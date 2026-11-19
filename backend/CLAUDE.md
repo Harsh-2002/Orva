@@ -62,9 +62,11 @@ version (`409 NOT_ACTIVE`) and takes the timeout from the Factory; the MCP
 set, and registers the ordinary invoke-only channel catalog, whose `invokeFunction`
 goes through `Proxy.Forward` and therefore the managed pool; managed never serves a
 non-`active` function from a prior code directory. `registerManagedOperationTools`
-shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools` and
-`registerKeyTools` with the normal catalog (73/28 unchanged; managed 66/22) and adds
-`list_activity`, `list_channels`, `get_channel` and `replay_execution`.
+shares `registerExecutionTools`, `registerTraceTools`, `registerSystemOpsTools`,
+`registerKeyTools` and `registerKVTools` with the normal catalog (73/28 unchanged;
+managed 72/24) and adds `list_activity`, `list_channels`, `get_channel` and
+`replay_execution`. Managed KV tools recheck the live operator credential's
+read/write tier at tool entry and never dispatch to a worker.
 Restore clears publications before admission.
 
 Bound configuration writes persist the same pair against the new generation

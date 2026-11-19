@@ -22,15 +22,18 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 66 on this
-> composition; read-only keys see 28 and 22 respectively. This composition also
+> An all-permissions key sees 73 tools on the normal server and 72 on this
+> composition; read-only keys see 28 and 24 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
 > permission tiers as the normal server, and accepts channel tokens at `/mcp`
 > as an invoke-only catalog dispatched through the managed pool. See
 > `docs/API.md` "Managed operator surfaces".
-> The managed REST operator KV routes use legacy read/write tiers. They do
-> not grant the function any SDK permissions.
+> Managed REST, MCP and Chat keep the legacy operator KV tiers: `read` for
+> `kv_get` and `kv_list`; `write` for `kv_put`, `kv_delete`, `kv_incr` and
+> `kv_cas`. Tools recheck the operator's current credential and required tier
+> at tool entry. They access stored values by function name or UUID, including
+> for inactive functions, without running code or granting SDK permissions.
 > Dashboard Chat requires admin and uses only the managed tool catalog,
 > scoped to the caller. A missing compiled egress policy stops provider calls
 > without disabling Chat settings or history. Model discovery checks the
