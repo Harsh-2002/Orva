@@ -7,6 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -507,5 +510,53 @@ func TestManagedChannelsAndTheirManagedCatalog(t *testing.T) {
 	f.expect(http.MethodDelete, "/api/v1/channels/"+created.ID, admin, "", http.StatusOK)
 	if rec := mcpCall(deps, created.Token, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("deleted channel token still authenticates: %d", rec.Code)
+	}
+}
+
+// An open /api/v1/events stream never idles, so draining the listener must be
+// preceded by StopEventStreams or one dashboard tab consumes the whole budget.
+func TestManagedShutdownIsNotHeldOpenByAnEventStream(t *testing.T) {
+	f := newManagedOpsFixture(t)
+	reader, _ := f.key("reader", `["read"]`)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	managedMust(t, err)
+	srv := &http.Server{Handler: f.router}
+	go srv.Serve(listener)
+	t.Cleanup(func() { srv.Close() })
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String()+"/api/v1/events", nil)
+	managedMust(t, err)
+	req.Header.Set("X-Orva-API-Key", reader)
+	res, err := http.DefaultClient.Do(req)
+	managedMust(t, err)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("event stream: %d", res.StatusCode)
+	}
+	instance := &ManagedInstance{service: &managedServer{runtime: f.runtime}}
+
+	// Without ending the stream the drain does not finish.
+	probe, cancelProbe := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancelProbe()
+	if err := srv.Shutdown(probe); err == nil {
+		t.Fatal("drain finished while an event stream was open; the test proves nothing")
+	}
+
+	instance.StopEventStreams()
+	instance.StopEventStreams() // idempotent
+	drained := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		drained <- srv.Shutdown(ctx)
+	}()
+	select {
+	case err := <-drained:
+		managedMust(t, err)
+	case <-time.After(6 * time.Second):
+		t.Fatal("drain stayed blocked after the event streams were stopped")
+	}
+	if _, err := io.Copy(io.Discard, res.Body); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("stream did not end cleanly: %v", err)
 	}
 }

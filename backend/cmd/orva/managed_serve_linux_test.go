@@ -22,7 +22,7 @@ import (
 	"github.com/Harsh-2002/Orva/backend/internal/workloadfence"
 )
 
-func TestManagedShutdownOrder(t *testing.T) {
+func TestManagedShutdownRunsEveryStage(t *testing.T) {
 	for failed := range 4 {
 		var got []int
 		wantErr := errors.New("cannot close")
@@ -36,11 +36,7 @@ func TestManagedShutdownOrder(t *testing.T) {
 			}
 		}
 		err := closeManaged(t.Context(), step(1), step(2), step(3))
-		expected := []int{1, 2, 3}
-		if failed > 0 {
-			expected = expected[:failed]
-		}
-		if !slices.Equal(got, expected) || (failed > 0) != errors.Is(err, wantErr) {
+		if !slices.Equal(got, []int{1, 2, 3}) || (failed > 0) != errors.Is(err, wantErr) {
 			t.Fatalf("failure at %d: ran %v, err %v", failed, got, err)
 		}
 	}
