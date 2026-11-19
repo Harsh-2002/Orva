@@ -25,7 +25,7 @@
 > Restore managed archives with the stopped server binary's `orva managed restore`
 > command; the legacy `POST /api/v1/restore` route is not mounted in managed mode.
 > Use `tools/list` to discover the tools available to your MCP credential.
-> An all-permissions key sees 73 tools on the normal server and 75 on this
+> An all-permissions key sees 73 tools on the normal server and 82 on this
 > composition; read-only keys see 28 and 25 respectively. This composition also
 > mounts executions (with replay through managed admission), traces, activity,
 > events, system, API-key, OAuth-app, session, channel and Chat routes at the same
@@ -1032,6 +1032,13 @@ call directly. API key permissions scope the available tool set.
 > managed mode it rechecks that live tier and uses only the installed managed
 > function, without approving its permissions. Overrides do not change the
 > stored preset; header names are case-insensitive.
+
+> **Managed Egress tools.** `list_firewall_rules`, `get_egress_policy_status`,
+> `add_firewall_rule`, `delete_firewall_rule`, `get_dns_config`, and
+> `set_dns_config` require live `admin` authority in managed MCP and Chat.
+> They use the same serving policy manager as REST. DNS settings are validated
+> together before any value is written. Use policy status to distinguish stored
+> rules from the compiled generation.
 
 > **Tool naming and metadata.** Every operator-mode tool name matches `^[a-z][a-z0-9_]{0,62}$` and ships with a human-readable `Title`, ≥80-char description, and honest annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). The same rules apply to channel-mode auto-generated tools — see `backend/internal/mcp/CHECKLIST.md` for the canonical 12-rule policy if you contribute new tools.
 
