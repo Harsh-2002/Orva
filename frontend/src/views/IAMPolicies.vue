@@ -65,7 +65,7 @@
         >
           {{ item.name }}
         </button>
-        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code> · {{ status(item) }}</span>
+        <span class="text-xs text-foreground-muted">Version <code>{{ item.latest_version }}</code><template v-if="status(item)"> · {{ status(item) }}</template></span>
       </li>
     </ul>
     <p
@@ -99,13 +99,15 @@ const emit = defineEmits(['select'])
 const creating = ref(false)
 const targets = computed(() => props.functions.map((f) => ({ id: f.id, label: f.name, state: 'resolved' })))
 const list = useIAMResource(() => 'policies', (_, signal) => props.api.list(signal))
+// Only the open policy's count is live; the list itself carries no attachment data.
 const attachments = ref(new Map())
-function setAttachments(count) { attachments.value.set(props.policyId, count) }
+function setAttachments(count) { attachments.value = new Map([[props.policyId, count]]) }
 function status(item) {
   if (!list.fresh.value) return 'Last known state, unverified'
   if (item.revoked) return 'Revoked permanently'
-  const count = attachments.value.get(item.id)
-  if (!count) return 'Available to attach'
+  const count = item.id === props.policyId ? attachments.value.get(item.id) : undefined
+  if (count === undefined) return ''
+  if (count === 0) return 'Not attached'
   return count === 1 ? 'Attached to 1 function' : `Attached to ${count} functions`
 }
 async function create(value) {

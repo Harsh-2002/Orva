@@ -406,6 +406,11 @@ describe('FunctionPermissions draft and save', () => {
     expect(row.element.tagName).toBe('LABEL')
     const box = row.find('input[type="checkbox"]')
     expect(box.attributes('aria-label')).toBe('Compare and set')
+    // The concise name is the label; the row's help text is its description.
+    const note = w.find(`[id="${box.attributes('aria-describedby')}"]`)
+    expect(note.exists()).toBe(true)
+    expect(note.text().length).toBeGreaterThan(0)
+    expect(row.text()).toContain(note.text())
     expect(row.classes()).not.toContain('border-primary')
     await box.setValue(true)
     expect(box.element.checked).toBe(true)

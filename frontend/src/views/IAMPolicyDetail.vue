@@ -108,6 +108,7 @@
           <fieldset
             :disabled="!!changeReason"
             aria-label="Attach or roll out a version"
+            :aria-describedby="selected.length ? undefined : attachHintId"
             class="space-y-2"
           >
             <Input
@@ -138,6 +139,7 @@
             </Button>
             <p
               v-if="!selected.length"
+              :id="attachHintId"
               class="text-sm text-foreground-muted"
             >
               Select at least one function.
@@ -158,7 +160,7 @@
             :to="`/functions/${id}/permissions`"
             class="text-link hover:underline underline-offset-4"
           >{{ label(id) }}</RouterLink>{{ index < attached.length - 1 ? ', ' : '' }}
-        </template>. Approve {{ attached.length === 1 ? 'it on its Permissions page' : 'each on its Permissions page' }} to make {{ attached.length === 1 ? 'it' : 'them' }} active.
+        </template>. {{ attached.length === 1 ? 'Check its Permissions page and approve it there if it is not active yet.' : 'Check each Permissions page and approve any function that is not active yet.' }}
       </p>
       <div
         v-if="state.data.value.can_manage && (!state.data.value.policy.revoked || !state.data.value.attachments.length)"
@@ -246,7 +248,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import Button from '@/components/common/Button.vue'
 import Input from '@/components/common/Input.vue'
@@ -285,6 +287,7 @@ const editingRevision = ref('')
 const copied = ref(false)
 async function copyPolicyId() { copied.value = await copyText(props.policyId) }
 const attached = ref([])
+const attachHintId = useId()
 // The list rows have no attachment data of their own, so the detail reports its
 // verified count on every load for the selected policy's status.
 watch(() => state.data.value?.attachments.length, (count) => { if (Number.isInteger(count)) emit('attachments', count) }, { immediate: true })

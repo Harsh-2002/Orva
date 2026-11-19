@@ -97,6 +97,7 @@
             :checked="form.actions.includes(id)"
             :disabled="blocked(id)"
             :aria-label="ACTION_LABELS[id]"
+            :aria-describedby="`${noteId}-${id}`"
             :class="INPUT"
             @change="toggle(id)"
           >
@@ -105,17 +106,19 @@
               {{ ACTION_LABELS[id] }}
               <code class="ml-1 font-mono text-[11px] font-normal text-foreground-muted">{{ id }}</code>
             </span>
-            <span
-              v-if="invalidAtStartup(id)"
-              class="block text-xs text-warning-fg"
-            >Not available at startup</span>
-            <template v-else>
-              <span class="block text-xs text-foreground-muted">{{ ACTION_HELP[id] }}</span>
+            <span :id="`${noteId}-${id}`">
               <span
-                v-if="needsGetFor(id)"
+                v-if="invalidAtStartup(id)"
                 class="block text-xs text-warning-fg"
-              >Also needs Read a key (kv.get)</span>
-            </template>
+              >Not available at startup</span>
+              <template v-else>
+                <span class="block text-xs text-foreground-muted">{{ ACTION_HELP[id] }}</span>
+                <span
+                  v-if="needsGetFor(id)"
+                  class="block text-xs text-warning-fg"
+                >Also needs Read a key (kv.get)</span>
+              </template>
+            </span>
           </span>
         </label>
       </fieldset>
@@ -350,7 +353,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
 import Input from '@/components/common/Input.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
@@ -361,6 +364,7 @@ import {
   emptyForm, formToInput, humanStatement, statementToForm, targetInfo,
 } from '@/utils/permissionsModel.js'
 
+const noteId = useId()
 const props = defineProps({
   functionId: { type: String, required: true },
   targets: { type: Array, default: () => [] },
