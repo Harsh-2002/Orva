@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,16 @@ import (
 
 // ── sandbox-side test client ────────────────────────────────────────────────
 
+// encodeTestFrame is encodeSDKFrame for payloads that are known to fit; the
+// boundary itself is covered by TestSDKFrameLengthBoundary.
+func encodeTestFrame(payload []byte) []byte {
+	b, err := encodeSDKFrame(payload)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 type testReply struct {
 	ID uint64          `json:"id"`
 	OK bool            `json:"ok"`
@@ -26,7 +37,7 @@ type testReply struct {
 func sendRaw(t *testing.T, c net.Conn, payload []byte) {
 	t.Helper()
 	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Write(encodeSDKFrame(payload)); err != nil {
+	if _, err := c.Write(encodeTestFrame(payload)); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 }
@@ -236,20 +247,20 @@ func TestSDKProtocolViolationClosesAndMarksUnhealthy(t *testing.T) {
 		{"zero length", hdr(0)},
 		{"oversized length", hdr(MaxSDKFrame + 1)},
 		{"max uint32 length", hdr(0xFFFFFFFF)},
-		{"invalid json", encodeSDKFrame([]byte(`{"id":1,`))},
-		{"not json", encodeSDKFrame([]byte(`hello`))},
-		{"array", encodeSDKFrame([]byte(`[1]`))},
-		{"null", encodeSDKFrame([]byte(`null`))},
-		{"string", encodeSDKFrame([]byte(`"x"`))},
-		{"missing id", encodeSDKFrame([]byte(`{"op":"kv.get"}`))},
-		{"zero id", encodeSDKFrame([]byte(`{"id":0,"op":"kv.get"}`))},
-		{"negative id", encodeSDKFrame([]byte(`{"id":-1,"op":"kv.get"}`))},
-		{"string id", encodeSDKFrame([]byte(`{"id":"1","op":"kv.get"}`))},
-		{"fractional id", encodeSDKFrame([]byte(`{"id":1.5,"op":"kv.get"}`))},
-		{"op wrong type", encodeSDKFrame([]byte(`{"id":1,"op":7}`))},
-		{"lease wrong type", encodeSDKFrame([]byte(`{"id":1,"op":"kv.get","lease":3}`))},
-		{"args array", encodeSDKFrame([]byte(`{"id":1,"op":"kv.get","a":[1]}`))},
-		{"trailing data", encodeSDKFrame([]byte(`{"id":1,"op":"kv.get"} {}`))},
+		{"invalid json", encodeTestFrame([]byte(`{"id":1,`))},
+		{"not json", encodeTestFrame([]byte(`hello`))},
+		{"array", encodeTestFrame([]byte(`[1]`))},
+		{"null", encodeTestFrame([]byte(`null`))},
+		{"string", encodeTestFrame([]byte(`"x"`))},
+		{"missing id", encodeTestFrame([]byte(`{"op":"kv.get"}`))},
+		{"zero id", encodeTestFrame([]byte(`{"id":0,"op":"kv.get"}`))},
+		{"negative id", encodeTestFrame([]byte(`{"id":-1,"op":"kv.get"}`))},
+		{"string id", encodeTestFrame([]byte(`{"id":"1","op":"kv.get"}`))},
+		{"fractional id", encodeTestFrame([]byte(`{"id":1.5,"op":"kv.get"}`))},
+		{"op wrong type", encodeTestFrame([]byte(`{"id":1,"op":7}`))},
+		{"lease wrong type", encodeTestFrame([]byte(`{"id":1,"op":"kv.get","lease":3}`))},
+		{"args array", encodeTestFrame([]byte(`{"id":1,"op":"kv.get","a":[1]}`))},
+		{"trailing data", encodeTestFrame([]byte(`{"id":1,"op":"kv.get"} {}`))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -340,7 +351,7 @@ func TestSDKNonReadingClientIsBounded(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close(); _ = host.Close(); <-done })
 	go func() {
 		for id := uint64(1); id <= 5000; id++ {
-			if _, err := client.Write(encodeSDKFrame([]byte(fmt.Sprintf(`{"id":%d,"op":"kv.get","a":{"key":"k"}}`, id)))); err != nil {
+			if _, err := client.Write(encodeTestFrame([]byte(fmt.Sprintf(`{"id":%d,"op":"kv.get","a":{"key":"k"}}`, id)))); err != nil {
 				return
 			}
 		}
@@ -513,14 +524,66 @@ func TestSDKConnCtxCancelledWhenChannelCloses(t *testing.T) {
 
 // ── frame reader / decoder fuzz ────────────────────────────────────────────
 
+// TestSDKFrameLengthBoundary pins the one place a wire length becomes an
+// allocation size: exactly MaxSDKFrame is accepted, zero and MaxSDKFrame+1 are
+// refused on the declared value before any arithmetic or allocation, and a
+// short header or truncated body is an I/O error rather than a short frame.
+func TestSDKFrameLengthBoundary(t *testing.T) {
+	maxPayload := bytes.Repeat([]byte("a"), MaxSDKFrame)
+	frame, err := encodeSDKFrame(maxPayload)
+	if err != nil {
+		t.Fatalf("encode at MaxSDKFrame: %v", err)
+	}
+	if want := MaxSDKFrame + sdkFrameHeaderLen; len(frame) != want {
+		t.Fatalf("encoded length = %d, want %d", len(frame), want)
+	}
+	if got := binary.BigEndian.Uint32(frame[:sdkFrameHeaderLen]); got != MaxSDKFrame {
+		t.Fatalf("encoded prefix = %d, want %d", got, MaxSDKFrame)
+	}
+	back, err := readSDKFrame(bytes.NewReader(frame))
+	if err != nil {
+		t.Fatalf("read at MaxSDKFrame: %v", err)
+	}
+	if !bytes.Equal(back, maxPayload) {
+		t.Fatalf("round trip changed the payload: %d bytes back, want %d", len(back), len(maxPayload))
+	}
+
+	if _, err := encodeSDKFrame(make([]byte, MaxSDKFrame+1)); !errors.Is(err, errSDKFrameTooLarge) {
+		t.Fatalf("encode at MaxSDKFrame+1 err = %v, want errSDKFrameTooLarge", err)
+	}
+
+	hdr := func(n uint32) []byte {
+		b := make([]byte, sdkFrameHeaderLen)
+		binary.BigEndian.PutUint32(b, n)
+		return b
+	}
+	// Header only: a reader that trusted the declared size would block on the
+	// body it never received, so the refusal has to come from the header.
+	for _, n := range []uint32{0, MaxSDKFrame + 1, 0xFFFFFFFF} {
+		if _, err := readSDKFrame(bytes.NewReader(hdr(n))); !errors.Is(err, errSDKProtocol) {
+			t.Fatalf("declared length %d err = %v, want errSDKProtocol", n, err)
+		}
+	}
+
+	if _, err := readSDKFrame(bytes.NewReader([]byte{0, 0, 1})); err == nil {
+		t.Fatal("three-byte header accepted as a frame")
+	}
+	if _, err := readSDKFrame(bytes.NewReader(append(hdr(8), "short"...))); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("truncated body err = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if _, err := readSDKFrame(bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
+		t.Fatalf("empty stream err = %v, want io.EOF", err)
+	}
+}
+
 // FuzzSDKFrame feeds arbitrary bytes to the frame reader and the strict
 // decoder: no panic, and an accepted frame is always within MaxSDKFrame.
 func FuzzSDKFrame(f *testing.F) {
 	f.Add([]byte{0, 0, 0, 0})
 	f.Add([]byte{0xff, 0xff, 0xff, 0xff})
-	f.Add(encodeSDKFrame([]byte(`{"id":1,"op":"kv.get","lease":"x","a":{"k":"v"}}`)))
-	f.Add(encodeSDKFrame([]byte(`[]`)))
-	f.Add(encodeSDKFrame([]byte(`{"id":1,"op":"kv.get"} trailing`)))
+	f.Add(encodeTestFrame([]byte(`{"id":1,"op":"kv.get","lease":"x","a":{"k":"v"}}`)))
+	f.Add(encodeTestFrame([]byte(`[]`)))
+	f.Add(encodeTestFrame([]byte(`{"id":1,"op":"kv.get"} trailing`)))
 	f.Add([]byte(`{"id":1}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if payload, err := readSDKFrame(bytes.NewReader(data)); err == nil {
