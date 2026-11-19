@@ -75,6 +75,22 @@ func enrollKillChild(dir, stage, planPath, exclude string) int {
 	return 0
 }
 
+// enrollmentWitness provisions the host witness the way production does: a
+// dedicated directory of its own, created by the provisioner so it is explicitly
+// chmod'ed to 0700. A pre-existing parent keeps whatever mode it was made with,
+// and a directory inherited from a setgid temp area fails the private-metadata
+// check. The directory is also resolved out of any symlinked temp path, because
+// every ancestor must be a real directory, and it stays outside the data
+// directory and every backup root.
+func enrollmentWitness(t *testing.T, dataDir string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	enrollmentMust(t, err)
+	witness := filepath.Join(root, "host", "witness")
+	enrollmentMust(t, artifactfs.ProvisionOwnerWitness(witness, managedBackupRoots(dataDir)))
+	return witness
+}
+
 // enrollmentKillFixture is a stopped legacy instance with the keys an operator
 // would already have on disk.
 func enrollmentKillFixture(t *testing.T) (string, []string) {
@@ -208,6 +224,29 @@ func enrollmentProvisionedRuntime(t *testing.T, dir string) {
 	}
 }
 
+// TestManagedEnrollWitnessPlacement runs everywhere. The witness fixture is pure
+// layout, so a placement the kernel cases would reject has to fail on any host
+// first, not only inside the disposable VM.
+func TestManagedEnrollWitnessPlacement(t *testing.T) {
+	dir, _ := enrollmentKillFixture(t)
+	witness := enrollmentWitness(t, dir)
+	st, err := os.Stat(witness)
+	enrollmentMust(t, err)
+	if !st.Mode().IsRegular() || st.Mode().Perm() != 0600 {
+		t.Fatalf("witness is %v, want a 0600 regular file", st.Mode())
+	}
+	parent, err := os.Stat(filepath.Dir(witness))
+	enrollmentMust(t, err)
+	if !parent.IsDir() || parent.Mode().Perm() != 0700 || parent.Mode()&os.ModeSetgid != 0 {
+		t.Fatalf("witness directory is %v, want a plain 0700 directory", parent.Mode())
+	}
+	rel, err := filepath.Rel(dir, witness)
+	enrollmentMust(t, err)
+	if filepath.IsLocal(rel) {
+		t.Fatalf("witness %s is inside the data directory", witness)
+	}
+}
+
 // TestManagedEnrollProcessKill stops the real offline apply at each
 // artifact-production boundary, then asks the real server process whether the
 // interrupted layout is serveable. Nothing may be deleted, no serving mode may
@@ -256,8 +295,7 @@ func TestManagedEnrollProcessKill(t *testing.T) {
 			launch := []string{bin, "-test.run=^TestManagedEnrollCrashHelper$", "-test.timeout=4m"}
 			if tc.gate != "" {
 				budget := enrollmentKernelBudget(t)
-				witness := filepath.Join(t.TempDir(), "witness")
-				enrollmentMust(t, artifactfs.ProvisionOwnerWitness(witness, managedBackupRoots(dir)))
+				witness := enrollmentWitness(t, dir)
 				env = append(env,
 					"ORVA_MANAGED_BOOT_BUDGET="+budget,
 					managedParentEnv+"="+filepath.Join(budget, "orva.workers"),
