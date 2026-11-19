@@ -2060,7 +2060,9 @@ const loadRouteData = async () => {
       await reloadSource(fn)
       markFormClean()
 
-      // Load existing secrets into the sidebar panel.
+      // Load existing secrets into the sidebar panel. Managed mode settles the
+      // capability first: it has no legacy secrets CRUD to write through.
+      await iam.check()
       await loadSecrets()
       // Load deployment history so the Versions card can render.
       await loadVersions(fn)
@@ -2771,6 +2773,34 @@ const rollbackToVersion = async (v) => {
   }
 }
 
+// Managed mode replaces the legacy secrets CRUD with a CAS-checked
+// configuration publication: read the tokens fresh for every write and never
+// reuse them, because they move after each publication.
+const loadManagedConfiguration = async () => {
+  const res = await apiClient.get(`/functions/${fnId.value}/configuration`, { quietStatuses: [404] })
+  return res.data
+}
+
+const managedConfigurationError = (err, fallback) => {
+  const status = err.response?.status
+  if (status === 409) return 'Configuration changed elsewhere; reload to continue.'
+  if (status === 403) return 'An administrator must change secrets.'
+  return err.response?.data?.error?.message || err?.message || fallback
+}
+
+const writeManagedSecret = async (key, value, { remove = false } = {}) => {
+  const config = await loadManagedConfiguration()
+  if (!config?.expected || !config?.current_artifact) {
+    throw new Error('Configuration is unavailable; reload to continue.')
+  }
+  const body = { expected: config.expected, current_artifact: config.current_artifact }
+  body.secret = remove ? { key } : { key, value }
+  if (remove) {
+    return apiClient.delete(`/functions/${fnId.value}/configuration/secrets`, { data: body })
+  }
+  return apiClient.put(`/functions/${fnId.value}/configuration/secrets`, body)
+}
+
 const loadSecrets = async () => {
   if (!fnId.value) return
   try {
@@ -2796,17 +2826,23 @@ const saveSecret = async () => {
   }
   // Existing function: save through the API.
   try {
-    await apiClient.post(`/functions/${fnId.value}/secrets`, {
-      key: name,
-      value: secretForm.value.value,
-    })
+    if (iam.available) {
+      await writeManagedSecret(name, secretForm.value.value)
+    } else {
+      await apiClient.post(`/functions/${fnId.value}/secrets`, {
+        key: name,
+        value: secretForm.value.value,
+      })
+    }
     secretForm.value.name = ''
     secretForm.value.value = ''
     await loadSecrets()
   } catch (err) {
     confirmStore.notify({
       title: 'Save failed',
-      message: err.response?.data?.error?.message || 'Failed to save secret',
+      message: iam.available
+        ? managedConfigurationError(err, 'Failed to save secret')
+        : (err.response?.data?.error?.message || 'Failed to save secret'),
       danger: true,
     })
   }
@@ -2827,12 +2863,18 @@ const removeSecret = async (key) => {
   })
   if (!ok) return
   try {
-    await apiClient.delete(`/functions/${fnId.value}/secrets/${encodeURIComponent(key)}`)
+    if (iam.available) {
+      await writeManagedSecret(key, '', { remove: true })
+    } else {
+      await apiClient.delete(`/functions/${fnId.value}/secrets/${encodeURIComponent(key)}`)
+    }
     await loadSecrets()
   } catch (err) {
     confirmStore.notify({
       title: 'Delete failed',
-      message: err.response?.data?.error?.message || 'Failed to delete secret',
+      message: iam.available
+        ? managedConfigurationError(err, 'Failed to delete secret')
+        : (err.response?.data?.error?.message || 'Failed to delete secret'),
       danger: true,
     })
   }
@@ -2844,12 +2886,18 @@ const flushPendingSecrets = async () => {
   if (!fnId.value || !pendingSecrets.value.length) return
   for (const sec of pendingSecrets.value) {
     try {
-      await apiClient.post(`/functions/${fnId.value}/secrets`, {
-        key: sec.name, value: sec.value,
-      })
+      if (iam.available) {
+        await writeManagedSecret(sec.name, sec.value)
+      } else {
+        await apiClient.post(`/functions/${fnId.value}/secrets`, {
+          key: sec.name, value: sec.value,
+        })
+      }
       buildLogs.value.push(`Saved secret: ${sec.name}`)
     } catch (err) {
-      const msg = err.response?.data?.error?.message || err.message
+      const msg = iam.available
+        ? managedConfigurationError(err, err.message)
+        : (err.response?.data?.error?.message || err.message)
       buildLogs.value.push(`Failed to save secret ${sec.name}: ${msg}`)
     }
   }
