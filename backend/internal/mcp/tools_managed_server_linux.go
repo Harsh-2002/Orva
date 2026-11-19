@@ -17,6 +17,7 @@ func registerManagedServerTools(rc *regCtx) {
 	if managedFixtureInvocationAvailable(rc.deps) {
 		registerFixtureInvokeTool(rc)
 	}
+	registerFirewallTools(rc)
 	registerIAMTools(rc)
 	registerConfigurationTools(rc)
 	registerWorkloadLifecycleTools(rc)
