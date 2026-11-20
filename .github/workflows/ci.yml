@@ -343,7 +343,7 @@ jobs:
         # exits 0, so scripts/govulncheck-gate.py is the gate: it carries one
         # expiring exception (GO-2026-6911) and fails on anything else.
         run: |
-          go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 -format json ./... > govulncheck.json
+          go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 -format json ./... > govulncheck.json
           python3 scripts/govulncheck-gate.py govulncheck.json
 
   ui:

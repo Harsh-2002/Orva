@@ -16,14 +16,13 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Changed
 
-- Go dependencies refreshed: Bifrost 1.15.2, mcp-go 1.6.0, sqlite 1.62.0,
-  go-selfupdate 1.7.1, pflag 1.1.0 and the golang.org/x crypto, sys, term, sync
-  and text modules. Nothing to do on upgrade. Bifrost 1.16.0 is not adopted: it
-  requires Go 1.27.4 and this repository still pins 1.27.3 in `go.mod`.
-- Dashboard helper text is shorter and fills its row instead of wrapping at a
-  narrow fixed width, and the Docs page sits in one centered reading column.
-  The stale "scratch hosts only" note about named permissions is replaced with
-  a short summary of how policies, versions and rollout work in managed mode.
+- Dependencies refreshed to their latest releases. The module now requires Go
+  1.27.4 (which fixes a net/http `MaxBytesReader` header race); the Docker image
+  and CI already track the latest 1.27 release. Go modules include Bifrost 1.16.0
+  with upstream mcp-go 1.6.0 (no fork), sqlite 1.62.0 and the `golang.org/x`
+  modules. The dashboard's lucide, vue, vitest and autoprefixer and its
+  postcss-selector-parser, glob and minimatch overrides are current, and CI scans
+  with govulncheck 1.10.0. Building from source needs Go 1.27.4 or newer.
 
 ### Added
 
