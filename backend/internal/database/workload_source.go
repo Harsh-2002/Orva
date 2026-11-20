@@ -10,6 +10,21 @@ type WorkloadSource struct {
 	Output                     WorkloadBuildOutput
 }
 
+// ReadWorkloadDeploymentSource resolves a retained deployment without consulting
+// the current Factory or any legacy source directory.
+func (db *Database) ReadWorkloadDeploymentSource(ctx context.Context, owner, deployment string) (WorkloadSource, error) {
+	tx, err := db.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return WorkloadSource{}, err
+	}
+	defer tx.Rollback()
+	a, err := readRollbackAssociationTx(ctx, tx, owner, deployment)
+	if err != nil {
+		return WorkloadSource{}, err
+	}
+	return WorkloadSource{Owner: owner, Runtime: a.runtime, Entrypoint: a.authored, Output: a.output}, nil
+}
+
 // ReadWorkloadSource returns the exact metadata for display, not admission.
 // Paused and pending functions still have an authored source.
 func (db *Database) ReadWorkloadSource(ctx context.Context, owner string) (WorkloadSource, error) {

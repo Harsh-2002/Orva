@@ -39,6 +39,10 @@ on this composition.
 - `GET /api/v1/functions/{fn_id}/source` reads the authored entrypoint and
   dependency manifest from the current sealed deployment; it never reads
   a legacy `current` symlink. Pending and paused deployments remain readable.
+- `GET /api/v1/functions/{fn_id}/diff` compares retained sealed source by
+  exact deployment ID (JSON or unified text). It requires `read` and does not
+  require an installed Factory or policy approval. Historical rows without
+  retained sealed source return `410 VERSION_GCD`; no legacy files are read.
 
 ## Managed operator surfaces
 
@@ -597,7 +601,8 @@ Errors:
   include the requested ID.
 - 410 `VERSION_GCD` if either version's source tree was pruned by the
   GC. `details.available_hashes` lists the surviving on-disk versions
-  so the caller can retry against a still-archived target.
+  in legacy mode. In managed mode this also covers history without retained
+  sealed source, including versions not rebuilt during portable restore.
 
 ### `GET /api/v1/functions/{id}/deployments`
 Deployment history for a function. Optional `?limit=N` (default 50).

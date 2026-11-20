@@ -30,6 +30,9 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Compare deployments in managed mode now reads retained sealed source in the
+  dashboard and `orva diff`, without installing or approving either version.
+
 - Managed mode now applies the egress policy to function workers; egress
   functions previously could not start. Policy changes rotate warm egress
   workers without uninstalling the function or changing its IAM state.

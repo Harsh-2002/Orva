@@ -250,6 +250,52 @@ func TestManagedServingLive(t *testing.T) {
 	}
 	node, err := db.GetFunctionByName("managed-node")
 	managedMust(t, err)
+	t.Run("deployment-compare", func(t *testing.T) {
+		base := "/api/v1/functions/"
+		var fn struct{ ID string }
+		managedMust(t, json.Unmarshal(call(t, http.MethodPost, strings.TrimSuffix(base, "/"),
+			map[string]string{"name": "compare-probe", "runtime": "node"}, 201), &fn))
+		deploy := func(code string) string {
+			t.Helper()
+			var result struct {
+				ID string `json:"deployment_id"`
+			}
+			managedMust(t, json.Unmarshal(call(t, http.MethodPost, base+fn.ID+"/deploy-inline",
+				map[string]string{"filename": "handler.js", "code": code}, 202), &result))
+			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+				row, err := db.GetDeployment(result.ID)
+				managedMust(t, err)
+				switch row.Status {
+				case "succeeded":
+					return result.ID
+				case "failed":
+					t.Fatal("fixture deployment failed")
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			t.Fatal("fixture deployment timed out")
+			return ""
+		}
+		before := "exports.handler = () => ({statusCode: 200, body: 'before-value'});\n"
+		after := "exports.handler = () => ({statusCode: 200, body: 'after-value'});\n"
+		from := deploy(before)
+		to := deploy(after)
+		query := "/diff?from=" + from + "&to=" + to
+		var comparison struct {
+			Files []struct{ Path, Kind, Before, After string }
+		}
+		managedMust(t, json.Unmarshal(call(t, http.MethodGet, base+"compare-probe"+query, nil, 200), &comparison))
+		if len(comparison.Files) != 1 || comparison.Files[0].Path != "handler.js" ||
+			comparison.Files[0].Kind != "handler" || comparison.Files[0].Before != before || comparison.Files[0].After != after {
+			t.Fatal("managed comparison did not read the exact authored pair")
+		}
+		diff := string(call(t, http.MethodGet, base+fn.ID+query+"&format=unified", nil, 200))
+		if !strings.Contains(diff, "-"+before) || !strings.Contains(diff, "+"+after) {
+			t.Fatal("managed unified diff does not match the authored pair")
+		}
+		call(t, http.MethodGet, base+node.ID+query, nil, 400)
+		call(t, http.MethodGet, base+fn.ID+"/diff?from="+from+"&to="+from, nil, 400)
+	})
 	configuration := "/api/v1/functions/" + node.ID + "/configuration"
 	lifecycle := func(operation string) {
 		t.Helper()

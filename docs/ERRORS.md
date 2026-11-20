@@ -97,7 +97,7 @@ session writers.
 | `CONFLICT` | 409 | `PUT /functions/{id}` name collision, or stale/ineligible job state in the explicit IAM jobs fixture. | no — refresh and review |
 | `IAM_DENIED` | 403 | Protected operation denied in the explicit IAM fixture, including jobs management without current admin/original-origin rights. Not a normal-serving IAM activation. | no — review current rights |
 | `CHECKPOINT_BUSY` | 409 | `POST /system/vacuum` could not checkpoint the WAL because another connection holds a read lock. Previously the checkpoint's busy result was discarded and VACUUM ran against a stale WAL. | yes — retry shortly |
-| `VERSION_GCD` | 410 | rollback / diff target's version tree was pruned by the GC; `details.available_hashes` lists survivors | no — pick a still-archived hash |
+| `VERSION_GCD` | 410 | rollback or diff source is no longer retained; legacy responses can list surviving hashes in `details.available_hashes` | no — pick a retained deployment |
 | `INACTIVE` | 410 | inbound webhook trigger is disabled | no — enable the trigger |
 | `REQUEST_TRUNCATED` | 410 | replay: the captured request body was truncated at the configured cap, so a replay would not match the original | no |
 | `PAYLOAD_TOO_LARGE` | 413 | body exceeds `cfg.Server.MaxBodyBytes` (default 6 MB). Two paths: a `Content-Length` above the cap is refused up front; a **chunked** body with no `Content-Length` is refused when the read hits the cap. The chunked case used to be silently truncated and handed to the function with a 200. | no — send `Content-Length`, split the upload, or raise the cap |
@@ -133,7 +133,7 @@ session writers.
 | `INSUFFICIENT_DISK` | 503 | not enough free disk on the data volume to start the build | no — free space or lower `system_config.min_free_disk_mb` |
 | `SHUTTING_DOWN` | 503 | server is closing down | no, on this host — redirect |
 | `SANDBOX_ERROR` | 503 | unmapped sandbox / dispatch failure | no — investigate |
-| `UNAVAILABLE` | 503 | onboarding cannot verify setup state, so it refuses to create an admin user | yes — retry once the database is reachable |
+| `UNAVAILABLE` | 503 | a required service or verified artifact is unavailable; the request is refused | yes — retry once the service or artifact is available |
 | `SERVICE_UNAVAILABLE` | 503 | authentication lookup failed (database error); the request is refused rather than treated as unauthenticated | yes — retry once the database is reachable |
 | `FIREWALL_DISABLED` | 503 | firewall manager not initialized; status/resolve cannot report enforcement | no — check the server log |
 | `FUNCTION_UNAVAILABLE` | 503 | inbound webhook: the target function is not in the registry (deleted or not yet loaded) | yes — retry once the function is active |
