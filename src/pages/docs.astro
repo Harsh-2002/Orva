@@ -283,9 +283,9 @@ def handler(event):
           <div>
             <dt><span class="num">sdk</span></dt>
             <dd>
-              The current SDK permission switch. Enable <span class="num">Allow Orva SDK</span> in the function
-              editor's Settings panel (or use the API/CLI) for handlers that use SDK operations. New functions default
-              to <span class="num">false</span>; this permission is independent of outbound networking.
+              In unreleased default mode, enable <span class="num">Allow Orva SDK</span> in the function editor
+              or use the API or CLI. New functions default to <span class="num">false</span>. This switch does
+              not grant permissions in managed mode.
             </dd>
           </div>
         </dl>
@@ -296,12 +296,29 @@ def handler(event):
         <h2>The SDK</h2>
         <p>
           The <span class="num">orva</span> package is preinstalled in every sandbox. There is nothing to add to
-          a manifest and no network call to fetch it. On current main, SDK operations require the function's
-          <span class="num">sdk: true</span> permission and use a private inherited per-worker channel; they work
-          with <span class="num">network_mode: none</span>. Only function-authored outbound network requests
-          require <span class="num">network_mode: egress</span>. Upgrade the server and runtime adapters
-          together to use this behavior; source behavior does not establish that an existing deployment has
-          upgraded.
+          a manifest and no network call to fetch it. How SDK operations reach Orva depends on the build:
+        </p>
+        <ul class="bullets">
+          <li>
+            <strong>Current release:</strong> the SDK uses internal HTTP and needs
+            <span class="num">network_mode: egress</span> for platform operations such as KV and function calls.
+          </li>
+          <li>
+            <strong>Unreleased default mode:</strong> SDK operations use a private inherited per-worker channel
+            and require <span class="num">sdk: true</span>. They work with <span class="num"
+              >network_mode: none</span
+            >.
+          </li>
+          <li>
+            <strong>Unreleased managed mode (opt-in):</strong> the same channel carries SDK calls, but Function
+            IAM replaces the broad permission switch. Protected operations are denied until explicitly granted and
+            reviewed. Function-to-function calls need both a caller grant and target acceptance.
+          </li>
+        </ul>
+        <p>
+          Outbound requests to external services still need egress. When moving to the private channel,
+          upgrade the server and runtime adapters together. An upgrade does not enroll an existing instance
+          into managed mode.
         </p>
 
         <h3>KV</h3>
@@ -504,13 +521,12 @@ $ orva logs my-fn --follow`}
 
         <h3>Credentials</h3>
         <p>
-          SDK calls use the private worker channel, not an SDK bearer token, internal HTTP route, or
-          control-plane network exemption. The channel is closed when its worker is reaped. SDK authority
-          remains governed by the current <span class="num">sdk</span> permission. The approved Function IAM plan
-          has an inert foundation under implementation; IAM and workload-scoped authorization are not active or
-          approved for rollout. See the
-          <a class="link" href={`${repo}/blob/main/docs/FUNCTION_IAM_PLAN.md`}>Function IAM plan</a>
-          for its implementation status and design.
+          With the private worker channel on <span class="num">main</span>, SDK calls no longer use an SDK
+          bearer token or an internal HTTP route. The channel closes when the worker exits. Function IAM
+          governs SDK operations only on an opted-in managed instance; it does not replace operator
+          authentication, public invocation authentication, or network policy. See the
+          <a class="link" href={`${repo}/blob/main/docs/API.md#managed-server`}>managed API reference</a>
+          and <a class="link" href={`${repo}/blob/main/docs/FUNCTION_IAM_PLAN.md`}>Function IAM plan</a>.
           <a class="link" href={`${repo}/blob/main/docs/SECURITY.md`}>SECURITY.md</a> sets out each credential class
           and exactly what revoking it reaches.
         </p>
