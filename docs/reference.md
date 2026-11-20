@@ -60,7 +60,8 @@
 > **not legacy routes or tools**. The names-only `read` route
 > `GET /api/v1/functions/{id}/secrets` takes a function UUID and returns
 > `{"secrets":["KEY"]}`; values are never returned. Managed secret writes use
-> `/api/v1/functions/{id}/configuration/secrets`. Mutation publishes review-required
+> `/api/v1/functions/{id}/configuration/secrets` (`orva secrets set/delete` use it
+> automatically on a managed server; `--install` also installs the result). Mutation publishes review-required
 > deny and invalidates the old actual Factory before ACK. Explicit new Factory
 > installation and current aggregate-policy review are separate steps; stored
 > approval cannot establish current runtime authority. Configuration uses the

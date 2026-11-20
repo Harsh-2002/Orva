@@ -406,6 +406,15 @@ orva secrets delete greeter STRIPE_KEY
 Secrets ride along with the function as `process.env.STRIPE_KEY` /
 `os.environ["STRIPE_KEY"]` inside the sandbox.
 
+On a managed server, `set` and `delete` change the secret through the
+configuration route using the function's current revisions, and are refused
+without being retried (HTTP 409) if the function changed in between. The
+function stays inactive until the new configuration is installed: add
+`--install` to do that in the same command (needs an administrator key), or
+install from the dashboard. Installing never approves permissions; review them
+separately. `--install` is an error on a legacy server. `orva secrets list`
+works unchanged on both.
+
 ### Schedules + background jobs
 
 #### Managed workload pause and resume (optional server composition)

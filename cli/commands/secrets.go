@@ -51,7 +51,13 @@ Examples:
   orva secrets set greeter STRIPE_KEY --value sk_live_123
   orva secrets set greeter STRIPE_KEY --value @key.txt
   printf 'sk_live_123' | orva secrets set greeter STRIPE_KEY --value @-
-  orva secrets set greeter STRIPE_KEY --value-file ./key.txt`,
+  orva secrets set greeter STRIPE_KEY --value-file ./key.txt
+
+On a managed server a change is applied against the function's current
+configuration revisions and is refused (nothing is retried) if it changed in
+the meantime. The function stays inactive until the configuration is installed:
+pass --install to do that in the same command. Installing never approves
+permissions; review them separately.`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSecretsSet,
 }
@@ -72,6 +78,8 @@ Examples:
 func init() {
 	secretsSetCmd.Flags().String("value", "", "secret value: inline string, @file, or @- for stdin")
 	secretsSetCmd.Flags().String("value-file", "", "path to a file containing the secret value")
+	secretsSetCmd.Flags().Bool("install", false, "managed servers: also install the new configuration (does not approve permissions)")
+	secretsDeleteCmd.Flags().Bool("install", false, "managed servers: also install the new configuration (does not approve permissions)")
 
 	secretsCmd.AddCommand(secretsListCmd)
 	secretsCmd.AddCommand(secretsSetCmd)
@@ -157,6 +165,13 @@ func runSecretsSet(cmd *cobra.Command, args []string) error {
 	}
 	secretValue := strings.TrimRight(string(raw), "\r\n")
 
+	if managedServer(client) {
+		return managedSecretWrite(cmd, client, fnID, args[0], key, &secretValue)
+	}
+	if install, _ := cmd.Flags().GetBool("install"); install {
+		return fmt.Errorf("set: --install applies only to managed servers")
+	}
+
 	// REST shape note: the server exposes Upsert at POST /api/v1/functions/{id}/secrets
 	// with body {"key": "...", "value": "..."} — there is no PUT-by-key route.
 	body := map[string]any{
@@ -194,6 +209,13 @@ func runSecretsDelete(cmd *cobra.Command, args []string) error {
 
 	if err := confirm(cmd, fmt.Sprintf("Delete secret %q from %s?", key, args[0])); err != nil {
 		return err
+	}
+
+	if managedServer(client) {
+		return managedSecretWrite(cmd, client, fnID, args[0], key, nil)
+	}
+	if install, _ := cmd.Flags().GetBool("install"); install {
+		return fmt.Errorf("delete: --install applies only to managed servers")
 	}
 
 	resp, err := client.Delete("/api/v1/functions/" + fnID + "/secrets/" + key)
