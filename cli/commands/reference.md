@@ -1989,6 +1989,10 @@ review what's about to change *before* rolling back, use the dashboard's
 Deployments page) or `orva diff <fn> --from <dep_id> --to <dep_id>` for
 a unified-diff in the terminal.
 
+In managed mode, both sides must have retained sealed source for their exact
+deployment IDs. Comparison does not install a build or approve permissions.
+Historical records without sealed source return `410 VERSION_GCD`.
+
 ```json
 {
   "error": {

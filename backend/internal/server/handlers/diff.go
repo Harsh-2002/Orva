@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,6 +38,23 @@ import (
 // unified bytes; the dashboard receives raw before/after blobs so the
 // @codemirror/merge MergeView owns its own highlighting.
 func (h *FunctionHandler) Diff(w http.ResponseWriter, r *http.Request) {
+	h.diff(w, r, nil)
+}
+
+type DiffSource struct {
+	Entrypoint, Code, Manifest, Dependencies string
+	HasManifest                              bool
+}
+
+type DiffSourceReader func(context.Context, string, string) (DiffSource, error)
+
+func (h *FunctionHandler) DiffWithSource(read DiffSourceReader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.diff(w, r, read)
+	}
+}
+
+func (h *FunctionHandler) diff(w http.ResponseWriter, r *http.Request, read DiffSourceReader) {
 	reqID := r.Header.Get("X-Request-ID")
 
 	rawID := r.PathValue("fn_id")
@@ -85,6 +103,27 @@ func (h *FunctionHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	}
 	toDep, err := loadDiffDeployment(h.DB, toID, fnID, reqID, w)
 	if err != nil {
+		return
+	}
+	if read != nil {
+		before, err := read(r.Context(), fnID, fromDep.ID)
+		if err != nil {
+			managedDiffError(w, reqID, err)
+			return
+		}
+		after, err := read(r.Context(), fnID, toDep.ID)
+		if err != nil {
+			managedDiffError(w, reqID, err)
+			return
+		}
+		files := []diffFile{{Path: after.Entrypoint, Kind: "handler", Before: before.Code, After: after.Code}}
+		if before.HasManifest || after.HasManifest {
+			files = append(files, diffFile{
+				Path: after.Manifest, Kind: "manifest", Before: before.Dependencies, After: after.Dependencies,
+				Added: !before.HasManifest, Removed: !after.HasManifest,
+			})
+		}
+		writeDeploymentDiff(w, format, fromDep, toDep, files)
 		return
 	}
 
@@ -138,6 +177,18 @@ func (h *FunctionHandler) Diff(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	writeDeploymentDiff(w, format, fromDep, toDep, files)
+}
+
+func managedDiffError(w http.ResponseWriter, reqID string, err error) {
+	if errors.Is(err, os.ErrNotExist) {
+		respond.Error(w, http.StatusGone, "VERSION_GCD", "One or both deployment sources are no longer retained", reqID)
+		return
+	}
+	respond.Error(w, http.StatusServiceUnavailable, "UNAVAILABLE", "Sealed deployment source unavailable", reqID)
+}
+
+func writeDeploymentDiff(w http.ResponseWriter, format string, fromDep, toDep *database.Deployment, files []diffFile) {
 	if format == "unified" {
 		var sb strings.Builder
 		for _, f := range files {

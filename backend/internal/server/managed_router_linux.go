@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"strings"
@@ -155,6 +156,14 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		gateRoute(mux, db, ops, "GET /api/v1/functions", managedRead, deploy.List)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}", managedRead, deploy.Get)
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/source", managedRead, readManagedSource(db, publication))
+		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/diff", managedRead, deploy.DiffWithSource(
+			func(ctx context.Context, owner, deployment string) (handlers.DiffSource, error) {
+				source, err := publication.ReadDeploymentSource(ctx, owner, deployment)
+				if errors.Is(err, builder.ErrDeploymentSourceGone) {
+					err = fs.ErrNotExist
+				}
+				return handlers.DiffSource(source), err
+			}))
 		// Names only: the editor shows which secrets exist, while every write
 		// stays on the CAS-checked configuration route.
 		gateRoute(mux, db, ops, "GET /api/v1/functions/{fn_id}/secrets", managedRead, listManagedSecretNames(db, reg))
