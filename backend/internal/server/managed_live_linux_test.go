@@ -689,6 +689,57 @@ func TestManagedServingLive(t *testing.T) {
 				t.Fatal("REST did not observe the policy committed through the slim CLI")
 			}
 		})
+		t.Run("slim-cli-secrets", func(t *testing.T) {
+			var fn struct{ ID string }
+			managedMust(t, json.Unmarshal(call(t, http.MethodPost, "/api/v1/functions",
+				map[string]string{"name": "cli-secret-probe", "runtime": "node"}, 201), &fn))
+			var deployed struct {
+				ID string `json:"deployment_id"`
+			}
+			managedMust(t, json.Unmarshal(call(t, http.MethodPost, "/api/v1/functions/"+fn.ID+"/deploy-inline", map[string]string{
+				"filename": "handler.js",
+				"code":     "exports.handler = () => ({statusCode: 200, body: process.env.CLI_SECRET || 'unset'});\n",
+			}, 202), &deployed))
+			for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(25 * time.Millisecond) {
+				row, err := db.GetDeployment(deployed.ID)
+				managedMust(t, err)
+				if row.Status == "succeeded" {
+					break
+				}
+				if row.Status == "failed" || time.Now().After(deadline) {
+					t.Fatalf("fixture deployment %s", row.Status)
+				}
+			}
+			call(t, http.MethodPost, "/api/v1/deployments/"+deployed.ID+"/install", nil, 200)
+			if got := string(call(t, http.MethodGet, "/fn/"+fn.ID, nil, 200)); got != "unset" {
+				t.Fatalf("fixture did not start without the secret: %q", got)
+			}
+			run := func(args ...string) string {
+				t.Helper()
+				cmd := exec.CommandContext(ctx, cli, append([]string{"secrets"}, args...)...)
+				cmd.Env = append(os.Environ(), "ORVA_CONFIG="+filepath.Join(t.TempDir(), "config.yaml"),
+					"ORVA_ENDPOINT="+listener.URL, "ORVA_API_KEY="+fixtureKey)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("orva secrets %s failed: %v\n%s", args[0], err, out)
+				}
+				if strings.Contains(string(out), "synthetic-cli-secret") {
+					t.Fatalf("orva secrets %s printed the secret value", args[0])
+				}
+				return string(out)
+			}
+			run("set", fn.ID, "CLI_SECRET", "--value", "synthetic-cli-secret", "--install")
+			if got := string(call(t, http.MethodGet, "/fn/"+fn.ID, nil, 200)); got != "synthetic-cli-secret" {
+				t.Fatalf("sandboxed function did not receive the secret set through the CLI: %q", got)
+			}
+			if !strings.Contains(run("list", fn.ID), "CLI_SECRET") {
+				t.Fatal("orva secrets list does not show the key")
+			}
+			run("--yes", "delete", fn.ID, "CLI_SECRET", "--install")
+			if got := string(call(t, http.MethodGet, "/fn/"+fn.ID, nil, 200)); got != "unset" {
+				t.Fatalf("secret still visible after CLI delete: %q", got)
+			}
+		})
 	}
 	const routePath = "/managed-acceptance/*"
 	const routeInvokePath = "/managed-acceptance/probe"

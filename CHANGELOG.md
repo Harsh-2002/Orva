@@ -33,6 +33,11 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- `orva secrets set` and `delete` now work on a managed server. They previously
+  called legacy routes it does not serve. They change the secret against the
+  function's current revisions, refuse without retrying if it changed meanwhile,
+  and leave installation explicit; `--install` installs the new configuration in
+  the same command without approving permissions.
 - Compare deployments in managed mode now reads retained sealed source in the
   dashboard and `orva diff`, without installing or approving either version.
 
