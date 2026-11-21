@@ -323,8 +323,7 @@ type managedInspection struct {
 	InboundPublished bool                          `json:"inbound_published"`
 }
 
-// managedServer reports whether the endpoint is a managed instance. A legacy
-// server has no capabilities route, so anything but an explicit true is legacy.
+// managedServer reports whether the endpoint explicitly advertises managed mode.
 func managedServer(c *client.Client) bool {
 	resp, err := c.Get("/api/v1/iam/capabilities")
 	if err != nil {

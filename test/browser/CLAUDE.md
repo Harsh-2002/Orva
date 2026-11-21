@@ -26,8 +26,9 @@ onto every result's location, so a failure reads `day laptop /deployments`.
 
 It obtains a dashboard session by logging in as `browser-harness`, onboarding
 that user if it does not exist (which is why `--api-key` is needed on an
-instance that already has functions). Add `--destructive` to run flows that
-delete data; without it those are skipped, not silently passed.
+instance that already has functions). Add `--destructive` to exercise keyboard
+deletion on a fresh, journey-owned function in each theme; without it those
+checks are skipped.
 
 ## Why a browser is required
 

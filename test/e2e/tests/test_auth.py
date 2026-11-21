@@ -5,6 +5,8 @@ protected /api/v1/* paths vs the public, auth-skipped /api/v1/system/health.
 Read-only: this module never logs out, onboards, or mutates the admin user. It
 only reads state and probes how unauthenticated/bad-key clients are rejected."""
 import sys
+import json
+from urllib.request import Request, urlopen
 
 from harness import OrvaClient, section, check, summary
 
@@ -74,6 +76,19 @@ def main():
         check("missing key on /system/metrics.json -> 401", am == 401, f"status {am}")
         okm, _ = c.req("GET", "/api/v1/system/metrics.json", expect=range(200, 599))
         check("admin key on /system/metrics.json -> 200", okm == 200, f"status {okm}")
+
+        section("default serving mode discovery does not enable IAM")
+        capabilities = "/api/v1/iam/capabilities"
+        check("anonymous mode discovery refused", anon.status("GET", capabilities) == 401)
+        check("invalid key cannot discover mode", bogus.status("GET", capabilities) == 401)
+        response = c.status("GET", capabilities)
+        check("authenticated mode discovery -> 200", response == 200, f"status {response}")
+        if response == 200:
+            request = Request(c.base + capabilities, headers={"X-Orva-API-Key": c.key})
+            with urlopen(request, timeout=10) as result:
+                check("default server reports managed false", json.load(result) == {"managed": False})
+                check("mode discovery cannot be cached", result.headers.get("Cache-Control") == "no-store")
+        check("managed policies are still absent", c.status("GET", "/api/v1/iam/policies") == 404)
     finally:
         cleanup(c)
     return summary()

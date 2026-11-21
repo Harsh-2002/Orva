@@ -191,11 +191,7 @@ try {
       for (const suite of flowSuites) {
         try {
           await suite.run({
-            context, base: BASE, report: themeReport, theme,
-            // Only in the last theme pass: a flow that deletes data takes the
-            // function every later pass discovered at start with it, and the
-            // next theme then reports 404s for routes that were fine.
-            destructive: DESTRUCTIVE && theme === THEMES[THEMES.length - 1], apiKey: API_KEY,
+            context, base: BASE, report: themeReport, theme, destructive: DESTRUCTIVE,
           })
         } catch (e) {
           // Keep enough of the message to see WHY. Playwright puts the

@@ -147,6 +147,7 @@ func managedRoutesWithAsync(db *database.Database, reg *registry.Registry, autho
 		mountManagedWebAuth(mux, db, ops)
 		mux.Handle("GET /web/", uiHandler())
 		gateRoute(mux, db, ops, "GET /api/v1/iam/capabilities", managedRead, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
 			respond.JSON(w, 200, map[string]bool{"managed": true})
 		})
 		(&workloadconfig.HTTPAdapter{Service: configuration, Authenticate: authenticate}).Register(mux)

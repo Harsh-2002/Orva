@@ -2,7 +2,9 @@
 
 > On Linux, `orva serve` selects the managed server from a durable mode record;
 > legacy instances stay legacy.
-> It exposes authenticated capability discovery at `GET /api/v1/iam/capabilities`,
+> Authenticated `GET /api/v1/iam/capabilities` reports `managed: true` or
+> `managed: false`; older default servers may return 404.
+> Managed serving exposes
 > fresh unbound creation at `POST /api/v1/iam/functions`, and exact Factory
 > installation at `POST /api/v1/deployments/{id}/install`. The managed
 > MCP/Chat tool `install_managed_deployment` does not review or approve policy.

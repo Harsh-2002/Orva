@@ -8,28 +8,77 @@
 // product routes through that one component. It was reproduced here first, at
 // which point it stopped being an opinion.
 //
-// Flows are destructive by nature, so they run against whatever instance they
-// are pointed at. Point this at a scratch instance, not one you care about.
+import { randomUUID } from 'node:crypto'
 
 export const meta = {
   id: 'journeys',
   title: 'Interaction flows an operator actually performs',
 }
 
-const BASE_OF = (ctx) => ctx.base
+async function checkDeleteConfirmation(page, base, report, where) {
+  // Never remove a function the viewport matrix or another tester is using.
+  const name = `browser-delete-${randomUUID()}`
+  const created = await page.request.post(`${base}/api/v1/functions`, {
+    data: { name, runtime: 'node' },
+  })
+  if (!created.ok()) throw new Error(`create dialog fixture: HTTP ${created.status()}`)
+  const { id } = await created.json()
+  if (!id) throw new Error('create dialog fixture: no function ID')
+  const url = `${base}/api/v1/functions/${id}`
+  let deleteRequests = 0
+  const trackDelete = (request) => {
+    if (request.method() === 'DELETE' && request.url() === url) deleteRequests++
+  }
+  page.on('request', trackDelete)
+  try {
+    await page.goto(`${base}/web/functions`, { waitUntil: 'networkidle', timeout: 30000 })
+    const search = page.getByPlaceholder('Search by name, runtime, or function id…')
+    await search.fill(name)
+    const row = page.getByRole('row').filter({ has: page.getByRole('link', { name, exact: true }) })
+    const dialog = page.getByRole('dialog')
+    const open = async () => {
+      await row.getByRole('button', { name: 'Delete function' }).click()
+      await dialog.waitFor()
+    }
+    const checkCancel = async (key, label) => {
+      await page.keyboard.press(key)
+      await dialog.waitFor({ state: 'hidden' })
+      const status = (await page.request.get(url)).status()
+      report.record('journeys', where, label, deleteRequests === 0 && status === 200
+        ? [] : [`sent ${deleteRequests} DELETE requests; fixture GET returned ${status}`])
+    }
 
-// Opens the delete confirm on the first Functions row, if there is one.
-async function openDeleteConfirm(page, base) {
-  await page.goto(`${base}/web/functions`, { waitUntil: 'networkidle', timeout: 30000 })
-  await page.waitForTimeout(600)
-  const rows = await page.evaluate(() => document.querySelectorAll('tbody tr').length)
-  if (!rows) return { rows: 0 }
-  const del = page.locator('tbody tr').first()
-    .locator('button[aria-label*="Delete" i], button[title*="Delete" i]').first()
-  if (!(await del.count())) return { rows, noButton: true }
-  await del.click()
-  await page.waitForTimeout(500)
-  return { rows, opened: await page.locator('[role="dialog"]').count() > 0 }
+    await open()
+    const focused = () => page.evaluate(() => document.activeElement?.textContent.trim())
+    const initial = await focused()
+    report.record('journeys', where, 'focus lands on the non-destructive control',
+      initial === 'Cancel' ? [] : [`focus landed on "${initial}", not Cancel`])
+    await checkCancel('Enter', 'Enter on Cancel does not confirm a destructive dialog')
+
+    await open()
+    await checkCancel('Escape', 'Escape closes a confirm without acting')
+
+    await open()
+    await page.keyboard.press('Tab')
+    const next = await focused()
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url() === url && r.request().method() === 'DELETE'),
+      page.keyboard.press('Enter'),
+    ])
+    const status = (await page.request.get(url)).status()
+    report.record('journeys', where, 'the confirm button is operable by keyboard',
+      next === 'Delete' && response.ok() && status === 404 && deleteRequests === 1
+        ? [] : [`Tab reached "${next}"; DELETE returned ${response.status()}, fixture GET returned ${status}`])
+  } finally {
+    page.off('request', trackDelete)
+    const current = await page.request.get(url)
+    if (current.status() !== 404) {
+      const cleanup = await page.request.delete(url)
+      if (!cleanup.ok() && cleanup.status() !== 404) {
+        report.fail('journeys', where, 'destructive fixture cleaned up', `HTTP ${cleanup.status()}`)
+      }
+    }
+  }
 }
 
 // Data rows only. An empty table still renders one <tr> holding the "nothing
@@ -99,11 +148,6 @@ export async function run({ context, base, report, destructive }) {
     desktopOverflow > 1 ? [] : ['long code line remained wrapped after resizing to desktop'])
   await mobileCodePage.close()
 
-  // The detail-view check runs BEFORE the destructive block on purpose: that
-  // block deletes a function, and deleting one cascades away its executions,
-  // so the invocations table this check needs would be empty by the time it
-  // ran and the check would skip itself out of existence every time.
-
   // ---- A detail view is reachable without a pointer ----------------------
   await page.goto(`${base}/web/invocations`, { waitUntil: 'networkidle', timeout: 30000 })
   await page.waitForTimeout(700)
@@ -134,54 +178,7 @@ export async function run({ context, base, report, destructive }) {
     report.skip('journeys', where, 'Enter on Cancel does not confirm a destructive dialog',
       'pass --destructive to run flows that delete data')
   } else {
-    const opened = await openDeleteConfirm(page, base)
-    if (!opened.rows) {
-      report.skip('journeys', where, 'Enter on Cancel does not confirm a destructive dialog',
-        'no functions on this instance to delete')
-    } else if (!opened.opened) {
-      report.fail('journeys', where, 'Enter on Cancel does not confirm a destructive dialog',
-        'could not open the delete confirmation dialog')
-    } else {
-      const focused = await page.evaluate(() => (document.activeElement?.textContent || '').trim())
-      const before = opened.rows
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(1200)
-      const after = await countRows(page)
-      report.record('journeys', where, 'Enter on Cancel does not confirm a destructive dialog',
-        after < before
-          ? [`focus was on "${focused}" and Enter deleted a function (${before} then ${after})`]
-          : [])
-      report.record('journeys', where, 'focus lands on the non-destructive control',
-        /cancel/i.test(focused) ? [] : [`focus landed on "${focused}", not Cancel`])
-    }
-
-    // ---- Escape still cancels -------------------------------------------
-    const esc = await openDeleteConfirm(page, base)
-    if (esc.opened) {
-      const before = esc.rows
-      await page.keyboard.press('Escape')
-      await page.waitForTimeout(900)
-      const closed = await page.locator('[role="dialog"]').count() === 0
-      const after = await countRows(page)
-      report.record('journeys', where, 'Escape closes a confirm without acting',
-        [...(closed ? [] : ['dialog stayed open after Escape']),
-          ...(after === before ? [] : ['Escape deleted something'])])
-    }
-
-    // ---- The confirm button still works by keyboard ----------------------
-    const ok = await openDeleteConfirm(page, base)
-    if (ok.opened) {
-      const before = ok.rows
-      await page.keyboard.press('Tab')
-      const focused = await page.evaluate(() => (document.activeElement?.textContent || '').trim())
-      await page.keyboard.press('Enter')
-      await page.waitForTimeout(1500)
-      const after = await countRows(page)
-      report.record('journeys', where, 'the confirm button is operable by keyboard',
-        after === before - 1
-          ? []
-          : [`Tab reached "${focused}" and Enter did not confirm (${before} then ${after})`])
-    }
+    await checkDeleteConfirmation(page, base, report, where)
   }
 
   // ---- The mobile drawer opens and closes --------------------------------

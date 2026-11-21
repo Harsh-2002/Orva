@@ -524,6 +524,14 @@ func TestManagedServingLive(t *testing.T) {
 			return raw
 		}
 
+		do(http.MethodGet, "/api/v1/iam/capabilities", "", nil, http.StatusUnauthorized)
+		modeHead, modeBody := do(http.MethodGet, "/api/v1/iam/capabilities", fixtureKey, nil, http.StatusOK)
+		var mode map[string]bool
+		managedMust(t, json.Unmarshal(modeBody, &mode))
+		if !mode["managed"] || modeHead.Get("Cache-Control") != "no-store" {
+			t.Fatal("capabilities did not report uncached managed mode")
+		}
+
 		// A real managed invocation, then everything an operator reads about it.
 		head, _ := do(http.MethodGet, "/fn/"+node.ID, "", nil, 200)
 		execID, traceID := head.Get("X-Orva-Execution-ID"), head.Get("X-Trace-Id")

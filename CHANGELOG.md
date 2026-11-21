@@ -43,6 +43,9 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Default serving reports its mode to the dashboard without an expected 404.
+  Settings keeps long build identifiers visible on phones, and Schedules
+  uses the same Refresh control as Jobs.
 - `orva deploy` now rejects an unsupported or mismatched runtime before
   uploading, rather than claiming it changed the runtime of an existing
   function. Default-mode tarball deploys now warn when they detect a disabled

@@ -86,4 +86,24 @@ export async function onPage({ page, route, viewport, report }) {
 
   report.record('responsive', where, 'nothing extends past the viewport edge',
     r.wide.map((w) => `${w.el} ends ${w.over}px past the right edge`))
+
+  if (route.name === 'settings') {
+    const summary = page.locator('summary').filter({ hasText: /^Build info\b/ })
+    const card = summary.locator('..')
+    const wasOpen = await card.getAttribute('open') !== null
+    if (!wasOpen) await summary.click()
+    try {
+      const overflowing = await card.locator('dd').evaluateAll((values) =>
+        values.filter((value) => {
+          const text = document.createRange()
+          text.selectNodeContents(value)
+          const right = document.documentElement.clientWidth
+          return [...text.getClientRects()].some((rect) => rect.right > right + 1)
+        }).length)
+      report.record('responsive', where, 'expanded build info fits the viewport',
+        overflowing ? [`${overflowing} build values extend past the right edge`] : [])
+    } finally {
+      if (!wasOpen) await summary.click()
+    }
+  }
 }

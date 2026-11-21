@@ -20,9 +20,9 @@
           aria-hidden="true"
         />
         Build info
-        <span class="ml-auto text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
+        <span class="ml-auto min-w-0 truncate text-xs font-normal text-foreground-muted group-open:hidden">{{ buildInfo?.version || EMPTY }}</span>
       </summary>
-      <dl class="mt-4 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-xs">
+      <dl class="mt-4 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs sm:gap-x-6 [&>dd]:wrap-anywhere">
         <dt class="text-foreground-muted">
           Version
         </dt>

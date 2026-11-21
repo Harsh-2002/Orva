@@ -4,8 +4,10 @@
 
 On Linux, `orva serve` selects this composition from the durable managed mode
 record. It mounts managed handlers without falling back to legacy mutation routes.
-Authenticated `GET /api/v1/iam/capabilities` returns `{"managed":true}` only
-on this composition.
+`GET /api/v1/iam/capabilities` requires `read`. It returns `{"managed":true}` on
+this composition and `{"managed":false}` in default serving, with
+`Cache-Control: no-store`. Older default servers may return 404. The mode
+response neither grants IAM permissions nor enables managed routes.
 
 - `POST /api/v1/functions` (also `/api/v1/iam/functions`) accepts `name`,
   `runtime` (`node` or `python`) and optional `entrypoint`. The route requires `write`; creation also

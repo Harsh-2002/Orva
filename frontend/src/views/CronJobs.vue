@@ -31,6 +31,7 @@
           :disabled="refreshing || saving"
           @click="loadJobs"
         >
+          <RefreshCw aria-hidden="true" />
           Refresh
         </Button>
       </div>
@@ -555,7 +556,7 @@ const historyOpen = ref(false)
 import { humanizeCron } from '@/utils/cronDescription'
 import { EMPTY } from '@/utils/format'
 import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue'
-import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2 } from '@lucide/vue'
+import { PlusCircle, Trash2, Clock, Edit, Play, Pause, CheckCircle2, RefreshCw } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
 import FilterSelect from '@/components/common/FilterSelect.vue'
 import IconButton from '@/components/common/IconButton.vue'
