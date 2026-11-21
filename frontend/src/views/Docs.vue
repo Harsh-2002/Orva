@@ -199,6 +199,11 @@
             TypeScript uses the jailed compiler. A syntax failure appears in the
             build log and leaves the previous live version serving.
           </p>
+          <p class="doc-lede mt-2">
+            When redeploying with <code class="doc-chip">orva deploy</code>, the
+            runtime must match the existing function. In default mode, tarball
+            deploys can warn when the entrypoint imports the SDK while SDK access is off.
+          </p>
         </div>
       </div>
 

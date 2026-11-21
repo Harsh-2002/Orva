@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -15,8 +16,6 @@ import (
 
 	cli "github.com/Harsh-2002/Orva/internal/client"
 	"github.com/spf13/cobra"
-	"io/fs"
-	"sort"
 )
 
 var deployCmd = &cobra.Command{
@@ -31,6 +30,8 @@ auto-detects the entrypoint:
     .ts file (e.g. handler.ts) so the validator passes before tsc runs.
   - Otherwise the server's runtime default is used (handler.js / handler.py).
 
+For an existing function, --runtime must match its current runtime.
+
 Examples:
   orva deploy ./src --name greeter --runtime node
   orva deploy ./src --name greeter --runtime node --follow   # stream build logs`,
@@ -40,7 +41,7 @@ Examples:
 
 func init() {
 	deployCmd.Flags().String("name", "", "function name (required)")
-	deployCmd.Flags().String("runtime", "", "runtime: node or python (required)")
+	deployCmd.Flags().String("runtime", "", "runtime: node or python (required; must match an existing function)")
 	deployCmd.Flags().String("entrypoint", "", "entrypoint file (optional; auto-detects handler.ts when tsconfig.json + handler.ts present)")
 	// --follow/-f matches logs/activity/deployments-logs; --watch is the
 	// original name, kept as a hidden alias for back-compat.
@@ -52,18 +53,20 @@ func init() {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	client, err := getClient(cmd)
-	if err != nil {
-		return err
-	}
-
 	srcPath := args[0]
 	name, _ := cmd.Flags().GetString("name")
 	runtime, _ := cmd.Flags().GetString("runtime")
+	if runtime != "node" && runtime != "python" {
+		return fmt.Errorf("invalid --runtime %q: expected node or python", runtime)
+	}
 	entrypoint, _ := cmd.Flags().GetString("entrypoint")
 	watch, _ := cmd.Flags().GetBool("follow")
 	if w, _ := cmd.Flags().GetBool("watch"); w {
 		watch = true // honor the deprecated --watch alias
+	}
+	client, err := getClient(cmd)
+	if err != nil {
+		return err
 	}
 
 	// Verify the source path exists.
@@ -80,7 +83,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	// validator looks for the runtime default `handler.js` BEFORE tsc has
 	// emitted anything and fails the first deploy. Only kicks in when the
 	// caller didn't pass --entrypoint explicitly.
-	if entrypoint == "" {
+	if runtime == "node" && entrypoint == "" {
 		if detected := detectTSEntrypoint(srcPath); detected != "" {
 			entrypoint = detected
 			infof(cmd, "Detected TypeScript project, using entrypoint %q", entrypoint)
@@ -111,11 +114,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
+	defer resp.Body.Close()
 	if err := checkResponse(resp); err != nil {
 		return err
 	}
 	raw, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
 	if err != nil {
 		return err
 	}
@@ -123,8 +126,12 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	var dep struct {
 		ID           string `json:"id"`
 		DeploymentID string `json:"deployment_id"`
+		Warning      string `json:"warning"`
 	}
 	_ = json.Unmarshal(raw, &dep)
+	if dep.Warning != "" {
+		infof(cmd, "Warning: %s", dep.Warning)
+	}
 	depID := dep.ID
 	if depID == "" {
 		depID = dep.DeploymentID
@@ -208,8 +215,9 @@ func resolveOrCreateFunction(cmd *cobra.Command, client *cli.Client, name, runti
 	if err == nil && resp.StatusCode == http.StatusOK {
 		var result struct {
 			Functions []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Runtime string `json:"runtime"`
 			} `json:"functions"`
 		}
 		if decodeJSON(resp, &result) == nil {
@@ -217,11 +225,10 @@ func resolveOrCreateFunction(cmd *cobra.Command, client *cli.Client, name, runti
 				if fn.Name != name {
 					continue
 				}
-				// --entrypoint and --runtime were applied only on the CREATE
-				// path below, so redeploying an existing function with a
-				// changed value silently kept the old one and exited 0. Apply
-				// them here too.
-				if err := applyDeployOverrides(cmd, client, fn.ID, runtime, entrypoint); err != nil {
+				if fn.Runtime != runtime {
+					return "", fmt.Errorf("function %q uses runtime %q, not %q; use a new function name to change runtimes", name, fn.Runtime, runtime)
+				}
+				if err := applyDeployEntrypoint(cmd, client, fn.ID, entrypoint); err != nil {
 					return "", err
 				}
 				return fn.ID, nil
@@ -436,38 +443,18 @@ func uploadDeploy(client *cli.Client, fnID, archivePath string) (*http.Response,
 	return sendLong(context.Background(), client, http.MethodPost, "/api/v1/functions/"+fnID+"/deploy", pr, writer.FormDataContentType())
 }
 
-// applyDeployOverrides PATCHes runtime/entrypoint onto an existing function
-// when the caller passed them explicitly. Only sends what was set, so a
-// plain `orva deploy` never rewrites configuration the operator did not ask
-// to change.
-func applyDeployOverrides(cmd *cobra.Command, client *cli.Client, fnID, runtime, entrypoint string) error {
-	body := map[string]string{}
-	if cmd.Flags().Changed("runtime") && runtime != "" {
-		body["runtime"] = runtime
-	}
-	if cmd.Flags().Changed("entrypoint") && entrypoint != "" {
-		body["entrypoint"] = entrypoint
-	}
-	if len(body) == 0 {
+func applyDeployEntrypoint(cmd *cobra.Command, client *cli.Client, fnID, entrypoint string) error {
+	if !cmd.Flags().Changed("entrypoint") || entrypoint == "" {
 		return nil
 	}
-	resp, err := client.Put("/api/v1/functions/"+fnID, body)
+	resp, err := client.Put("/api/v1/functions/"+fnID, map[string]string{"entrypoint": entrypoint})
 	if err != nil {
-		return fmt.Errorf("apply deploy overrides: %w", err)
+		return fmt.Errorf("update deploy entrypoint: %w", err)
 	}
 	defer resp.Body.Close()
 	if err := checkResponse(resp); err != nil {
-		return fmt.Errorf("apply deploy overrides: %w", err)
+		return fmt.Errorf("update deploy entrypoint: %w", err)
 	}
-	infof(cmd, "Updated %s on the existing function.", strings.Join(keysOf(body), " and "))
+	infof(cmd, "Updated entrypoint on the existing function.")
 	return nil
-}
-
-func keysOf(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

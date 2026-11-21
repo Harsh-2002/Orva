@@ -10,11 +10,8 @@ import sys
 
 ALLOW = {
     # mark3labs/mcp-go redirect SSRF, reached only via Bifrost's MCP client, which
-    # Orva never builds (llm.TestGatewayHasNoMCPManager). The fix is merged
-    # upstream (mark3labs/mcp-go#1192, 2026-11-09) but unreleased: v1.5.0 is
-    # still the latest, and the advisory lists every version as affected, so
-    # pinning a commit would not clear this gate. Delete this entry once a fixed
-    # mcp-go is required by a Bifrost release that builds with our tree.
+    # Orva never builds (llm.TestGatewayHasNoMCPManager). mcp-go v1.6.0 includes
+    # the default-client fix (#1192); the Go advisory still has no fixed version.
     "GO-2026-6911": {
         "module": "github.com/mark3labs/mcp-go",
         "expires": datetime.date(2026, 12, 7),

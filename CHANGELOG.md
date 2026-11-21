@@ -14,6 +14,16 @@ unreleased range, and the sections below as the record for everything before it.
 
 ## Unreleased
 
+### Breaking
+
+- The SDK no longer uses internal HTTP, and `orva chat` has been removed.
+  Dashboard Chat remains available. Upgrade the server, runtime adapters and
+  SDK together; an SDK-enabled function cannot start with an old adapter.
+- In default serving mode, the upgrade preserves existing SDK access by
+  enabling it once for existing egress functions. New functions need explicit
+  SDK permission, even when egress is enabled. Upgrading does not enroll an
+  instance in managed IAM.
+
 ### Changed
 
 - Dependencies refreshed to their latest releases. The module now requires Go
@@ -33,6 +43,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- `orva deploy` now rejects an unsupported or mismatched runtime before
+  uploading, rather than claiming it changed the runtime of an existing
+  function. Default-mode tarball deploys now warn when they detect a disabled
+  SDK import in the configured entrypoint.
 - `orva secrets set` and `delete` now work on a managed server. They previously
   called legacy routes it does not serve. They change the secret against the
   function's current revisions, refuse without retrying if it changed meanwhile,
@@ -437,11 +451,10 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Upgrade notes
 
-- The server binary and the runtime adapters are a pair. A new adapter under an
-  old binary prints a `__ORVA_EOR__` line at the end of every invocation's
-  stderr. Docker refreshes adapters on start; on bare metal run `orva setup` (or
-  re-run `install.sh`) after replacing the binary. A new binary with an old
-  adapter works as before, without the fix.
+- The server binary and runtime adapters must be upgraded together. Docker
+  refreshes adapters on start; on bare metal re-run the installer to update
+  the runtime trees and adapters. For a development binary swap with existing
+  runtime trees, run the new binary's `orva setup` before starting it.
 - Docker: pull the new image and recreate the container. The entrypoint now
   compares both interpreter and rootfs content revision, so existing volumes
   without a revision refresh once even when Python's version is unchanged.

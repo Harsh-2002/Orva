@@ -795,11 +795,11 @@ func (h *FunctionHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Tarball deploys: we'd have to unpack and scan to detect the SDK
-	// import, which is more work than this advisory is worth. The MCP
-	// inline path (which is what an agent uses) catches it; the CLI
-	// tarball path is a human flow where the operator tends to know.
-	h.enqueueOrBuildSync(w, r, fn, tarballPath, reqID, "")
+	var deployWarning string
+	if !managed && !fn.SDK && builder.ArchiveEntrypointUsesOrvaSDK(tarballPath, fn.Entrypoint) {
+		deployWarning = builder.SDKNoneWarning
+	}
+	h.enqueueOrBuildSync(w, r, fn, tarballPath, reqID, deployWarning)
 }
 
 // DeployInline handles POST /api/v1/functions/{fn_id}/deploy-inline.

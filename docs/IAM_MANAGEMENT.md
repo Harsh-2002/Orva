@@ -1,8 +1,9 @@
-# Named Function IAM management (scratch activation only)
+# Named Function IAM management
 
-The interfaces below are implemented for explicit scratch fixture activation.
-Normal serving routes, schema initialization and tool catalogs remain **off**.
-This is not production IAM, migration/restore or async-lifecycle acceptance.
+These interfaces are available in the opt-in Linux managed server and in the
+scratch fixtures. Default serving does not mount the IAM routes, initialize the
+IAM schema, or expose the IAM tools. See [the managed API](API.md#managed-server)
+and [the enrollment runbook](OPERATIONS.md) for the serving boundary and limits.
 
 The authoritative publication service is `workloadpolicy.Service`. All HTTP,
 CLI, external MCP and in-product AI operations use its shared raw management
@@ -71,7 +72,8 @@ List returns `items`, decimal-string `offset` and `can_manage`.
 Function inspection returns `function`, `host`, `inline_policy`, `attachments`,
 `effective_policy`, and `history`. Host includes decimal-string combined revision
 and authority epoch, nullable current/approved artifacts, quarantine/review flags,
-`can_manage`, and `enforcement:"scratch_opt_in"`. Each attachment identifies its
+`can_manage`, and `enforcement:"managed"` (`"scratch_opt_in"` in fixtures).
+Each attachment identifies its
 policy UUID/name/version and retained document, enabled/revoked state.
 **Only inline_policy enters the editable inline draft. Effective policy is
 read-only.** History carries digest, actor UUID/kind, timestamp and decimal-string
@@ -123,7 +125,7 @@ preserving duplicate-key evidence for server rejection. Payloads print as JSON
 on stdout, status/errors on stderr. Names are resolved only to real functions;
 policy completion suggests stable policy UUIDs with names as descriptions.
 
-Optional explicit IAM dependencies register one shared external/in-process tool
+The managed MCP and Chat registries expose one shared tool
 family: `list_iam_policies`, `get_iam_policy`, `create_iam_policy`,
 `update_iam_policy`, `get_iam_policy_impact`, `attach_iam_policy`,
 `detach_iam_policy`, `revoke_iam_policy`, `delete_iam_policy`,
@@ -135,10 +137,10 @@ raw arguments on **both** transports, before generic decoding can normalize it.
 Catalog visibility is not authorization. Destructive tools enforce confirm:true
 in code; AI approval policy remains an additional independent gate.
 
-The reusable guided Policies and FunctionPermissionSources Vue views are wired
-only through `managed-iam.html` in the explicitly labelled scratch shell, not the
-normal router. The incumbent guided inline editor keeps its ordering, draft,
-ABA/conflict and review guards; it receives only the inline source.
+The dashboard enables the Policies and per-function Permissions routes only
+after the authenticated capabilities response reports `managed: true`.
+The guided inline editor receives only the inline source and retains its
+draft, conflict and review guards.
 
 The managed function view starts with a human-readable effective outbound and
 inbound summary and attributes retained grants to their inline or pinned sources.

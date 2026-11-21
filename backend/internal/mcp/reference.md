@@ -245,6 +245,11 @@ Orva offers two runtimes, latest-stable only. The ID is generic (`node` /
 
 ## Deploy & invoke
 
+When redeploying with `orva deploy`, `--runtime` must match the existing
+function. Use a different function name to switch runtimes. In default mode,
+tarball deploy responses can carry an advisory `warning` if a bounded scan
+detects an SDK import in the configured entrypoint while `sdk` is false.
+
 The dashboard handles day-to-day work; these calls are for CI and
 automation. Builds run async — poll `/api/v1/deployments/<id>` or
 stream `/api/v1/deployments/<id>/stream` until `phase: done`.

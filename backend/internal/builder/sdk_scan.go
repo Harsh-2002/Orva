@@ -1,6 +1,13 @@
 package builder
 
-import "strings"
+import (
+	"archive/tar"
+	"compress/gzip"
+	"io"
+	"os"
+	"path"
+	"strings"
+)
 
 // sdkImportPatterns are the substrings we treat as "this handler imports
 // the orva SDK." Conservative on purpose — we look for the canonical
@@ -36,9 +43,41 @@ func SourceUsesOrvaSDK(source string) bool {
 	return false
 }
 
-// SDKNoneWarning is the canonical warning string emitted when a deploy
-// lands code that imports the orva SDK while the function's
-// SDK permission is absent. Surfaced on both REST and MCP deploy paths.
+// ArchiveEntrypointUsesOrvaSDK makes a bounded advisory scan, leaving archive
+// validation to the builder. It never extracts files.
+func ArchiveEntrypointUsesOrvaSDK(archivePath, entrypoint string) bool {
+	const (
+		archiveScanLimit = 4 << 20
+		sourceScanLimit  = 256 << 10
+	)
+	if entrypoint == "" {
+		return false
+	}
+	entrypoint = path.Clean(entrypoint)
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(io.LimitReader(f, archiveScanLimit))
+	if err != nil {
+		return false
+	}
+	defer zr.Close()
+	tr := tar.NewReader(io.LimitReader(zr, archiveScanLimit))
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			return false
+		}
+		if header.Typeflag == tar.TypeReg && path.Clean(header.Name) == entrypoint {
+			prefix, err := io.ReadAll(io.LimitReader(tr, sourceScanLimit))
+			return err == nil && SourceUsesOrvaSDK(string(prefix))
+		}
+	}
+}
+
+// SDKNoneWarning describes a detected SDK import without SDK permission.
 const SDKNoneWarning = "Function imports the orva SDK (kv / invoke / jobs) " +
 	"but sdk permission is false. Update the function with sdk=true to enable " +
 	"platform SDK calls independently of network_mode. External HTTPS still requires egress."

@@ -1139,11 +1139,11 @@ can't run without them. Full reproduction + alternatives in
 
 ## Known advisory: GO-2026-6911 (mcp-go redirect SSRF)
 
-`github.com/mark3labs/mcp-go` follows cross-origin redirects in its MCP
-*client* transport and forwards configured headers and OAuth tokens to the
-redirected host. Every version is affected and there is no fixed release
-(upstream issue mark3labs/mcp-go#1188, fix PR #1190, unmerged as of
-2026-11-07).
+Older versions of `github.com/mark3labs/mcp-go` could follow cross-origin
+redirects in the MCP client and forward configured headers and OAuth tokens.
+The default-client fix ([upstream #1192](https://github.com/mark3labs/mcp-go/pull/1192))
+is in v1.6.0, which Orva now uses. The Go vulnerability record still has no fixed
+version, so the scanner continues to report it.
 
 Orva is not exposed. The module is reached only through the embedded Bifrost
 gateway's MCP client, which Bifrost builds only when it is given an `MCPConfig`
@@ -1154,9 +1154,9 @@ MCP manager.
 
 `govulncheck` still reports the finding because its call graph cannot see that
 condition, so the CI gate (`scripts/govulncheck-gate.py`) carries one expiring
-exception for this ID. It fails on any other call-reachable finding, when a fix
-becomes available, and on 2026-12-07. Delete the exception when a fixed mcp-go
-is required by a Bifrost release that builds with this tree.
+exception for this ID. It fails on any other call-reachable finding, when the
+scanner reports a fixed version, and after 2026-12-07. Recheck the advisory
+when its Go record changes; remove the exception when the scan is clean.
 
 ## Reading further in the code
 
@@ -1170,10 +1170,10 @@ If you find a security issue please open a private security advisory
 on the GitHub repository (Settings → Security → Advisories) rather
 than a public issue.
 
-## Internal managed Function IAM increment (inactive)
+## Opt-in managed Function IAM
 
-The staged named-policy store/service is not registered in production and its
-schema is not initialized at boot. Immutable versions are attached by explicit
+The named-policy service and schema are available only in managed serving or
+explicit fixtures, not in default serving. Immutable versions are attached by explicit
 pin, never followed automatically. Effective authority is a union of separately
 retained inline and managed sources. Detach and terminal global revoke remove
 only their own contribution; overlapping grants can remain.
@@ -1186,20 +1186,19 @@ preserve approval and quarantine/review state and can proceed with explicitly
 unknown current artifacts; they never approve different code. Cancellation
 callbacks run after IAM and owner locks are released and before acknowledgement.
 
-This does not qualify migration/restore, function deletion, privileged deployment,
-async enforcement or real SDK/UI/CLI/MCP behavior. The legacy inline-only HTTP
-adapter refuses managed mode. The precise internal contract and remaining gates
-are in `backend/internal/workloadpolicy/MANAGED.md`.
-## Scratch source-aware management adapters
+Managed policy management is not a migration, restore, or approval of new code.
+The legacy inline-only HTTP adapter refuses managed mode. See
+[`IAM_MANAGEMENT.md`](IAM_MANAGEMENT.md) for the operator contract.
+
+## Source-aware management adapters
 
 The optional named-policy adapters reject duplicate/unknown raw fields on both
 external MCP and in-process agent paths before generic decoding discards
 evidence. Live read is required before inspection; live read plus admin are
 rechecked inside the final mutation transaction. Tool visibility and confirm
 flags are not authority. Function responses keep editable inline policy separate
-from read-only effective union and attributed version pins. These adapters and
-schema initialization remain explicitly scratch-only, not serving activation.
-See `IAM_MANAGEMENT.md` for the exact staged wire contract and limitations.
+from read-only effective union and attributed version pins. These adapters are
+not mounted in default serving.
 # Staged public exposure writer boundary
 
 The optional `workloadtrigger` candidate serializes inbound-webhook CRUD and

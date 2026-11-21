@@ -161,6 +161,9 @@ def main():
             check("CLI deploy succeeded", True, deploy_ok.get("detail", "")[:200])
             check("CLI invoke returned a response", deploy_ok.get("invoked", False),
                   deploy_ok.get("invoke_detail", "")[:200])
+            check("tarball deploy warns about disabled SDK in JSON and stderr", deploy_ok["sdk_warning"])
+            check("invalid and mismatched deploy runtimes fail without a mutation", deploy_ok["runtime_refused"])
+            check("matching-runtime redeploy with SDK enabled succeeds without an SDK warning", deploy_ok["redeployed"])
 
         section("delete via CLI + confirm gone")
         if fid:
@@ -188,7 +191,7 @@ def _try_deploy_invoke(client, cli):
     try:
         src = tempfile.mkdtemp(prefix="orva-cli-e2e-")
         with open(os.path.join(src, "handler.js"), "w") as f:
-            f.write("export default async function () { return { ok: true }; }\n")
+            f.write("const orva = require('orva');\nexports.handler = () => ({statusCode: 200, body: {ok: true}});\n")
 
         rc, out, err = cli.run("deploy", src, "--name", dep_name,
                                "--runtime", "node", "--follow", timeout=120)
@@ -202,9 +205,10 @@ def _try_deploy_invoke(client, cli):
             _cli_delete(cli, dep_name)
             return {"failed": True, "detail": f"deploy rc={rc}: {blob.strip()[-300:]}"}
 
-        result = {"detail": blob.strip()[-200:]}
-        # invoke now prints the response BODY to stdout (status/timing go to
-        # stderr); a 2xx invocation exits 0 with a non-empty body.
+        warning = "sdk permission is false"
+        result = {"detail": blob.strip()[-200:],
+                  "sdk_warning": warning in (json.loads(out).get("warning") or "") and warning in err}
+        # Assert that the initial deployment works before testing config refusal.
         irc, iout, ierr = cli.run("invoke", dep_name, "--body", "{}", timeout=60)
         try:
             invoke_body = json.loads(iout)
@@ -216,6 +220,21 @@ def _try_deploy_invoke(client, cli):
             stderr = latest_execution_stderr(client, function_name=dep_name)
             if stderr:
                 result["invoke_detail"] += f"; stderr={stderr[:700]!r}"
+
+        first = client.get(f"/api/v1/functions/{dep_name}")
+        result["runtime_refused"] = True
+        for bad in ("python", "go"):
+            rrc, _, rerr = cli.run("deploy", src, "--name", dep_name, "--runtime", bad,
+                                   "--entrypoint", "another.js")
+            expected = 'uses runtime "node"' if bad == "python" else "invalid --runtime"
+            after = client.get(f"/api/v1/functions/{dep_name}")
+            result["runtime_refused"] &= (rrc != 0 and expected in rerr and all(
+                first[k] == after[k] for k in ("runtime", "version", "entrypoint", "active_deployment_id")))
+        client.put(f"/api/v1/functions/{first['id']}", {"sdk": True})
+        rrc, rout, rerr = cli.run("deploy", src, "--name", dep_name, "--runtime", "node",
+                                 "--entrypoint", "handler.js", "--follow", timeout=120)
+        result["redeployed"] = (rrc == 0 and "Build succeeded." in rerr
+                                and not json.loads(rout).get("warning") and warning not in rerr)
         _cli_delete(cli, dep_name)
         return result
     except Exception as e:

@@ -282,6 +282,11 @@ orva deploy ./py-fn --name greeter --runtime python
 orva deploy ./src --name greeter --runtime node --follow
 ```
 
+For an existing function, `--runtime` must match its current runtime. To switch
+runtimes, deploy under a new function name. In default mode, a tarball deploy
+can warn on stderr when the server detects an SDK import but SDK access is off.
+The JSON response retains the `warning` field.
+
 ### Function configuration and SDK access
 
 `functions create` defaults to `sdk: false`. Pass `--sdk` (or `--sdk=true`)

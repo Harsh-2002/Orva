@@ -497,7 +497,11 @@ build.
 Returns 202 with the deployment record. Build runs asynchronously.
 
 ### `POST /api/v1/functions/{id}/deploy`
-Deploy from a tarball (multipart upload).
+Deploy from a gzip tarball in the `code` multipart field. Returns 202 with
+`deployment_id` and `status: "queued"`. In default serving, the response may
+include `warning` when a bounded scan detects an Orva SDK import in the
+configured entrypoint and `sdk` is false. The notice is advisory; a missing
+warning does not validate SDK access.
 
 ### `POST /api/v1/functions/{id}/rollback`
 Roll back to a prior version.
