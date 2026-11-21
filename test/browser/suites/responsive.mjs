@@ -88,20 +88,23 @@ export async function onPage({ page, route, viewport, report }) {
     r.wide.map((w) => `${w.el} ends ${w.over}px past the right edge`))
 
   if (route.name === 'settings') {
-    const summary = page.locator('summary').filter({ hasText: /^Build info\b/ })
+    const summary = page.locator('summary').filter({ hasText: /^\s*Build info\b/ })
     const card = summary.locator('..')
     const wasOpen = await card.getAttribute('open') !== null
     if (!wasOpen) await summary.click()
     try {
-      const overflowing = await card.locator('dd').evaluateAll((values) =>
-        values.filter((value) => {
-          const text = document.createRange()
-          text.selectNodeContents(value)
-          const right = document.documentElement.clientWidth
-          return [...text.getClientRects()].some((rect) => rect.right > right + 1)
-        }).length)
-      report.record('responsive', where, 'expanded build info fits the viewport',
-        overflowing ? [`${overflowing} build values extend past the right edge`] : [])
+      const problems = await card.locator('dl').evaluate((list) => {
+        const label = [...list.querySelectorAll('dt')].find((dt) => dt.textContent.trim() === 'Commit')
+        const value = label?.nextElementSibling
+        if (!value?.matches('dd') || !value.textContent.trim()) return ['Build info has no commit value']
+        const text = document.createRange()
+        text.selectNodeContents(value)
+        const rects = [...text.getClientRects()]
+        if (!rects.length) return ['the commit value is not visible']
+        return rects.some((r) => r.right > document.documentElement.clientWidth + 1)
+          ? ['the commit value extends past the right edge'] : []
+      })
+      report.record('responsive', where, 'expanded build info fits the viewport', problems)
     } finally {
       if (!wasOpen) await summary.click()
     }
