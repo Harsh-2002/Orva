@@ -578,7 +578,10 @@ curl -s -X POST $BASE/api/v1/auth/onboard -H 'Content-Type: application/json' \
 On a **virgin** instance that is all you need — the auto-minted
 `bootstrap-admin` key does not count as use. Against an instance that has
 operator-minted API keys or deployed functions, onboarding requires proof of
-control and returns **401** without one:
+control and returns **401** without it. The dashboard then reveals a masked
+**Admin API key** field and keeps the username and password for the retry. The
+key goes only in the onboarding request header and is not saved by the dashboard.
+For a direct API client, send the same header:
 
 ```bash
 curl -s -X POST $BASE/api/v1/auth/onboard \

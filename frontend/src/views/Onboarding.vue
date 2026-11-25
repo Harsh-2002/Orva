@@ -133,12 +133,38 @@
           </div>
         </div>
 
+        <div v-if="needsAdminKey">
+          <label
+            for="onboard-admin-key"
+            class="block text-xs font-medium text-foreground-muted uppercase tracking-wide mb-1.5"
+          >Admin API key</label>
+          <input
+            id="onboard-admin-key"
+            ref="adminKeyInput"
+            v-model.trim="adminKey"
+            type="password"
+            required
+            autocomplete="off"
+            autocapitalize="none"
+            spellcheck="false"
+            :aria-describedby="adminKeyRejected ? 'onboard-admin-key-hint onboard-error' : 'onboard-admin-key-hint'"
+            :aria-invalid="adminKeyRejected || undefined"
+            class="w-full bg-background border border-border rounded-md px-3 py-2.5 text-base sm:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-focus-ring focus:border-focus-ring transition-colors"
+            :disabled="loading"
+            @input="clearKeyError"
+          >
+          <p id="onboard-admin-key-hint" class="mt-1.5 text-xs text-foreground-muted">
+            Use an existing key with admin permission. The dashboard does not save it.
+          </p>
+        </div>
+
         <!-- role="alert" so a failed first-run attempt is announced; the block
              is conditionally rendered, so the insertion is the announcement.
              Tokens match Login's equivalent block rather than hand-rolled
              danger alphas, so the two entry screens agree. -->
         <div
           v-if="error"
+          id="onboard-error"
           class="bg-danger-tint border border-danger-ring rounded-md px-4 py-3 flex items-start gap-3"
           role="alert"
         >
@@ -155,7 +181,7 @@
           type="submit"
           class="w-full"
           :loading="loading"
-          :disabled="!isPasswordValid || !form.username || loading"
+          :disabled="!isPasswordValid || !form.username || (needsAdminKey && !adminKey) || loading"
         >
           Create account
         </Button>
@@ -169,7 +195,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { AlertCircle, Check, Copy, Eye, EyeOff, X } from '@lucide/vue'
 import Button from '@/components/common/Button.vue'
@@ -187,6 +213,10 @@ const form = ref({
 const error = ref('')
 const loading = ref(false)
 const showPassword = ref(false)
+const needsAdminKey = ref(false)
+const adminKey = ref('')
+const adminKeyInput = ref(null)
+const adminKeyRejected = ref(false)
 
 const passwordChecks = computed(() => ({
   length: form.value.password.length >= 10,
@@ -260,16 +290,33 @@ const copyPassword = async () => {
   }
 }
 
-const handleOnboard = async () => {
+const clearKeyError = () => {
+  if (!adminKeyRejected.value) return
+  adminKeyRejected.value = false
   error.value = ''
+}
+
+const handleOnboard = async () => {
+  if (loading.value || (needsAdminKey.value && !adminKey.value)) return
+  error.value = ''
+  adminKeyRejected.value = false
   loading.value = true
 
-  const result = await auth.onboard(form.value.username, form.value.password)
-
+  const usedAdminKey = !!adminKey.value
+  const result = await auth.onboard(form.value.username, form.value.password, adminKey.value)
+  adminKey.value = ''
   loading.value = false
 
   if (result.success) {
     router.push('/')
+  } else if (result.needsAdminKey) {
+    needsAdminKey.value = true
+    adminKeyRejected.value = usedAdminKey
+    error.value = usedAdminKey
+      ? 'That key was not accepted. Enter a valid admin API key to continue.'
+      : 'This instance is already in use. Enter an admin API key to finish setup.'
+    await nextTick()
+    adminKeyInput.value?.focus()
   } else {
     error.value = result.error
   }

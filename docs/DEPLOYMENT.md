@@ -113,6 +113,9 @@ caddy, nginx, traefik, cloudflared. The browser's clipboard API
 silently fails on plain HTTP from non-localhost — the dashboard
 becomes partially broken.
 
+Use HTTPS for remote dashboard setup, especially when an
+[API-first instance requires an admin API key](OPERATIONS.md#symptom-containers-wont-start-auth-flicker-redirected-to-onboarding).
+
 If your proxy forwards `X-Forwarded-Proto: https` (the nginx example below does), Orva sets the `Secure` flag on session cookies by itself. Set `ORVA_SECURE_COOKIES=true` only when it cannot see the real scheme so
 session cookies are only sent over HTTPS.
 
