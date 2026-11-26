@@ -51,10 +51,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const onboard = async (username, password) => {
+  const onboard = async (username, password, adminKey) => {
     loading.value = true
     try {
-      const res = await authClient.post('/api/v1/auth/onboard', { username, password })
+      const config = adminKey ? { headers: { 'X-Orva-API-Key': adminKey } } : undefined
+      const res = await authClient.post('/api/v1/auth/onboard', { username, password }, config)
       user.value = res.data.user
       isAuthenticated.value = true
       setHasUser(true)
@@ -62,6 +63,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       return {
         success: false,
+        needsAdminKey: error.response?.status === 401 &&
+          error.response?.data?.error?.code === 'UNAUTHORIZED',
         error: error.response?.data?.error?.message || 'Setup failed'
       }
     } finally {

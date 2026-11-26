@@ -30,6 +30,11 @@ instance that already has functions). Add `--destructive` to exercise keyboard
 deletion on a fresh, journey-owned function in each theme; without it those
 checks are skipped.
 
+`node onboarding.mjs <virgin loopback origin> <second virgin loopback origin>
+<second bootstrap key file>` claims two disposable servers. It covers keyless
+first setup and API-first setup, where the browser must recover from the 401,
+reject a wrong key, and finish with the valid key without storing it.
+
 ## Why a browser is required
 
 `html, body { overflow-x: hidden }` is deliberate (DESIGN.md §7): the document

@@ -43,6 +43,8 @@ unreleased range, and the sections below as the record for everything before it.
 
 ### Fixed
 
+- Dashboard setup lets API-first operators enter an existing admin API key
+  when the server requires proof of control. Fresh installs still need no key.
 - Default serving reports its mode to the dashboard without an expected 404.
   Settings keeps long build identifiers visible on phones, and Schedules
   uses the same Refresh control as Jobs.

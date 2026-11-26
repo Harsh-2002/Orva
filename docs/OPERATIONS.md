@@ -676,10 +676,16 @@ account and mint a fresh key from Settings → API keys (or
 `POST /api/v1/keys`). Deleting the keyfile alone does **not** make Orva
 generate a new one — it regenerates only when the database has no keys at all.
 
+If you used the API before creating a dashboard account, open `/web/onboarding`
+and submit your username and password. When setup asks for proof of control,
+enter your existing admin API key and retry. Use HTTPS or a local connection.
+This creates the first dashboard account; it does not reset an existing one.
+
 > **Do not delete the `users` and `sessions` rows to force re-onboarding.** An
 > older version of this page suggested it; it destroys your accounts and does
 > not recover anything. `POST /api/v1/auth/onboard` refuses with `401` once the
-> instance shows any sign of use (operator-minted keys or deployed functions),
+> instance shows any sign of use (operator-minted keys or deployed functions)
+> unless you still have a valid admin API key,
 > so you end up with no user, no session, and no way back in short of restoring
 > a backup.
 
